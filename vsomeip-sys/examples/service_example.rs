@@ -1,7 +1,7 @@
 use cxx::{let_cxx_string, SharedPtr};
 use std::thread;
 use vsomeip_sys::glue::{make_application_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::{create_callback, get_pinned_application, get_pinned_runtime,  register_message_handler_fn_ptr_safe};
+use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_runtime,  register_message_handler_fn_ptr_safe};
 use vsomeip_sys::vsomeip::{application, message, runtime};
 use vsomeip_sys::{vsomeip, extern_callback_wrappers::MessageHandlerFnPtr};
 
@@ -22,29 +22,22 @@ fn start_app() {
     );
     get_pinned_application(&app_wrapper).init();
 
-    let (my_callback) = create_callback(|msg| {
+    extern "C" fn my_msg_handler(msg: &SharedPtr<message>) {
         println!("received Request!");
-    });
+    }
+    let my_callback = MessageHandlerFnPtr(my_msg_handler);
     get_pinned_application(&app_wrapper).offer_service(
         SAMPLE_SERVICE_ID,
         SAMPLE_INSTANCE_ID,
         vsomeip::ANY_MAJOR,
         vsomeip::ANY_MINOR,
     );
-
     register_message_handler_fn_ptr_safe(&mut app_wrapper,
                                              SAMPLE_SERVICE_ID,
                                              SAMPLE_INSTANCE_ID,
                                              SAMPLE_METHOD_ID,
                                              my_callback,
     );
-
-    // get_pinned_application(&app_wrapper).register_message_handler(
-    //     SAMPLE_SERVICE_ID,
-    //     SAMPLE_INSTANCE_ID,
-    //     SAMPLE_METHOD_ID,
-    //     my_callback,
-    // );
     get_pinned_application(&app_wrapper).start();
 }
 
