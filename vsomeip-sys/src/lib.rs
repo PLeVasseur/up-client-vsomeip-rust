@@ -97,13 +97,11 @@ pub mod safe_glue {
     use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
     use crate::glue::upcast;
     use crate::glue::{
-        create_payload_wrapper,
-        ApplicationWrapper, MessageWrapper,
-        PayloadWrapper, RuntimeWrapper,
+        create_payload_wrapper, ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper,
     };
     use crate::glue::{get_payload_raw, set_payload_raw};
-    use crate::vsomeip::{application, message, payload, runtime};
     use crate::vsomeip::message_base;
+    use crate::vsomeip::{application, message, payload, runtime};
     use cxx::UniquePtr;
     use std::pin::Pin;
     use std::slice;

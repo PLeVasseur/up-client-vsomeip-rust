@@ -49,10 +49,9 @@ fn main() -> miette::Result<()> {
             "-I/usr/include/x86_64-linux-gnu/c++/11",
         ])
         .build()?;
-    b
-        .flag_if_supported("-std=c++17")
+    b.flag_if_supported("-std=c++17")
         .flag_if_supported("-Wno-deprecated-declarations") // suppress warnings from C++
-        .flag_if_supported("-Wno-unused-function")         // compiler compiling vsomeip
+        .flag_if_supported("-Wno-unused-function") // compiler compiling vsomeip
         .compile("autocxx-portion");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rustc-link-lib=vsomeip3");
@@ -71,7 +70,10 @@ fn main() -> miette::Result<()> {
     println!("cargo:rerun-if-changed=src/cxx_bridge.rs");
 
     // we rewrite the autocxx generated code to suppress the cargo warning about unused imports
-    let file_path = Path::new(&out_dir).join("autocxx-build-dir").join("rs").join("autocxx-ffi-default-gen.rs");
+    let file_path = Path::new(&out_dir)
+        .join("autocxx-build-dir")
+        .join("rs")
+        .join("autocxx-ffi-default-gen.rs");
     if let Ok(mut contents) = fs::read_to_string(&file_path) {
         // Insert #[allow(unused_imports)] for specific lines
         contents = contents.replace(
