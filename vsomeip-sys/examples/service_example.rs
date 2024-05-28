@@ -1,9 +1,11 @@
 use cxx::{let_cxx_string, SharedPtr};
 use std::thread;
 use vsomeip_sys::glue::{make_application_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_runtime,  register_message_handler_fn_ptr_safe};
-use vsomeip_sys::vsomeip::{application, message, runtime};
-use vsomeip_sys::{vsomeip, extern_callback_wrappers::MessageHandlerFnPtr};
+use vsomeip_sys::safe_glue::{
+    get_pinned_application, get_pinned_runtime, register_message_handler_fn_ptr_safe,
+};
+use vsomeip_sys::vsomeip::{message, runtime};
+use vsomeip_sys::{extern_callback_wrappers::MessageHandlerFnPtr, vsomeip};
 
 const SAMPLE_SERVICE_ID: u16 = 0x1234;
 const SAMPLE_INSTANCE_ID: u16 = 0x5678;
@@ -32,11 +34,12 @@ fn start_app() {
         vsomeip::ANY_MAJOR,
         vsomeip::ANY_MINOR,
     );
-    register_message_handler_fn_ptr_safe(&mut app_wrapper,
-                                             SAMPLE_SERVICE_ID,
-                                             SAMPLE_INSTANCE_ID,
-                                             SAMPLE_METHOD_ID,
-                                             my_callback,
+    register_message_handler_fn_ptr_safe(
+        &mut app_wrapper,
+        SAMPLE_SERVICE_ID,
+        SAMPLE_INSTANCE_ID,
+        SAMPLE_METHOD_ID,
+        my_callback,
     );
     get_pinned_application(&app_wrapper).start();
 }

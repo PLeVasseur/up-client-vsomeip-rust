@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 #[cxx::bridge(namespace = "glue")]
-pub mod bar {
+pub mod handler_registration {
     unsafe extern "C++" {
         include!("vsomeip/vsomeip.hpp");
         include!("include/application_wrapper.h");
@@ -29,7 +29,8 @@ pub mod bar {
             _fn_ptr_handler: message_handler_fn_ptr,
         );
 
-        type availability_handler_fn_ptr = crate::extern_callback_wrappers::AvailabilityHandlerFnPtr;
+        type availability_handler_fn_ptr =
+            crate::extern_callback_wrappers::AvailabilityHandlerFnPtr;
 
         pub unsafe fn register_availability_handler_fn_ptr(
             _application: *mut ApplicationWrapper,

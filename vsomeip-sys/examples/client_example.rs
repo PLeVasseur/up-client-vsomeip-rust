@@ -1,16 +1,16 @@
-use crossbeam_channel::{bounded, Receiver, Sender};
-use cxx::{let_cxx_string, SharedPtr};
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, Once};
+use cxx::let_cxx_string;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
-use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_message, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, set_data_safe, register_message_handler_fn_ptr_safe, register_availability_handler_fn_ptr_safe};
-use vsomeip_sys::vsomeip::{application, instance_t, message, message_base, runtime, service_t};
 use vsomeip_sys::extern_callback_wrappers::AvailabilityHandlerFnPtr;
+use vsomeip_sys::glue::{
+    make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
+};
+use vsomeip_sys::safe_glue::{
+    get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime,
+    register_availability_handler_fn_ptr_safe, set_data_safe,
+};
+use vsomeip_sys::vsomeip::{instance_t, runtime, service_t};
 
 const SAMPLE_SERVICE_ID: u16 = 0x1234;
 const SAMPLE_INSTANCE_ID: u16 = 0x5678;
@@ -26,11 +26,7 @@ fn start_app() {
     );
 
     get_pinned_application(&app_wrapper).init();
-    extern "C" fn my_availability_fn(
-        service: service_t,
-        instance: instance_t,
-        availability: bool,
-    ) {
+    extern "C" fn my_availability_fn(service: service_t, instance: instance_t, availability: bool) {
         println!(
             "Service [{:04x}.{:x}] is {}",
             service,
@@ -43,12 +39,13 @@ fn start_app() {
         );
     }
     let my_availability_callback = AvailabilityHandlerFnPtr(my_availability_fn);
-    register_availability_handler_fn_ptr_safe(&mut app_wrapper,
-                                              SAMPLE_SERVICE_ID,
-                                              SAMPLE_INSTANCE_ID,
-                                              my_availability_callback,
-                                              vsomeip_sys::vsomeip::ANY_MAJOR,
-                                              vsomeip_sys::vsomeip::ANY_MINOR,
+    register_availability_handler_fn_ptr_safe(
+        &mut app_wrapper,
+        SAMPLE_SERVICE_ID,
+        SAMPLE_INSTANCE_ID,
+        my_availability_callback,
+        vsomeip_sys::vsomeip::ANY_MAJOR,
+        vsomeip_sys::vsomeip::ANY_MINOR,
     );
     get_pinned_application(&app_wrapper).request_service(
         SAMPLE_SERVICE_ID,

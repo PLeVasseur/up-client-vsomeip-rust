@@ -66,6 +66,23 @@ fn main() -> miette::Result<()> {
         .compile("cxx-portion");
     println!("cargo:rerun-if-changed=src/cxx_bridge.rs");
 
+    // we rewrite the autocxx generated code to suppress the cargo warning about unused imports
+    let file_path = Path::new(&out_dir).join("autocxx-build-dir").join("rs").join("autocxx-ffi-default-gen.rs");
+    if let Ok(mut contents) = fs::read_to_string(&file_path) {
+        // Insert #[allow(unused_imports)] for specific lines
+        contents = contents.replace(
+            "pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;",
+            "#[allow(unused_imports)]  pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;"
+        );
+
+        contents = contents.replace(
+            "pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;",
+            "#[allow(unused_imports)]  pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;"
+        );
+
+        fs::write(&file_path, contents).expect("Unable to write file");
+    }
+
     Ok(())
 }
 

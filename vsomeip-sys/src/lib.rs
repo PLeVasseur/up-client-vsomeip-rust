@@ -61,8 +61,8 @@ mod autocxx_failed {
 
 // wrappers for the extern "C" fns we need to provide to vsomeip
 pub mod extern_callback_wrappers {
-    use cxx::{type_id, ExternType, SharedPtr};
     use crate::vsomeip;
+    use cxx::{type_id, ExternType, SharedPtr};
 
     #[repr(transparent)]
     pub struct AvailabilityHandlerFnPtr(
@@ -92,27 +92,21 @@ pub mod vsomeip {
 }
 
 pub mod safe_glue {
+    use crate::cxx_bridge::handler_registration::register_availability_handler_fn_ptr;
+    use crate::cxx_bridge::handler_registration::register_message_handler_fn_ptr;
+    use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
     use crate::glue::upcast;
     use crate::glue::{
-        create_payload_wrapper, make_application_wrapper, make_message_wrapper,
-        make_payload_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper,
+        create_payload_wrapper,
+        ApplicationWrapper, MessageWrapper,
         PayloadWrapper, RuntimeWrapper,
     };
-    use crate::vsomeip::{application, message, payload, runtime};
     use crate::glue::{get_payload_raw, set_payload_raw};
-    use crate::vsomeip::{instance_t, message_base, service_t};
-    use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
-    use cxx::{SharedPtr, UniquePtr};
-    use lazy_static::lazy_static;
-    use std::cell::UnsafeCell;
-    use std::collections::HashMap;
-    use std::ffi::c_void;
+    use crate::vsomeip::{application, message, payload, runtime};
+    use crate::vsomeip::message_base;
+    use cxx::UniquePtr;
     use std::pin::Pin;
     use std::slice;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex, Once};
-    use crate::cxx_bridge::bar::register_message_handler_fn_ptr;
-    use crate::cxx_bridge::bar::register_availability_handler_fn_ptr;
 
     pub fn get_pinned_runtime(wrapper: &RuntimeWrapper) -> Pin<&mut runtime> {
         unsafe { Pin::new_unchecked(wrapper.get_mut().as_mut().unwrap()) }
@@ -246,7 +240,13 @@ pub mod safe_glue {
     ) {
         unsafe {
             let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
-            register_message_handler_fn_ptr(application_wrapper_ptr, _service, _instance, _method, _fn_ptr_handler);
+            register_message_handler_fn_ptr(
+                application_wrapper_ptr,
+                _service,
+                _instance,
+                _method,
+                _fn_ptr_handler,
+            );
         }
     }
 
@@ -256,11 +256,18 @@ pub mod safe_glue {
         _instance: u16,
         _fn_ptr_handler: AvailabilityHandlerFnPtr,
         _major_version: u8,
-        _minor_version: u32
+        _minor_version: u32,
     ) {
         unsafe {
             let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
-            register_availability_handler_fn_ptr(application_wrapper_ptr, _service, _instance, _fn_ptr_handler, _major_version, _minor_version);
+            register_availability_handler_fn_ptr(
+                application_wrapper_ptr,
+                _service,
+                _instance,
+                _fn_ptr_handler,
+                _major_version,
+                _minor_version,
+            );
         }
     }
 }
@@ -277,13 +284,17 @@ pub mod glue {
 
 #[cfg(test)]
 mod tests {
+    use crate::extern_callback_wrappers::AvailabilityHandlerFnPtr;
     use crate::ffi::vsomeip_v3::runtime;
     use crate::glue::{
         make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
     };
-    use crate::safe_glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe, set_data_safe, set_message_payload};
+    use crate::safe_glue::{
+        get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
+        get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe,
+        set_data_safe, set_message_payload,
+    };
     use crate::vsomeip::{message, message_base};
-    use crate::extern_callback_wrappers::AvailabilityHandlerFnPtr;
     use cxx::let_cxx_string;
     use std::pin::Pin;
     use std::slice;
@@ -308,13 +319,7 @@ mod tests {
             println!("hello from Rust!");
         }
         let callback = AvailabilityHandlerFnPtr(callback);
-        register_availability_handler_fn_ptr_safe(&mut app_wrapper,
-                                                  1,
-                                                  2,
-                                                  callback,
-                                                  3,
-                                                  4,
-        );
+        register_availability_handler_fn_ptr_safe(&mut app_wrapper, 1, 2, callback, 3, 4);
         let request =
             make_message_wrapper(get_pinned_runtime(&runtime_wrapper).create_request(true));
 
