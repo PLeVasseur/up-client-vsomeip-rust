@@ -17,6 +17,8 @@
 #include <iostream>
 #include "vsomeip/vsomeip.hpp"  // Adjust the path as necessary to include the runtime type
 
+namespace glue {
+
 class PayloadWrapper {
 public:
     explicit PayloadWrapper(std::shared_ptr<vsomeip_v3::payload> ptr) : ptr_(std::move(ptr)) {}
@@ -28,10 +30,6 @@ public:
     std::shared_ptr<vsomeip_v3::payload> get_shared_ptr() const {
         return ptr_;
     }
-
-   ~PayloadWrapper() {
-           std::cout << "PayloadWrapper destructed, address: " << this << std::endl;
-   }
 
 private:
     std::shared_ptr<vsomeip_v3::payload> ptr_;
@@ -48,7 +46,6 @@ void set_payload_raw(vsomeip_v3::message* message_ptr, const vsomeip_v3::payload
 
 const vsomeip_v3::payload* get_payload_raw(const vsomeip_v3::message* self) {
     auto sp = self->get_payload();
-    std::cout << "get_payload_raw called, payload address: " << sp.get() << std::endl;
     return sp.get();
 }
 
@@ -61,7 +58,4 @@ std::unique_ptr<PayloadWrapper> create_payload_wrapper(const vsomeip_v3::payload
     return std::make_unique<PayloadWrapper>(sptr);
 }
 
-//const vsomeip_v3::payload* get_payload_raw(const vsomeip_v3::message* self) {
-//    auto sp = self->get_payload();
-//    return sp.get();
-//}
+} // namespace glue

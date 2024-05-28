@@ -16,6 +16,8 @@
 #include <memory>
 #include "vsomeip/vsomeip.hpp"  // Adjust the path as necessary to include the runtime type
 
+namespace glue {
+
 class RuntimeWrapper {
 public:
     explicit RuntimeWrapper(std::shared_ptr<vsomeip_v3::runtime> ptr) : ptr_(std::move(ptr)) {}
@@ -31,3 +33,5 @@ private:
 std::unique_ptr<RuntimeWrapper> make_runtime_wrapper(std::shared_ptr<vsomeip_v3::runtime> ptr) {
     return std::make_unique<RuntimeWrapper>(std::move(ptr));
 }
+
+} // namespace glue

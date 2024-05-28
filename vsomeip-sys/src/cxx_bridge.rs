@@ -11,7 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-#[cxx::bridge]
+#[cxx::bridge(namespace = "glue")]
 pub mod bar {
     unsafe extern "C++" {
         include!("vsomeip/vsomeip.hpp");
@@ -19,7 +19,7 @@ pub mod bar {
         include!("application_registrations.h");
 
         type message_handler_fn_ptr = crate::extern_callback_wrappers::MessageHandlerFnPtr;
-        type ApplicationWrapper = crate::ffi::ApplicationWrapper;
+        type ApplicationWrapper = crate::ffi::glue::ApplicationWrapper;
 
         pub unsafe fn register_message_handler_fn_ptr(
             _application: *mut ApplicationWrapper,

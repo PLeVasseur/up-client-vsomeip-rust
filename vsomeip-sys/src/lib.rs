@@ -29,24 +29,24 @@ include_cpp! {
     generate!("vsomeip_v3::message_t")
     generate!("vsomeip_v3::ANY_MAJOR")
     generate!("vsomeip_v3::ANY_MINOR")
-    generate!("RuntimeWrapper")
-    generate!("make_runtime_wrapper")
-    generate!("ApplicationWrapper")
-    generate!("make_application_wrapper")
-    generate!("MessageWrapper")
-    generate!("make_message_wrapper")
-    generate!("upcast")
-    generate!("PayloadWrapper")
-    generate!("make_payload_wrapper")
-    generate!("set_payload_raw")
-    generate!("get_payload_raw")
-    generate!("create_payload_wrapper")
+    generate!("glue::RuntimeWrapper")
+    generate!("glue::make_runtime_wrapper")
+    generate!("glue::ApplicationWrapper")
+    generate!("glue::make_application_wrapper")
+    generate!("glue::MessageWrapper")
+    generate!("glue::make_message_wrapper")
+    generate!("glue::upcast")
+    generate!("glue::PayloadWrapper")
+    generate!("glue::make_payload_wrapper")
+    generate!("glue::set_payload_raw")
+    generate!("glue::get_payload_raw")
+    generate!("glue::create_payload_wrapper")
 }
 
 // autocxx fails to generate bindings to these functions, so we write the bindings for them
 // by hand and inject them into the vsomeip_v3 namespace
 #[cxx::bridge(namespace = "vsomeip_v3")]
-mod foo {
+mod autocxx_failed {
     unsafe extern "C++" {
         include!("vsomeip/vsomeip.hpp");
 
@@ -59,6 +59,7 @@ mod foo {
     }
 }
 
+// wrappers for the extern "C" fns we need to provide to vsomeip
 pub mod extern_callback_wrappers {
     use cxx::{type_id, ExternType, SharedPtr};
     use crate::vsomeip;
@@ -73,7 +74,7 @@ pub mod extern_callback_wrappers {
     );
 
     unsafe impl ExternType for AvailabilityHandlerFnPtr {
-        type Id = type_id!("availability_handler_fn_ptr");
+        type Id = type_id!("glue::availability_handler_fn_ptr");
         type Kind = cxx::kind::Trivial;
     }
 
@@ -81,7 +82,7 @@ pub mod extern_callback_wrappers {
     pub struct MessageHandlerFnPtr(pub extern "C" fn(&SharedPtr<vsomeip::message>));
 
     unsafe impl ExternType for MessageHandlerFnPtr {
-        type Id = type_id!("message_handler_fn_ptr");
+        type Id = type_id!("glue::message_handler_fn_ptr");
         type Kind = cxx::kind::Trivial;
     }
 }
@@ -90,15 +91,15 @@ pub mod vsomeip {
     pub use crate::ffi::vsomeip_v3::*;
 }
 
-pub mod pinned {
-    pub use crate::ffi::upcast;
+pub mod glue {
+    pub use crate::ffi::glue::upcast;
     use crate::ffi::vsomeip_v3::{application, message, payload, runtime};
-    pub use crate::ffi::{
+    pub use crate::ffi::glue::{
         create_payload_wrapper, make_application_wrapper, make_message_wrapper,
         make_payload_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper,
         PayloadWrapper, RuntimeWrapper,
     };
-    use crate::ffi::{get_payload_raw, set_payload_raw};
+    use crate::ffi::glue::{get_payload_raw, set_payload_raw};
     use crate::vsomeip::{instance_t, message_base, service_t};
     use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
     use cxx::{SharedPtr, UniquePtr};
@@ -243,14 +244,8 @@ pub mod pinned {
         _fn_ptr_handler: MessageHandlerFnPtr,
     ) {
         unsafe {
-            // Ensure application_wrapper is not null and get a mutable reference
             let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
             register_message_handler_fn_ptr(application_wrapper_ptr, _service, _instance, _method, _fn_ptr_handler);
-            // // Pin the mutable reference to ApplicationWrapper
-            // let mut application_pin = Pin::new_unchecked(application_ref);
-            // // Get the raw pointer using get_self
-            // let application_ptr: *mut ApplicationWrapper = application_pin.as_mut().get_self();
-            // let application_ptr = ApplicationWrapper::get_mut(&**application_pin);
         }
     }
 
@@ -267,11 +262,6 @@ pub mod pinned {
             // Ensure application_wrapper is not null and get a mutable reference
             let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
             register_availability_handler_fn_ptr(application_wrapper_ptr, _service, _instance, _fn_ptr_handler, _major_version, _minor_version);
-            // // Pin the mutable reference to ApplicationWrapper
-            // let mut application_pin = Pin::new_unchecked(application_ref);
-            // // Get the raw pointer using get_self
-            // let application_ptr: *mut ApplicationWrapper = application_pin.as_mut().get_self();
-            // let application_ptr = ApplicationWrapper::get_mut(&**application_pin);
         }
     }
 
@@ -375,12 +365,12 @@ pub mod pinned {
 #[cfg(test)]
 mod tests {
     use crate::ffi::vsomeip_v3::runtime;
-    use crate::ffi::{
+    use crate::glue::{
         make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
     };
-    use crate::pinned::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe, set_data_safe, set_message_payload, upcast};
+    use crate::glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe, set_data_safe, set_message_payload, upcast};
     use crate::vsomeip::{message, message_base};
-    use crate::{ffi, vsomeip, extern_callback_wrappers::AvailabilityHandlerFnPtr};
+    use crate::extern_callback_wrappers::AvailabilityHandlerFnPtr;
     use cxx::let_cxx_string;
     use std::pin::Pin;
     use std::slice;
@@ -398,8 +388,8 @@ mod tests {
         get_pinned_application(&app_wrapper).init();
 
         extern "C" fn callback(
-            service: ffi::vsomeip_v3::service_t,
-            instance: ffi::vsomeip_v3::instance_t,
+            service: crate::vsomeip::service_t,
+            instance: crate::vsomeip::instance_t,
             availability: bool,
         ) {
             println!("hello from Rust!");
@@ -412,7 +402,6 @@ mod tests {
                                                   3,
                                                   4,
         );
-        // get_pinned_application(&app_wrapper).register_availability_handler(1, 2, callback, 3, 4);
         let request =
             make_message_wrapper(get_pinned_runtime(&runtime_wrapper).create_request(true));
 
@@ -430,7 +419,6 @@ mod tests {
             make_payload_wrapper(get_pinned_runtime(&runtime_wrapper).create_payload());
         let foo = get_pinned_payload(&payload_wrapper);
 
-        // Data to be passed to set_data
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
 
         set_data_safe(get_pinned_payload(&payload_wrapper), Box::from(data));

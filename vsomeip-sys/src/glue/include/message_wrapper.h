@@ -17,6 +17,8 @@
 #include <iostream>
 #include "vsomeip/vsomeip.hpp"  // Adjust the path as necessary to include the runtime type
 
+namespace glue {
+
 class MessageWrapper {
 public:
     explicit MessageWrapper(std::shared_ptr<vsomeip_v3::message> ptr) : ptr_(std::move(ptr)) {}
@@ -40,3 +42,5 @@ std::unique_ptr<MessageWrapper> make_message_wrapper(std::shared_ptr<vsomeip_v3:
 inline vsomeip_v3::message_base& upcast(vsomeip_v3::message& derived) {
     return derived;
 }
+
+} // namespace glue
