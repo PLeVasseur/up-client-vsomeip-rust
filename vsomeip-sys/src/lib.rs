@@ -15,6 +15,7 @@ mod cxx_bridge;
 
 use autocxx::prelude::*; // use all the main autocxx functions
 
+// using autocxx to generate Rust bindings for all these
 include_cpp! {
     #include "vsomeip/vsomeip.hpp"
     #include "runtime_wrapper.h"
@@ -22,10 +23,10 @@ include_cpp! {
     #include "message_wrapper.h"
     #include "payload_wrapper.h"
     safety!(unsafe) // see details of unsafety policies described in the 'safety' section of the book
-    generate!("vsomeip_v3::runtime") // add this line for each function or type you wish to generate
+    generate!("vsomeip_v3::runtime")
     generate!("vsomeip_v3::application")
-    generate!("vsomeip_v3::message_base") // add this line for each function or type you wish to generate
-    generate!("vsomeip_v3::message_t") // add this line for each function or type you wish to generate
+    generate!("vsomeip_v3::message_base")
+    generate!("vsomeip_v3::message_t")
     generate!("vsomeip_v3::ANY_MAJOR")
     generate!("vsomeip_v3::ANY_MINOR")
     generate!("RuntimeWrapper")
@@ -40,9 +41,10 @@ include_cpp! {
     generate!("set_payload_raw")
     generate!("get_payload_raw")
     generate!("create_payload_wrapper")
-    // generate!("register_message_handler_fn_ptr")
 }
 
+// autocxx fails to generate bindings to these functions, so we write the bindings for them
+// by hand and inject them into the vsomeip_v3 namespace
 #[cxx::bridge(namespace = "vsomeip_v3")]
 mod foo {
     unsafe extern "C++" {
@@ -57,56 +59,35 @@ mod foo {
     }
 }
 
-// #[cxx::bridge]
-// mod bar {
-//     unsafe extern "C++" {
-//         include!("vsomeip/vsomeip.hpp");
-//         include!("application_wrapper.h");
-//         include!("application_registrations.h");
-//
-//         type message_handler_fn_ptr = crate::MessageHandlerFnPtr;
-//         type ApplicationWrapper = crate::ffi::ApplicationWrapper;
-//
-//         pub unsafe fn register_message_handler_fn_ptr(
-//             _application: *mut ApplicationWrapper,
-//             _service: u16,
-//             _instance: u16,
-//             _method: u16,
-//             _fn_ptr_handler: message_handler_fn_ptr,
-//         );
-//     }
-// }
+pub mod extern_callback_wrappers {
+    use cxx::{type_id, ExternType, SharedPtr};
+    use crate::vsomeip;
 
-use cxx::{type_id, ExternType, SharedPtr};
+    #[repr(transparent)]
+    pub struct AvailabilityHandlerFnPtr(
+        pub  extern "C" fn(
+            service: crate::ffi::vsomeip_v3::service_t,
+            instance: crate::ffi::vsomeip_v3::instance_t,
+            availability: bool,
+        ),
+    );
 
-#[repr(transparent)]
-pub struct AvailabilityHandlerFnPtr(
-    pub  extern "C" fn(
-        service: ffi::vsomeip_v3::service_t,
-        instance: ffi::vsomeip_v3::instance_t,
-        availability: bool,
-    ),
-);
+    unsafe impl ExternType for AvailabilityHandlerFnPtr {
+        type Id = type_id!("availability_handler_fn_ptr");
+        type Kind = cxx::kind::Trivial;
+    }
 
-unsafe impl ExternType for AvailabilityHandlerFnPtr {
-    type Id = type_id!("availability_handler_fn_ptr");
-    type Kind = cxx::kind::Trivial;
-}
+    #[repr(transparent)]
+    pub struct MessageHandlerFnPtr(pub extern "C" fn(&SharedPtr<vsomeip::message>));
 
-#[repr(transparent)]
-pub struct MessageHandlerFnPtr(pub extern "C" fn(&SharedPtr<vsomeip::message>));
-
-unsafe impl ExternType for MessageHandlerFnPtr {
-    type Id = type_id!("message_handler_fn_ptr");
-    type Kind = cxx::kind::Trivial;
+    unsafe impl ExternType for MessageHandlerFnPtr {
+        type Id = type_id!("message_handler_fn_ptr");
+        type Kind = cxx::kind::Trivial;
+    }
 }
 
 pub mod vsomeip {
     pub use crate::ffi::vsomeip_v3::*;
-}
-
-pub mod reexports {
-    pub use cxx::SharedPtr;
 }
 
 pub mod pinned {
@@ -119,7 +100,7 @@ pub mod pinned {
     };
     use crate::ffi::{get_payload_raw, set_payload_raw};
     use crate::vsomeip::{instance_t, message_base, service_t};
-    use crate::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
+    use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
     use cxx::{SharedPtr, UniquePtr};
     use lazy_static::lazy_static;
     use std::cell::UnsafeCell;
@@ -399,7 +380,7 @@ mod tests {
     };
     use crate::pinned::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe, set_data_safe, set_message_payload, upcast};
     use crate::vsomeip::{message, message_base};
-    use crate::{ffi, vsomeip, AvailabilityHandlerFnPtr};
+    use crate::{ffi, vsomeip, extern_callback_wrappers::AvailabilityHandlerFnPtr};
     use cxx::let_cxx_string;
     use std::pin::Pin;
     use std::slice;

@@ -2,7 +2,7 @@ use cxx::{let_cxx_string, SharedPtr};
 use std::thread;
 use vsomeip_sys::pinned::{create_callback, get_pinned_application, get_pinned_runtime, make_application_wrapper, make_runtime_wrapper, register_message_handler_fn_ptr_safe};
 use vsomeip_sys::vsomeip::{application, message, runtime};
-use vsomeip_sys::{vsomeip, MessageHandlerFnPtr};
+use vsomeip_sys::{vsomeip, extern_callback_wrappers::MessageHandlerFnPtr};
 
 const SAMPLE_SERVICE_ID: u16 = 0x1234;
 const SAMPLE_INSTANCE_ID: u16 = 0x5678;

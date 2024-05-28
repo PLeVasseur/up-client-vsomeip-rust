@@ -35,38 +35,35 @@ fn main() -> miette::Result<()> {
 
     let project_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let runtime_wrapper_dir = project_root.join("src/glue/include"); // Update the path as necessary
-
-    // let interface_path = Path::new("src").join("vsomeip-src").join("interface");
     let interface_path = vsomeip_decompressed_folder.join("interface");
+
     // for some reason unless we explicitly provide paths to headers for the stdlib here we have issues
     // I don't think we should really _have_ to do this though, as their locations are
     // more or less consistent on every instance of the different platforms
     // reference: https://github.com/google/autocxx/issues/1347#issuecomment-1928551787
+
+    // we use autocxx to generate bindings for all those requested in src/lib.rs in the include_cpp! {} macro
     let mut b = autocxx_build::Builder::new("src/lib.rs", &[&interface_path, &runtime_wrapper_dir])
         .extra_clang_args(&[
             "-I/usr/include/c++/11",
             "-I/usr/include/x86_64-linux-gnu/c++/11",
         ])
         .build()?;
-    b.flag_if_supported("-std=c++17").compile("vsomeip-sys"); // arbitrary library name, pick anything
+    b.flag_if_supported("-std=c++17").compile("autocxx-portion");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rustc-link-lib=vsomeip3");
     println!("cargo:rustc-link-search=native=/usr/local/lib");
 
     let include_dir = project_root.join("src/glue"); // Update the path as necessary
 
+    // we use cxx to generate bindings for those couple of functions for which autocxx fails
+    // due to usage of std::function inside of the function body
     cxx_build::bridge("src/cxx_bridge.rs")
         .file("src/glue/application_registrations.cpp")
         .file("src/glue/src/application_wrapper.cpp")
         .include(&include_dir)
-        // .includes("src/glue/application_registrations.h")
-        // .include("/usr/include/c++/11")
-        // .include("/usr/include/x86_64-linux-gnu/c++/11")
-        // .include("/usr/include")
-        // .include(&interface_path)
-        // .include(&runtime_wrapper_dir)
         .flag_if_supported("-std=c++17")
-        .compile("cxxbridge");
+        .compile("cxx-portion");
     println!("cargo:rerun-if-changed=src/cxx_bridge.rs");
 
     Ok(())
