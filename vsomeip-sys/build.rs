@@ -49,7 +49,11 @@ fn main() -> miette::Result<()> {
             "-I/usr/include/x86_64-linux-gnu/c++/11",
         ])
         .build()?;
-    b.flag_if_supported("-std=c++17").compile("autocxx-portion");
+    b
+        .flag_if_supported("-std=c++17")
+        .flag_if_supported("-Wno-deprecated-declarations") // suppress warnings from C++
+        .flag_if_supported("-Wno-unused-function")         // compiler compiling vsomeip
+        .compile("autocxx-portion");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rustc-link-lib=vsomeip3");
     println!("cargo:rustc-link-search=native=/usr/local/lib");
