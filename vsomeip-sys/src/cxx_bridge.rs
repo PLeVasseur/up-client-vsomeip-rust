@@ -42,3 +42,23 @@ pub mod handler_registration {
         );
     }
 }
+
+// autocxx fails to generate bindings to these functions, so we write the bindings for them
+// by hand and inject them into the vsomeip_v3 namespace
+#[cxx::bridge(namespace = "vsomeip_v3")]
+mod autocxx_failed {
+    unsafe extern "C++" {
+        include!("vsomeip/vsomeip.hpp");
+
+        type payload = crate::vsomeip::payload;
+
+        /// # Safety
+        ///
+        /// We are simply creating a binding here for one that autocxx failed to generate
+        pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);
+
+        pub fn get_data(self: &payload) -> *const u8;
+
+        pub fn get_length(self: &payload) -> u32;
+    }
+}

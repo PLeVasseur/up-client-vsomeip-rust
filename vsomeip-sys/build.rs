@@ -87,10 +87,7 @@ fn main() -> miette::Result<()> {
         );
 
         // Removing pub from an unsafe function we never use to suppress warning
-        contents = contents.replace(
-            "pub unsafe fn create_payload1",
-            "unsafe fn create_payload1"
-        );
+        contents = contents.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
 
         fs::write(&file_path, contents).expect("Unable to write file");
     }

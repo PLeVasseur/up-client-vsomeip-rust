@@ -90,10 +90,7 @@ fn main() {
         payload_data.push((i as u16 % 256) as u8);
     }
 
-    set_data_safe(
-        get_pinned_payload(&payload_wrapper),
-        &payload_data,
-    );
+    set_data_safe(get_pinned_payload(&payload_wrapper), &payload_data);
 
     let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();
     println!("attempting send...");
