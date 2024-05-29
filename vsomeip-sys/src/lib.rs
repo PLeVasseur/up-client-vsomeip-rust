@@ -51,6 +51,10 @@ mod autocxx_failed {
         include!("vsomeip/vsomeip.hpp");
 
         type payload = crate::vsomeip::payload;
+
+        /// # Safety
+        ///
+        /// We are simply creating a binding here for one that autocxx failed to generate
         pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);
 
         pub fn get_data(self: &payload) -> *const u8;
@@ -59,7 +63,7 @@ mod autocxx_failed {
     }
 }
 
-// wrappers for the extern "C" fns we need to provide to vsomeip
+// wrappers for the extern "C" fns we need to provide to vsomeip for callbacks
 pub mod extern_callback_wrappers {
     use crate::vsomeip;
     use cxx::{type_id, ExternType, SharedPtr};
@@ -97,11 +101,12 @@ pub mod safe_glue {
     use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
     use crate::glue::upcast;
     use crate::glue::{
-        create_payload_wrapper, ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper,
+        ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper,
     };
-    use crate::glue::{get_payload_raw, set_payload_raw};
+    use crate::ffi::glue::{get_payload_raw, set_payload_raw};
     use crate::vsomeip::message_base;
     use crate::vsomeip::{application, message, payload, runtime};
+    use crate::unsafe_fns::create_payload_wrapper;
     use cxx::UniquePtr;
     use std::pin::Pin;
     use std::slice;
@@ -152,7 +157,7 @@ pub mod safe_glue {
         unsafe { Pin::new_unchecked(wrapper.get_mut().as_mut().unwrap()) }
     }
 
-    pub fn set_data_safe(payload: Pin<&mut payload>, _data: Box<[u8]>) {
+    pub fn set_data_safe(payload: Pin<&mut payload>, _data: &[u8]) {
         // Get the length of the data
         let length = _data.len() as u32;
 
@@ -165,8 +170,8 @@ pub mod safe_glue {
     }
 
     pub fn get_data_safe(payload_wrapper: &PayloadWrapper) -> Vec<u8> {
-        let length = get_pinned_payload(&payload_wrapper).get_length();
-        let data_ptr = get_pinned_payload(&payload_wrapper).get_data();
+        let length = get_pinned_payload(payload_wrapper).get_length();
+        let data_ptr = get_pinned_payload(payload_wrapper).get_data();
 
         // Convert the raw pointer and length to a slice
         let data_slice: &[u8] = unsafe { slice::from_raw_parts(data_ptr, length as usize) };
@@ -184,8 +189,8 @@ pub mod safe_glue {
         unsafe {
             let message_pin = Pin::new_unchecked(&mut *message_wrapper);
             let payload_pin = Pin::new_unchecked(&mut *payload_wrapper);
-            let message_ptr = MessageWrapper::get_mut(&**message_pin);
-            let payload_ptr = PayloadWrapper::get_mut(&**payload_pin);
+            let message_ptr = MessageWrapper::get_mut(&message_pin);
+            let payload_ptr = PayloadWrapper::get_mut(&payload_pin);
             set_payload_raw(message_ptr, payload_ptr);
         }
     }
@@ -200,7 +205,7 @@ pub mod safe_glue {
             }
 
             let message_pin = Pin::new_unchecked(message_wrapper.as_mut().unwrap());
-            let message_ptr = MessageWrapper::get_mut(&*message_pin) as *const message;
+            let message_ptr = MessageWrapper::get_mut(&message_pin) as *const message;
 
             if (message_ptr as *const ()).is_null() {
                 eprintln!("message_ptr is null");
@@ -270,14 +275,17 @@ pub mod safe_glue {
     }
 }
 
+mod unsafe_fns {
+    pub use crate::ffi::glue::create_payload_wrapper;
+}
+
 pub mod glue {
     pub use crate::ffi::glue::upcast;
     pub use crate::ffi::glue::{
-        create_payload_wrapper, make_application_wrapper, make_message_wrapper,
+        make_application_wrapper, make_message_wrapper,
         make_payload_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper,
         PayloadWrapper, RuntimeWrapper,
     };
-    pub use crate::ffi::glue::{get_payload_raw, set_payload_raw};
 }
 
 #[cfg(test)]
@@ -292,10 +300,7 @@ mod tests {
         get_pinned_payload, get_pinned_runtime, register_availability_handler_fn_ptr_safe,
         set_data_safe, set_message_payload,
     };
-    use crate::vsomeip::{message, message_base};
     use cxx::let_cxx_string;
-    use std::pin::Pin;
-    use std::slice;
     use std::time::Duration;
 
     #[test]
@@ -310,9 +315,9 @@ mod tests {
         get_pinned_application(&app_wrapper).init();
 
         extern "C" fn callback(
-            service: crate::vsomeip::service_t,
-            instance: crate::vsomeip::instance_t,
-            availability: bool,
+            _service: crate::vsomeip::service_t,
+            _instance: crate::vsomeip::instance_t,
+            _availability: bool,
         ) {
             println!("hello from Rust!");
         }
@@ -333,11 +338,11 @@ mod tests {
 
         let mut payload_wrapper =
             make_payload_wrapper(get_pinned_runtime(&runtime_wrapper).create_payload());
-        let foo = get_pinned_payload(&payload_wrapper);
+        let _foo = get_pinned_payload(&payload_wrapper);
 
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
 
-        set_data_safe(get_pinned_payload(&payload_wrapper), Box::from(data));
+        set_data_safe(get_pinned_payload(&payload_wrapper), &data);
 
         let data_vec = get_data_safe(&payload_wrapper);
         println!("{:?}", data_vec);

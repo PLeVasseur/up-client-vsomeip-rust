@@ -11,9 +11,6 @@ const SAMPLE_SERVICE_ID: u16 = 0x1234;
 const SAMPLE_INSTANCE_ID: u16 = 0x5678;
 const SAMPLE_METHOD_ID: u16 = 0x0421;
 
-const SAMPLE_MAJOR_VERSION: u8 = 1;
-const SAMPLE_MINOR_VERSION: u32 = 2;
-
 fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
@@ -24,7 +21,7 @@ fn start_app() {
     );
     get_pinned_application(&app_wrapper).init();
 
-    extern "C" fn my_msg_handler(msg: &SharedPtr<message>) {
+    extern "C" fn my_msg_handler(_msg: &SharedPtr<message>) {
         println!("received Request!");
     }
     let my_callback = MessageHandlerFnPtr(my_msg_handler);

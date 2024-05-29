@@ -92,7 +92,7 @@ fn main() {
 
     set_data_safe(
         get_pinned_payload(&payload_wrapper),
-        Box::from(payload_data),
+        &payload_data,
     );
 
     let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();

@@ -24,7 +24,7 @@ fn main() -> miette::Result<()> {
     let vsomeip_decompressed_folder = Path::new(&out_dir).join("vsomeip").join("vsomeip-src");
     let vsomeip_archive_url = format!("{VSOMEIP_TAGGED_RELEASE_BASE}{VSOMEIP_VERSION_ARCHIVE}");
 
-    download_and_write_file(&*vsomeip_archive_url, &vsomeip_archive_dest)
+    download_and_write_file(&vsomeip_archive_url, &vsomeip_archive_dest)
         .expect("Unable to download released archive");
     decompress::decompress(
         vsomeip_archive_dest,
@@ -43,7 +43,7 @@ fn main() -> miette::Result<()> {
     // reference: https://github.com/google/autocxx/issues/1347#issuecomment-1928551787
 
     // we use autocxx to generate bindings for all those requested in src/lib.rs in the include_cpp! {} macro
-    let mut b = autocxx_build::Builder::new("src/lib.rs", &[&interface_path, &runtime_wrapper_dir])
+    let mut b = autocxx_build::Builder::new("src/lib.rs", [&interface_path, &runtime_wrapper_dir])
         .extra_clang_args(&[
             "-I/usr/include/c++/11",
             "-I/usr/include/x86_64-linux-gnu/c++/11",
@@ -84,6 +84,12 @@ fn main() -> miette::Result<()> {
         contents = contents.replace(
             "pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;",
             "#[allow(unused_imports)]  pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;"
+        );
+
+        // Removing pub from an unsafe function we never use to suppress warning
+        contents = contents.replace(
+            "pub unsafe fn create_payload1",
+            "unsafe fn create_payload1"
         );
 
         fs::write(&file_path, contents).expect("Unable to write file");
