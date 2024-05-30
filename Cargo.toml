@@ -46,6 +46,7 @@ uuid = { version = "1.7", features = ["v8"] }
 vsomeip-proc-macro = { path = "vsomeip-proc-macro" }
 vsomeip-sys = { path = "vsomeip-sys" }
 lazy_static = "1.4.0"
+protobuf = "3.4.0"
 
 [dev-dependencies]
 test-case = { version = "3.3" }

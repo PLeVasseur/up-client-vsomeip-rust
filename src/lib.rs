@@ -13,6 +13,7 @@
 
 use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
+use protobuf::Enum;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::thread;
@@ -20,7 +21,9 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
+use up_rust::{
+    UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUIDBuilder, UUri,
+};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
@@ -290,16 +293,15 @@ fn convert_vsomeip_msg_to_umsg(
 ) -> Result<UMessage, UStatus> {
     let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
 
+    let service_id = get_pinned_message_base(_vsomeip_message).get_service();
+    let client_id = get_pinned_message_base(_vsomeip_message).get_client();
+    let method_id = get_pinned_message_base(_vsomeip_message).get_method();
+    let interface_version = get_pinned_message_base(_vsomeip_message).get_interface_version();
+    let payload = get_message_payload(_vsomeip_message);
+    let payload_bytes = get_data_safe(&payload);
+
     match msg_type {
         message_type_e::MT_REQUEST => {
-            let service_id = get_pinned_message_base(_vsomeip_message).get_service();
-            let client_id = get_pinned_message_base(_vsomeip_message).get_client();
-            let method_id = get_pinned_message_base(_vsomeip_message).get_method();
-            let interface_version =
-                get_pinned_message_base(_vsomeip_message).get_interface_version();
-            let payload = get_message_payload(_vsomeip_message);
-            let payload_bytes = get_data_safe(&payload);
-
             let sink = UUri {
                 authority_name: UPClientVsomeip::get_authority_name().to_string(),
                 ue_id: client_id as u32,
@@ -320,6 +322,7 @@ fn convert_vsomeip_msg_to_umsg(
             let ttl = 10;
 
             let umsg_res = UMessageBuilder::request(sink, source, ttl)
+                .with_comm_status(UCode::OK.value())
                 .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
 
             let Ok(umsg) = umsg_res else {
@@ -331,9 +334,79 @@ fn convert_vsomeip_msg_to_umsg(
 
             Ok(umsg)
         }
-        message_type_e::MT_NOTIFICATION => Ok(UMessage::default()),
-        message_type_e::MT_RESPONSE => Ok(UMessage::default()),
-        message_type_e::MT_ERROR => Ok(UMessage::default()),
+        message_type_e::MT_NOTIFICATION => {
+            // TODO: Implement the logic here from the table
+
+            Ok(UMessage::default())
+        }
+        message_type_e::MT_RESPONSE => {
+            let sink = UUri {
+                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                ue_id: client_id as u32,
+                ue_version_major: 1, // TODO: I don't see a way to get this
+                resource_id: 0,      // set to 0 as this is the resource_id of "me"
+                ..Default::default()
+            };
+
+            let source = UUri {
+                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                ue_id: service_id as u32,
+                ue_version_major: interface_version as u32,
+                resource_id: method_id as u32,
+                ..Default::default()
+            };
+
+            // TODO: Need to perform correlation to get this, this is just stand-in
+            let req_id = UUIDBuilder::build();
+
+            let umsg_res = UMessageBuilder::response(sink, req_id, source)
+                .with_comm_status(UCode::OK.value())
+                .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
+
+            let Ok(umsg) = umsg_res else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Unable to build UMessage from vsomeip message",
+                ));
+            };
+
+            Ok(umsg)
+        }
+        message_type_e::MT_ERROR => {
+            let sink = UUri {
+                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                ue_id: client_id as u32,
+                ue_version_major: 1, // TODO: I don't see a way to get this
+                resource_id: 0,      // set to 0 as this is the resource_id of "me"
+                ..Default::default()
+            };
+
+            let source = UUri {
+                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                ue_id: service_id as u32,
+                ue_version_major: interface_version as u32,
+                resource_id: method_id as u32,
+                ..Default::default()
+            };
+
+            // TODO: Need to perform correlation to get this, this is just stand-in
+            let req_id = UUIDBuilder::build();
+
+            // TODO: Check with Steven on if we should be passing along the payload in the error cases for Response
+            // TODO: Need to do proper mapping from error code into commstatus, for now just set INTERNAL
+            let umsg_res = UMessageBuilder::response(sink, req_id, source)
+                .with_comm_status(UCode::INTERNAL.value())
+                .build();
+
+            let Ok(umsg) = umsg_res else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Unable to build UMessage from vsomeip message",
+                ));
+            };
+
+            Ok(umsg)
+        }
         _ => Err(UStatus::fail_with_code(
             UCode::OUT_OF_RANGE,
             format!(
