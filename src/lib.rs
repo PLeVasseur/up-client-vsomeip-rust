@@ -289,7 +289,8 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let (_, client_id) = split_u32_to_u16(sink.ue_id);
+            let (_, _client_id) = split_u32_to_u16(sink.ue_id);
+            let client_id = 0; // manually setting this to 0 as according to spec
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
