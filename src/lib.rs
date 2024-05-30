@@ -230,7 +230,7 @@ impl UPClientVsomeip {
             convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
 
         let msg_to_send = _vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-        get_pinned_application(&_application_wrapper).send(msg_to_send);
+        get_pinned_application(_application_wrapper).send(msg_to_send);
 
         Self::return_oneshot_value(Ok(()), _return_channel).await;
     }
@@ -255,40 +255,58 @@ fn convert_vsomeip_msg_to_umsg(
 }
 
 fn convert_umsg_to_vsomeip_msg(
-    _umsg: &UMessage,
+    umsg: &UMessage,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
-    _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
+    runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-    let Some(sink) = _umsg.attributes.sink.as_ref() else {
+    let Some(sink) = umsg.attributes.sink.as_ref() else {
         return Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
             "Message has no sink UUri",
         ));
     };
 
-    let Some(source) = _umsg.attributes.source.as_ref() else {
+    let Some(source) = umsg.attributes.source.as_ref() else {
         return Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
             "Message has no source UUri",
         ));
     };
 
-    match _umsg
+    match umsg
         .attributes
         .type_
         .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
     {
         UMessageType::UMESSAGE_TYPE_PUBLISH => {
             // Implementation goes here
-            let vsomeip_msg =
-                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+            let vsomeip_msg = make_message_wrapper(
+                get_pinned_runtime(runtime_wrapper).create_notification(true),
+            );
+            let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            let (_, method_id) = split_u32_to_u16(source.resource_id);
+            get_pinned_message_base(&vsomeip_msg).set_method(method_id);
+            let (_, client_id) = split_u32_to_u16(sink.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+
+            // where do we retrieve the _previous_ session ID such that we can increment it?
+            // or... perhaps since we're the only publisher, we're trivially able to do so?
+            let session_id = 0;
+            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+
+            get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+
+            // TODO: Add the payload
 
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_REQUEST => {
             // Implementation goes here
             let vsomeip_msg =
-                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+                make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             // TODO: I _think_ that resource_id was intended to be a u16, but till we get confirmations
@@ -304,6 +322,10 @@ fn convert_umsg_to_vsomeip_msg(
             let session_id = 0;
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
 
+            get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+
+            // TODO: Add the payload
+
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
@@ -311,15 +333,52 @@ fn convert_umsg_to_vsomeip_msg(
             // TODO -- this should be create_response, but that takes a &SharedPtr<message> which
             //  should be the original request message
             let vsomeip_msg =
-                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+                make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
+
+            let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            let (_, method_id) = split_u32_to_u16(sink.resource_id);
+            get_pinned_message_base(&vsomeip_msg).set_method(method_id);
+            let (_, client_id) = split_u32_to_u16(source.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+
+            // we need to keep track of what the session_id should be based on identifying
+            // characteristics of the UMessage we would have gotten in register_listener callback
+            let session_id: u16 = 0;
+            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+
+            let ok = {
+                if let Some(commstatus) = umsg.attributes.commstatus {
+                    let commstatus = commstatus.enum_value_or(UCode::UNIMPLEMENTED);
+                    commstatus == UCode::OK
+                } else {
+                    false
+                }
+            };
+
+            if ok {
+                get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+                get_pinned_message_base(&vsomeip_msg)
+                    .set_message_type(vsomeip::message_type_e::MT_RESPONSE);
+
+                // TODO: Add the payload
+            } else {
+                // TODO: Perform mapping from uProtocol UCode contained in commstatus into vsomeip::return_code_e
+                get_pinned_message_base(&vsomeip_msg)
+                    .set_return_code(vsomeip::return_code_e::E_NOT_OK);
+                get_pinned_message_base(&vsomeip_msg)
+                    .set_message_type(vsomeip::message_type_e::MT_ERROR);
+            }
 
             Ok(vsomeip_msg)
         }
         _ => {
-            return Err(UStatus::fail_with_code(
+            Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 "Trying to convert an unspecified or notification message type.",
-            ));
+            ))
         }
     }
 }
