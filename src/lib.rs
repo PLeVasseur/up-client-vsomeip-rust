@@ -252,9 +252,9 @@ fn convert_vsomeip_msg_to_umsg(
     _vsomeip_message: &UniquePtr<MessageWrapper>,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-) -> UMessage {
+) -> Result<UMessage, UStatus> {
     // Implementation goes here
-    UMessage::default()
+    Ok(UMessage::default())
 }
 
 fn convert_umsg_to_vsomeip_msg(

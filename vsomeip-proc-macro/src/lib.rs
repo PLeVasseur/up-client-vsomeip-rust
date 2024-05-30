@@ -84,7 +84,14 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             let application_wrapper = make_application_wrapper(
                 get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
             );
-            let umsg = convert_vsomeip_msg_to_umsg(&vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
+            let res = convert_vsomeip_msg_to_umsg(&vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
+
+            let Ok(umsg) = res else {
+                if let Err(err) = res {
+                    // TODO: Add some logging here
+                }
+                return;
+            };
 
             println!("Calling extern function #{}", listener_id);
             let registry = LISTENER_REGISTRY.lock().unwrap();
