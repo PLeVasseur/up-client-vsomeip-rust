@@ -92,6 +92,12 @@ fn main() -> miette::Result<()> {
         // Rewriting a doc comment translated from C++ to not use [] link syntax
         contents = contents.replace("successfully [de]registered", "successfully de/registered");
 
+        // Adding a derived Debug for the message_type_e enum
+        contents = contents.replace(
+            "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
+              "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
+        );
+
         fs::write(&file_path, contents).expect("Unable to write file");
     }
 

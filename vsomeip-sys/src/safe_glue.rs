@@ -18,7 +18,7 @@ use crate::ffi::glue::{get_payload_raw, set_payload_raw};
 use crate::glue::upcast;
 use crate::glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use crate::unsafe_fns::create_payload_wrapper;
-use crate::vsomeip::message_base;
+use crate::vsomeip::{message_base};
 use crate::vsomeip::{application, message, payload, runtime};
 use cxx::UniquePtr;
 use std::pin::Pin;

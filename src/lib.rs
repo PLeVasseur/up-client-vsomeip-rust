@@ -20,19 +20,22 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
+use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
     ApplicationWrapper, MessageWrapper, RuntimeWrapper,
 };
 use vsomeip_sys::safe_glue::{
-    get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime,
-    set_data_safe, set_message_payload,
+    get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
+    get_pinned_payload, get_pinned_runtime, set_data_safe, set_message_payload,
 };
 use vsomeip_sys::vsomeip;
+use vsomeip_sys::vsomeip::message_type_e;
 
 pub mod transport;
+
+const ME_AUTHORITY: &str = "me_authority";
 
 enum TransportCommand {
     RegisterListener(
@@ -47,17 +50,30 @@ enum TransportCommand {
 
 lazy_static! {
     static ref APP_NAME: OnceLock<String> = OnceLock::new();
+    static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
+    static ref UE_ID: OnceLock<u16> = OnceLock::new();
 }
 
 pub struct UPClientVsomeip {
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
     app_name: String,
+    // we're going to be using this for error messages, so suppress this warning for now
+    #[allow(dead_code)]
+    authority_name: String,
+    // we're going to be using this for error messages, so suppress this warning for now
+    #[allow(dead_code)]
+    ue_id: u16,
     tx_to_event_loop: Sender<TransportCommand>,
 }
 
 impl UPClientVsomeip {
-    pub fn new_with_config(app_name: &str, config_path: &Path) -> Result<Self, UStatus> {
+    pub fn new_with_config(
+        app_name: &str,
+        authority_name: &str,
+        ue_id: u16,
+        config_path: &Path,
+    ) -> Result<Self, UStatus> {
         if !config_path.exists() {
             return Err(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
@@ -65,30 +81,49 @@ impl UPClientVsomeip {
             ));
         }
 
-        Self::new_internal(app_name, Some(config_path))
+        Self::new_internal(app_name, authority_name, ue_id, Some(config_path))
     }
 
-    pub fn new(app_name: &str) -> Result<Self, UStatus> {
-        Self::new_internal(app_name, None)
+    pub fn new(app_name: &str, authority_name: &str, ue_id: u16) -> Result<Self, UStatus> {
+        Self::new_internal(app_name, authority_name, ue_id, None)
     }
 
-    fn new_internal(app_name: &str, config_path: Option<&Path>) -> Result<Self, UStatus> {
+    fn new_internal(
+        app_name: &str,
+        authority_name: &str,
+        ue_id: u16,
+        config_path: Option<&Path>,
+    ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
 
         APP_NAME
             .set(app_name.to_string())
             .expect("APP_NAME was already set!");
 
+        AUTHORITY_NAME
+            .set(authority_name.to_string())
+            .expect("AUTHORITY_NAME was already set!");
+
+        UE_ID.set(ue_id).expect("UE_ID was already set!");
+
         Self::app_event_loop(app_name, rx, config_path);
 
         Ok(Self {
             app_name: app_name.parse().unwrap(),
+            authority_name: authority_name.to_string(),
+            ue_id,
             tx_to_event_loop: tx,
         })
     }
 
     fn get_app_name() -> &'static String {
         APP_NAME.get().expect("APP_NAME has not been initialized")
+    }
+
+    fn get_authority_name() -> &'static String {
+        AUTHORITY_NAME
+            .get()
+            .expect("APP_NAME has not been initialized")
     }
 
     fn app_event_loop(
@@ -249,12 +284,64 @@ impl UPClientVsomeip {
 }
 
 fn convert_vsomeip_msg_to_umsg(
-    _vsomeip_message: &UniquePtr<MessageWrapper>,
+    _vsomeip_message: &mut UniquePtr<MessageWrapper>,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UMessage, UStatus> {
-    // Implementation goes here
-    Ok(UMessage::default())
+    let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
+
+    match msg_type {
+        message_type_e::MT_REQUEST => {
+            let service_id = get_pinned_message_base(_vsomeip_message).get_service();
+            let client_id = get_pinned_message_base(_vsomeip_message).get_client();
+            let method_id = get_pinned_message_base(_vsomeip_message).get_method();
+            let interface_version =
+                get_pinned_message_base(_vsomeip_message).get_interface_version();
+            let payload = get_message_payload(_vsomeip_message);
+            let payload_bytes = get_data_safe(&payload);
+
+            let sink = UUri {
+                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                ue_id: client_id as u32,
+                ue_version_major: 1, // TODO: I don't see a way to get this
+                resource_id: 0,      // set to 0 as this is the resource_id of "me"
+                ..Default::default()
+            };
+
+            let source = UUri {
+                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                ue_id: service_id as u32,
+                ue_version_major: interface_version as u32,
+                resource_id: method_id as u32,
+                ..Default::default()
+            };
+
+            // TODO: Not sure where to get this
+            let ttl = 10;
+
+            let umsg_res = UMessageBuilder::request(sink, source, ttl)
+                .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
+
+            let Ok(umsg) = umsg_res else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Unable to build UMessage from vsomeip message",
+                ));
+            };
+
+            Ok(umsg)
+        }
+        message_type_e::MT_NOTIFICATION => Ok(UMessage::default()),
+        message_type_e::MT_RESPONSE => Ok(UMessage::default()),
+        message_type_e::MT_ERROR => Ok(UMessage::default()),
+        _ => Err(UStatus::fail_with_code(
+            UCode::OUT_OF_RANGE,
+            format!(
+                "Not one of the handled message types from SOME/IP: {:?}",
+                msg_type
+            ),
+        )),
+    }
 }
 
 fn convert_umsg_to_vsomeip_msg(
