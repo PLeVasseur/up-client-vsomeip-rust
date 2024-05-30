@@ -301,7 +301,6 @@ fn convert_umsg_to_vsomeip_msg(
 
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
 
-            // TODO: Add the payload
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
@@ -318,7 +317,7 @@ fn convert_umsg_to_vsomeip_msg(
         }
         UMessageType::UMESSAGE_TYPE_REQUEST => {
             // Implementation goes here
-            let vsomeip_msg =
+            let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
@@ -337,13 +336,23 @@ fn convert_umsg_to_vsomeip_msg(
 
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
 
-            // TODO: Add the payload
+            let payload = {
+                if let Some(bytes) = umsg.payload.clone() {
+                    bytes.to_vec()
+                } else {
+                    Vec::new()
+                }
+            };
+            let mut vsomeip_payload =
+                make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
+            set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
+            set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
 
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
             // Implementation goes here
-            let vsomeip_msg =
+            let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
@@ -374,7 +383,17 @@ fn convert_umsg_to_vsomeip_msg(
                 get_pinned_message_base(&vsomeip_msg)
                     .set_message_type(vsomeip::message_type_e::MT_RESPONSE);
 
-                // TODO: Add the payload
+                let payload = {
+                    if let Some(bytes) = umsg.payload.clone() {
+                        bytes.to_vec()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                let mut vsomeip_payload =
+                    make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
+                set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
+                set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
             } else {
                 // TODO: Perform mapping from uProtocol UCode contained in commstatus into vsomeip::return_code_e
                 get_pinned_message_base(&vsomeip_msg)
