@@ -22,8 +22,11 @@ use tokio::sync::oneshot;
 
 use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
-use vsomeip_sys::glue::{make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper, make_message_wrapper};
-use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_runtime};
+use vsomeip_sys::glue::{
+    make_application_wrapper, make_message_wrapper, make_runtime_wrapper, ApplicationWrapper,
+    MessageWrapper, RuntimeWrapper,
+};
+use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_message_base, get_pinned_runtime};
 use vsomeip_sys::vsomeip;
 
 pub mod transport;
@@ -229,11 +232,7 @@ impl UPClientVsomeip {
         let msg_to_send = _vsomeip_msg.as_ref().unwrap().get_shared_ptr();
         get_pinned_application(&_application_wrapper).send(msg_to_send);
 
-        Self::return_oneshot_value(
-            Ok(()),
-            _return_channel,
-        )
-        .await;
+        Self::return_oneshot_value(Ok(()), _return_channel).await;
     }
 
     async fn return_oneshot_value(
@@ -260,17 +259,50 @@ fn convert_umsg_to_vsomeip_msg(
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+    let Some(sink) = _umsg.attributes.sink.as_ref() else {
+        return Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "Message has no sink UUri",
+        ));
+    };
 
-    match _umsg.attributes.type_.enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED) {
+    let Some(source) = _umsg.attributes.source.as_ref() else {
+        return Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "Message has no source UUri",
+        ));
+    };
+
+    match _umsg
+        .attributes
+        .type_
+        .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
+    {
         UMessageType::UMESSAGE_TYPE_PUBLISH => {
             // Implementation goes here
-            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+            let vsomeip_msg =
+                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
 
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_REQUEST => {
             // Implementation goes here
-            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+            let vsomeip_msg =
+                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+            let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            // TODO: I _think_ that resource_id was intended to be a u16, but till we get confirmations
+            let (_, method_id) = split_u32_to_u16(sink.resource_id);
+            get_pinned_message_base(&vsomeip_msg).set_method(method_id);
+            let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+            let (_, client_id) = split_u32_to_u16(source.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+
+            // where do we retrieve the _previous_ session ID such that we can increment it?
+            // or... perhaps since we're the only publisher, we're trivially able to do so?
+            let session_id = 0;
+            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
 
             Ok(vsomeip_msg)
         }
@@ -278,14 +310,30 @@ fn convert_umsg_to_vsomeip_msg(
             // Implementation goes here
             // TODO -- this should be create_response, but that takes a &SharedPtr<message> which
             //  should be the original request message
-            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+            let vsomeip_msg =
+                make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
 
             Ok(vsomeip_msg)
         }
         _ => {
-            return Err(UStatus::fail_with_code(UCode::INTERNAL, "Trying to convert an unspecified or notification message type."));
+            return Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Trying to convert an unspecified or notification message type.",
+            ));
         }
     }
+}
 
+fn split_u32_to_u16(value: u32) -> (u16, u16) {
+    let most_significant_bits = (value >> 16) as u16;
+    let least_significant_bits = (value & 0xFFFF) as u16;
+    (most_significant_bits, least_significant_bits)
+}
 
+fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
+    let byte1 = (value >> 24) as u8;
+    let byte2 = (value >> 16 & 0xFF) as u8;
+    let byte3 = (value >> 8 & 0xFF) as u8;
+    let byte4 = (value & 0xFF) as u8;
+    (byte1, byte2, byte3, byte4)
 }
