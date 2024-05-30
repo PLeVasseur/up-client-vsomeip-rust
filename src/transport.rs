@@ -209,8 +209,5 @@ impl UTransport for UPClientVsomeip {
 mod tests {
     use crate::UPClientVsomeip;
 
-    fn test_constructing_client() {
-
-    }
-
+    fn test_constructing_client() {}
 }

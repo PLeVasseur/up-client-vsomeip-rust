@@ -11,21 +11,18 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use std::path::Path;
 use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
+use std::path::Path;
 use std::sync::OnceLock;
 use std::thread;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use up_rust::{UCode, UMessage, UStatus, UUri};
+use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
-use vsomeip_sys::glue::{
-    make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper,
-    RuntimeWrapper,
-};
+use vsomeip_sys::glue::{make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper, make_message_wrapper};
 use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_runtime};
 use vsomeip_sys::vsomeip;
 
@@ -56,7 +53,10 @@ pub struct UPClientVsomeip {
 impl UPClientVsomeip {
     pub fn new_with_config(app_name: &str, config_path: &Path) -> Result<Self, UStatus> {
         if !config_path.exists() {
-            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("Configuration file not found at: {}", config_path)));
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!("Configuration file not found at: {:?}", config_path),
+            ));
         }
 
         Self::new_internal(app_name, Some(config_path))
@@ -85,7 +85,12 @@ impl UPClientVsomeip {
         APP_NAME.get().expect("APP_NAME has not been initialized")
     }
 
-    fn app_event_loop(app_name: &str, mut rx_to_event_loop: Receiver<TransportCommand>, config_path: Option<&Path>) {
+    fn app_event_loop(
+        app_name: &str,
+        mut rx_to_event_loop: Receiver<TransportCommand>,
+        config_path: Option<&Path>,
+    ) {
+        let config_path = config_path.map(|p| p.to_path_buf());
         let app_name = app_name.to_string();
         thread::spawn(move || {
             // Create a new single-threaded runtime
@@ -102,7 +107,8 @@ impl UPClientVsomeip {
                         let config_path_str = config_path.display().to_string();
                         let_cxx_string!(config_path_cxx_str = config_path_str);
                         make_application_wrapper(
-                            get_pinned_runtime(&runtime_wrapper).create_application1(&app_name_cxx, &config_path_cxx_str),
+                            get_pinned_runtime(&runtime_wrapper)
+                                .create_application1(&app_name_cxx, &config_path_cxx_str),
                         )
                     } else {
                         make_application_wrapper(
@@ -138,12 +144,15 @@ impl UPClientVsomeip {
                                 &runtime_wrapper,
                             )
                         }
-                        TransportCommand::Send(umsg, return_channel) => Self::send_internal(
-                            umsg,
-                            return_channel,
-                            &application_wrapper,
-                            &runtime_wrapper,
-                        ),
+                        TransportCommand::Send(umsg, return_channel) => {
+                            Self::send_internal(
+                                umsg,
+                                return_channel,
+                                &application_wrapper,
+                                &runtime_wrapper,
+                            )
+                            .await
+                        }
                     }
                 }
             });
@@ -173,17 +182,67 @@ impl UPClientVsomeip {
         todo!()
     }
 
-    fn send_internal(
-        _umsg: UMessage,
+    async fn send_internal(
+        umsg: UMessage,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
         _application_wrapper: &UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
+        match umsg
+            .attributes
+            .type_
+            .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
+        {
+            UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
+                Self::return_oneshot_value(
+                    Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Unspecified message type not supported",
+                    )),
+                    _return_channel,
+                )
+                .await;
+                return;
+            }
+            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
+                Self::return_oneshot_value(
+                    Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Notification is not supported",
+                    )),
+                    _return_channel,
+                )
+                .await;
+                return;
+            }
+            UMessageType::UMESSAGE_TYPE_PUBLISH
+            | UMessageType::UMESSAGE_TYPE_REQUEST
+            | UMessageType::UMESSAGE_TYPE_RESPONSE => {
+                // TODO: Add logging that we succeeded and proceed...
+            }
+        }
+
         // Implementation goes here
         let _vsomeip_msg =
-            convert_umsg_to_vsomeip_msg(&_umsg, _application_wrapper, _runtime_wrapper);
+            convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
 
-        todo!()
+        let msg_to_send = _vsomeip_msg.as_ref().unwrap().get_shared_ptr();
+        get_pinned_application(&_application_wrapper).send(msg_to_send);
+
+        Self::return_oneshot_value(
+            Ok(()),
+            _return_channel,
+        )
+        .await;
+    }
+
+    async fn return_oneshot_value(
+        result: Result<(), UStatus>,
+        tx: oneshot::Sender<Result<(), UStatus>>,
+    ) {
+        if let Err(_err) = tx.send(result) {
+            // TODO: Add logging here that we couldn't return a result
+        }
     }
 }
 
@@ -200,7 +259,33 @@ fn convert_umsg_to_vsomeip_msg(
     _umsg: &UMessage,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-) -> UniquePtr<MessageWrapper> {
-    // Implementation goes here
-    todo!()
+) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+
+    match _umsg.attributes.type_.enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED) {
+        UMessageType::UMESSAGE_TYPE_PUBLISH => {
+            // Implementation goes here
+            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+
+            Ok(vsomeip_msg)
+        }
+        UMessageType::UMESSAGE_TYPE_REQUEST => {
+            // Implementation goes here
+            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+
+            Ok(vsomeip_msg)
+        }
+        UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            // Implementation goes here
+            // TODO -- this should be create_response, but that takes a &SharedPtr<message> which
+            //  should be the original request message
+            let vsomeip_msg = make_message_wrapper(get_pinned_runtime(&_runtime_wrapper).create_request(true));
+
+            Ok(vsomeip_msg)
+        }
+        _ => {
+            return Err(UStatus::fail_with_code(UCode::INTERNAL, "Trying to convert an unspecified or notification message type."));
+        }
+    }
+
+
 }
