@@ -23,10 +23,13 @@ use tokio::sync::oneshot;
 use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
-    make_application_wrapper, make_message_wrapper, make_runtime_wrapper, ApplicationWrapper,
-    MessageWrapper, RuntimeWrapper,
+    make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
+    ApplicationWrapper, MessageWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_message_base, get_pinned_runtime};
+use vsomeip_sys::safe_glue::{
+    get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime,
+    set_data_safe, set_message_payload,
+};
 use vsomeip_sys::vsomeip;
 
 pub mod transport;
@@ -280,9 +283,8 @@ fn convert_umsg_to_vsomeip_msg(
     {
         UMessageType::UMESSAGE_TYPE_PUBLISH => {
             // Implementation goes here
-            let vsomeip_msg = make_message_wrapper(
-                get_pinned_runtime(runtime_wrapper).create_notification(true),
-            );
+            let mut vsomeip_msg =
+                make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_notification(true));
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let (_, method_id) = split_u32_to_u16(source.resource_id);
@@ -300,6 +302,17 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
 
             // TODO: Add the payload
+            let payload = {
+                if let Some(bytes) = umsg.payload.clone() {
+                    bytes.to_vec()
+                } else {
+                    Vec::new()
+                }
+            };
+            let mut vsomeip_payload =
+                make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
+            set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
+            set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
 
             Ok(vsomeip_msg)
         }
@@ -330,8 +343,6 @@ fn convert_umsg_to_vsomeip_msg(
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
             // Implementation goes here
-            // TODO -- this should be create_response, but that takes a &SharedPtr<message> which
-            //  should be the original request message
             let vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
@@ -374,12 +385,10 @@ fn convert_umsg_to_vsomeip_msg(
 
             Ok(vsomeip_msg)
         }
-        _ => {
-            Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
-                "Trying to convert an unspecified or notification message type.",
-            ))
-        }
+        _ => Err(UStatus::fail_with_code(
+            UCode::INTERNAL,
+            "Trying to convert an unspecified or notification message type.",
+        )),
     }
 }
 
