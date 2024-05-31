@@ -93,6 +93,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 return;
             };
 
+            // TODO: Replace with the log crate
             println!("Calling extern function #{}", listener_id);
             let registry = LISTENER_REGISTRY.lock().unwrap();
             if let Some(listener) = registry.get(&listener_id) {

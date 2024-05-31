@@ -14,8 +14,9 @@
 use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
 use protobuf::Enum;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -23,6 +24,7 @@ use tokio::sync::oneshot;
 
 use up_rust::{
     UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUIDBuilder, UUri,
+    UUID,
 };
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
@@ -51,10 +53,18 @@ enum TransportCommand {
     Send(UMessage, oneshot::Sender<Result<(), UStatus>>),
 }
 
+type ClientId = u16;
+type ReqId = UUID;
+type SessionId = u16;
+
 lazy_static! {
     static ref APP_NAME: OnceLock<String> = OnceLock::new();
     static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
     static ref UE_ID: OnceLock<u16> = OnceLock::new();
+    static ref UE_REQUEST_CORRELATION: Mutex<HashMap<ClientId, ReqId>> = Mutex::new(HashMap::new());
+    static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, ClientId>> = Mutex::new(HashMap::new());
+    static ref CLIENT_ID_SESSION_ID_TRACKING: Mutex<HashMap<ClientId, SessionId>> =
+        Mutex::new(HashMap::new());
 }
 
 pub struct UPClientVsomeip {
@@ -483,14 +493,9 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-
-            // where do we retrieve the _previous_ session ID such that we can increment it?
-            // or... perhaps since we're the only publisher, we're trivially able to do so?
-            let session_id = 0;
+            let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
-
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
@@ -511,21 +516,16 @@ fn convert_umsg_to_vsomeip_msg(
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
-            // TODO: I _think_ that resource_id was intended to be a u16, but till we get confirmations
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
             let (_, client_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
-
-            // where do we retrieve the _previous_ session ID such that we can increment it?
-            // or... perhaps since we're the only publisher, we're trivially able to do so?
-            let session_id = 0;
+            // TODO: When the SOME/IP RESPONSE is crafted within the mE, does it increment the session ID?
+            let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
-
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
@@ -553,12 +553,8 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-
-            // we need to keep track of what the session_id should be based on identifying
-            // characteristics of the UMessage we would have gotten in register_listener callback
-            let session_id: u16 = 0;
+            let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-
             let ok = {
                 if let Some(commstatus) = umsg.attributes.commstatus {
                     let commstatus = commstatus.enum_value_or(UCode::UNIMPLEMENTED);
@@ -567,11 +563,9 @@ fn convert_umsg_to_vsomeip_msg(
                     false
                 }
             };
-
             if ok {
                 get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
-                get_pinned_message_base(&vsomeip_msg)
-                    .set_message_type(vsomeip::message_type_e::MT_RESPONSE);
+                get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_RESPONSE);
 
                 let payload = {
                     if let Some(bytes) = umsg.payload.clone() {
@@ -613,4 +607,13 @@ fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     let byte3 = (value >> 8 & 0xFF) as u8;
     let byte4 = (value & 0xFF) as u8;
     (byte1, byte2, byte3, byte4)
+}
+
+fn retrieve_session_id(client_id: ClientId) -> SessionId {
+    let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.lock().unwrap();
+
+    let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(0);
+    let returned_session_id = *current_sesion_id;
+    *current_sesion_id += 1;
+    returned_session_id
 }
