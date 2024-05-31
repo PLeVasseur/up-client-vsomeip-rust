@@ -23,8 +23,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use up_rust::{
-    UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUIDBuilder, UUri,
-    UUID,
+    UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri, UUID,
 };
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
@@ -274,7 +273,20 @@ impl UPClientVsomeip {
             UMessageType::UMESSAGE_TYPE_PUBLISH
             | UMessageType::UMESSAGE_TYPE_REQUEST
             | UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                // TODO: Add logging that we succeeded and proceed...
+                // TODO: Add logging that we succeeded
+
+                let vsomeip_msg_res =
+                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
+                match vsomeip_msg_res {
+                    Ok(vsomeip_msg) => {
+                        // TODO: Add logging here that we succeeded
+                        let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
+                        get_pinned_application(_application_wrapper).send(shared_ptr_message);
+                    }
+                    Err(_e) => {
+                        // TODO: Add logging that we failed
+                    }
+                }
             }
         }
 
