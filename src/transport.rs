@@ -28,8 +28,9 @@ use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_run
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 
-use crate::UPClientVsomeip;
+use crate::is_point_to_point_message;
 use crate::{convert_vsomeip_msg_to_umsg, TransportCommand};
+use crate::{determine_registration_type, RegistrationType, UPClientVsomeip};
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 1;
 
@@ -89,6 +90,12 @@ impl UTransport for UPClientVsomeip {
             source_filter, sink_filter_str
         );
 
+        let registration_type_res =
+            determine_registration_type(source_filter, &sink_filter.cloned());
+        let Ok(registration_type) = registration_type_res else {
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
+        };
+
         let listener_id = {
             let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
             if let Some(&id) = free_ids.iter().next() {
@@ -101,6 +108,11 @@ impl UTransport for UPClientVsomeip {
                 ));
             }
         };
+
+        if registration_type == RegistrationType::AllPointToPoint {
+            let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
+            point_to_point_listeners.insert(listener_id);
+        }
 
         let comp_listener = ComparableListener::new(Arc::clone(&listener));
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
@@ -155,7 +167,21 @@ impl UTransport for UPClientVsomeip {
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
 
+        let registration_type_res =
+            determine_registration_type(source_filter, &sink_filter.cloned());
+        let Ok(registration_type) = registration_type_res else {
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
+        };
+
         let comp_listener = ComparableListener::new(listener);
+
+        // consider using a worker pool for these, otherwise this will block
+        let (tx, rx) = oneshot::channel();
+        let _tx_res = self
+            .tx_to_event_loop
+            .send(TransportCommand::UnregisterListener(src, sink, tx))
+            .await;
+        await_internal_function(rx).await?;
 
         let listener_id = {
             let mut id_map = LISTENER_ID_MAP.lock().unwrap();
@@ -184,13 +210,12 @@ impl UTransport for UPClientVsomeip {
             free_ids.insert(listener_id);
         }
 
-        // consider using a worker pool for these, otherwise this will block
-        let (tx, rx) = oneshot::channel();
-        let _tx_res = self
-            .tx_to_event_loop
-            .send(TransportCommand::UnregisterListener(src, sink, tx))
-            .await;
-        await_internal_function(rx).await
+        if registration_type == RegistrationType::AllPointToPoint {
+            let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
+            point_to_point_listeners.remove(&listener_id);
+        }
+
+        Ok(())
     }
 
     async fn receive(

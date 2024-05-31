@@ -71,19 +71,31 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             };
             static ref LISTENER_ID_MAP: Mutex<HashMap<(UUri, Option<UUri>, ComparableListener), usize>> =
                 Mutex::new(HashMap::new());
+            static ref POINT_TO_POINT_LISTENERS: Mutex<HashSet<usize>> = Mutex::new(HashSet::new());
         }
 
         #generated_fns
 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
-            let cloned_vsomeip_msg = vsomeip_msg.clone();
-            let mut vsomeip_msg_wrapper = make_message_wrapper(cloned_vsomeip_msg);
             let app_name = UPClientVsomeip::get_app_name();
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
             let_cxx_string!(app_name_cxx = app_name);
             let application_wrapper = make_application_wrapper(
                 get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
             );
+            let cloned_vsomeip_msg = vsomeip_msg.clone();
+            let mut vsomeip_msg_wrapper = make_message_wrapper(cloned_vsomeip_msg);
+
+            let point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
+            if point_to_point_listeners.contains(&listener_id) {
+                if !is_point_to_point_message(&mut vsomeip_msg_wrapper) {
+                    // TODO: Log an INFO level message, since it's fairly likely to occur
+                    //  and we don't want to spam the log
+                } else {
+                    // TODO: Add logging here that this proceeded
+                }
+            }
+
             let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
 
             let Ok(umsg) = res else {

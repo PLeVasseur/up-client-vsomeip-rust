@@ -58,6 +58,14 @@ type ReqId = UUID;
 type SessionId = u16;
 type RequestId = u32;
 
+#[derive(PartialEq)]
+enum RegistrationType {
+    Publish,
+    Request,
+    Response,
+    AllPointToPoint,
+}
+
 lazy_static! {
     static ref APP_NAME: OnceLock<String> = OnceLock::new();
     static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
@@ -228,21 +236,20 @@ impl UPClientVsomeip {
     ) {
         // TODO: May want to add additional validation up here on the UUri filters
 
-        // infer the type of message desired based on the filters provided
-        let registration_type = {
-            if let Some(sink_filter) = &_sink_filter {
-                if sink_filter.resource_id == 0 {
-                    UMessageType::UMESSAGE_TYPE_RESPONSE
-                } else {
-                    UMessageType::UMESSAGE_TYPE_REQUEST
-                }
-            } else {
-                UMessageType::UMESSAGE_TYPE_PUBLISH
-            }
+        let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
+        let Ok(registration_type) = registration_type_res else {
+            Self::return_oneshot_result(
+                Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "Unable to map source and sink filters to uProtocol message type",
+                )),
+                _return_channel,
+            )
+            .await;
+            return;
         };
-
         match registration_type {
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+            RegistrationType::Publish => {
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
@@ -257,7 +264,7 @@ impl UPClientVsomeip {
 
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
+            RegistrationType::Request => {
                 let Some(sink_filter) = _sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
@@ -284,7 +291,7 @@ impl UPClientVsomeip {
 
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            RegistrationType::Response => {
                 let Some(sink_filter) = _sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
@@ -311,16 +318,28 @@ impl UPClientVsomeip {
 
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
-            _ => {
-                // TODO: Add logging that we failed
-                Self::return_oneshot_result(
-                    Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        "Only able to register for Publish, Request, Response",
-                    )),
-                    _return_channel,
-                )
-                .await;
+            RegistrationType::AllPointToPoint => {
+                // TODO: There's another layer of indirection needed here, as when we register for
+                //  "all" we then need to ensure that what we have received is strictly one of:
+                //    * REQUEST
+                //    * RESPONSE
+                //    * ERROR
+                //  Or in other words, we want to avoid calling the callback we were given with
+                //   a SOME/IP NOTIFICATION
+
+                let service_id = vsomeip::ANY_SERVICE;
+                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let method_id = vsomeip::ANY_METHOD;
+
+                register_message_handler_fn_ptr_safe(
+                    _application_wrapper,
+                    service_id,
+                    instance_id,
+                    method_id,
+                    _msg_handler,
+                );
+
+                Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
         }
     }
@@ -756,4 +775,44 @@ fn retrieve_session_id(client_id: ClientId) -> SessionId {
     let returned_session_id = *current_sesion_id;
     *current_sesion_id += 1;
     returned_session_id
+}
+
+// infer the type of message desired based on the filters provided
+fn determine_registration_type(
+    _source_filter: &UUri,
+    sink_filter: &Option<UUri>,
+) -> Result<RegistrationType, UStatus> {
+    if let Some(sink_filter) = &sink_filter {
+        // determine if we're in the uStreamer use-case of capturing all point-to-point messages
+        let streamer_use_case = {
+            _source_filter.authority_name == ME_AUTHORITY // TODO: Is this good enough? Maybe have configurable in UPClientVsomeip?
+            && _source_filter.ue_id == 0x0000_FFFF
+            && _source_filter.ue_version_major == 0xFF
+            && _source_filter.resource_id == 0xFFFF
+            && sink_filter.authority_name == "*"
+            && sink_filter.ue_id == 0x0000_FFFF
+            && sink_filter.ue_version_major == 0xFF
+            && sink_filter.resource_id == 0xFFFF
+        };
+
+        if streamer_use_case {
+            return Ok(RegistrationType::AllPointToPoint);
+        }
+
+        if sink_filter.resource_id == 0 {
+            Ok(RegistrationType::Response)
+        } else {
+            Ok(RegistrationType::Request)
+        }
+    } else {
+        Ok(RegistrationType::Publish)
+    }
+}
+
+fn is_point_to_point_message(_vsomeip_message: &mut UniquePtr<MessageWrapper>) -> bool {
+    let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
+    matches!(
+        msg_type,
+        message_type_e::MT_REQUEST | message_type_e::MT_RESPONSE | message_type_e::MT_ERROR
+    )
 }
