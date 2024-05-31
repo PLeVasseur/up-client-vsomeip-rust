@@ -16,12 +16,13 @@ use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::oneshot;
 use tokio::time::timeout;
+
+use log::{info, trace};
 
 use up_rust::{ComparableListener, UCode, UListener, UMessage, UStatus, UTransport, UUri};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
@@ -35,7 +36,7 @@ use crate::{convert_vsomeip_msg_to_umsg, TransportCommand};
 use crate::{determine_registration_type, RegistrationType, UPClientVsomeip};
 use crate::{ClientId, ReqId, RequestId, SessionId};
 
-const INTERNAL_FUNCTION_TIMEOUT: u64 = 1;
+const INTERNAL_FUNCTION_TIMEOUT: u64 = 2;
 
 generate_message_handler_extern_c_fns!(10000);
 
@@ -88,8 +89,8 @@ impl UTransport for UPClientVsomeip {
                 "".parse().unwrap()
             }
         };
-        println!(
-            "Registering listener for source filter: {:?}{}",
+        info!(
+            "Registering listener for source filter: {:?} sink_filter: {}",
             source_filter, sink_filter_str
         );
 
@@ -112,6 +113,8 @@ impl UTransport for UPClientVsomeip {
             }
         };
 
+        trace!("Obtained listener_id: {}", listener_id);
+
         if registration_type == RegistrationType::AllPointToPoint {
             let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
             point_to_point_listeners.insert(listener_id);
@@ -125,6 +128,8 @@ impl UTransport for UPClientVsomeip {
             id_map.insert(key, listener_id);
         }
 
+        trace!("Inserted into LISTENER_ID_MAP");
+
         LISTENER_REGISTRY
             .lock()
             .unwrap()
@@ -134,6 +139,8 @@ impl UTransport for UPClientVsomeip {
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
+
+        trace!("Obtained extern_fn");
 
         // consider using a worker pool for these, otherwise this will block
         let (tx, rx) = oneshot::channel();
@@ -234,8 +241,4 @@ impl UTransport for UPClientVsomeip {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::UPClientVsomeip;
-
-    fn test_constructing_client() {}
-}
+mod tests {}

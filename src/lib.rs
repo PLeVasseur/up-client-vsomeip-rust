@@ -19,6 +19,8 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
+use log::trace;
+
 use up_rust::{
     UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri, UUID,
 };
@@ -41,6 +43,10 @@ use transport::{
     APP_NAME, AUTHORITY_NAME, CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, UE_ID,
     UE_REQUEST_CORRELATION,
 };
+
+const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
+const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
+const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
 
 const ME_AUTHORITY: &str = "me_authority";
 
@@ -108,19 +114,26 @@ impl UPClientVsomeip {
         ue_id: u16,
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
+        // TODO: Consider if we want to allow the outer program to set this up
+        //  Seems reasonable
+        // env_logger::init();
+
         let (tx, rx) = channel(10000);
 
-        APP_NAME
-            .set(app_name.to_string())
-            .expect("APP_NAME was already set!");
+        let mut app_name_static = APP_NAME.lock().unwrap();
+        *app_name_static = app_name.to_string();
 
-        AUTHORITY_NAME
-            .set(authority_name.to_string())
-            .expect("AUTHORITY_NAME was already set!");
+        let mut authority_name_static = AUTHORITY_NAME.lock().unwrap();
+        *authority_name_static = authority_name.to_string();
 
-        UE_ID.set(ue_id).expect("UE_ID was already set!");
+        let mut ue_id_static = UE_ID.lock().unwrap();
+        *ue_id_static = ue_id;
 
-        Self::app_event_loop(app_name, rx, config_path);
+        // TODO: This should return a Result<(), UStatus> to allow us to fail out if we failed
+        //  to create a vsomeip application
+        Self::start_app(app_name, config_path);
+
+        Self::app_event_loop(app_name, rx);
 
         Ok(Self {
             app_name: app_name.parse().unwrap(),
@@ -130,24 +143,44 @@ impl UPClientVsomeip {
         })
     }
 
-    fn get_app_name() -> &'static String {
-        APP_NAME.get().expect("APP_NAME has not been initialized")
-    }
-
-    fn get_authority_name() -> &'static String {
-        AUTHORITY_NAME
-            .get()
-            .expect("APP_NAME has not been initialized")
-    }
-
-    fn app_event_loop(
-        app_name: &str,
-        mut rx_to_event_loop: Receiver<TransportCommand>,
-        config_path: Option<&Path>,
-    ) {
+    fn start_app(app_name: &str, config_path: Option<&Path>) {
+        let app_name = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
+
+        thread::spawn(move || {
+            trace!("Within start_app, spawned dedicated thread to park app");
+            let config_path = config_path.map(|p| p.to_path_buf());
+            let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
+            let_cxx_string!(app_name_cxx = app_name);
+            // TODO: Add some additional checks to ensure we succeeded, e.g. check not null pointer
+            //  This is probably best handled at a lower level in vsomeip-sys
+            //  and surfacing a new API
+            let application_wrapper = {
+                if let Some(config_path) = config_path {
+                    let config_path_str = config_path.display().to_string();
+                    let_cxx_string!(config_path_cxx_str = config_path_str);
+                    make_application_wrapper(
+                        get_pinned_runtime(&runtime_wrapper)
+                            .create_application1(&app_name_cxx, &config_path_cxx_str),
+                    )
+                } else {
+                    make_application_wrapper(
+                        get_pinned_runtime(&runtime_wrapper).create_application(&app_name_cxx),
+                    )
+                }
+            };
+
+            get_pinned_application(&application_wrapper).init();
+            // thread is blocked by vsomeip here
+            get_pinned_application(&application_wrapper).start();
+        });
+    }
+
+    fn app_event_loop(app_name: &str, mut rx_to_event_loop: Receiver<TransportCommand>) {
         let app_name = app_name.to_string();
         thread::spawn(move || {
+            trace!("On dedicated thread");
+
             // Create a new single-threaded runtime
             let runtime = Builder::new_current_thread()
                 .enable_all()
@@ -155,27 +188,18 @@ impl UPClientVsomeip {
                 .expect("Failed to create Tokio runtime");
 
             runtime.block_on(async move {
+                trace!("Within blocked runtime");
+
                 let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
                 let_cxx_string!(app_name_cxx = app_name);
-                let mut application_wrapper = {
-                    if let Some(config_path) = config_path {
-                        let config_path_str = config_path.display().to_string();
-                        let_cxx_string!(config_path_cxx_str = config_path_str);
-                        make_application_wrapper(
-                            get_pinned_runtime(&runtime_wrapper)
-                                .create_application1(&app_name_cxx, &config_path_cxx_str),
-                        )
-                    } else {
-                        make_application_wrapper(
-                            get_pinned_runtime(&runtime_wrapper).create_application(&app_name_cxx),
-                        )
-                    }
-                };
+                let mut application_wrapper = make_application_wrapper(
+                    get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
+                );
 
-                get_pinned_application(&application_wrapper).init();
-                get_pinned_application(&application_wrapper).start();
-
+                trace!("Entering command loop");
                 while let Some(cmd) = rx_to_event_loop.recv().await {
+                    trace!("Received TransportCommand");
+
                     match cmd {
                         TransportCommand::RegisterListener(
                             src,
@@ -183,6 +207,12 @@ impl UPClientVsomeip {
                             msg_handler,
                             return_channel,
                         ) => {
+                            trace!(
+                                "{}:{} - Attempting to register listener",
+                                UP_CLIENT_VSOMEIP_TAG,
+                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP
+                            );
+
                             Self::register_listener_internal(
                                 src,
                                 sink,
@@ -214,7 +244,11 @@ impl UPClientVsomeip {
                     }
                 }
             });
+            trace!("Parking dedicated thread");
+            thread::park();
+            trace!("Made past dedicated thread park");
         });
+        trace!("Past thread spawn");
     }
 
     async fn register_listener_internal(
@@ -226,6 +260,11 @@ impl UPClientVsomeip {
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
         // TODO: May want to add additional validation up here on the UUri filters
+
+        trace!("{}:{} - Attempting to register: source_filter: {:?} & sink_filter: {:?}",
+            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+            _source_filter, _sink_filter
+        );
 
         let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
         let Ok(registration_type) = registration_type_res else {
@@ -241,6 +280,9 @@ impl UPClientVsomeip {
         };
         match registration_type {
             RegistrationType::Publish => {
+                trace!("{}:{} - Registering for Publish style messages.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
@@ -253,9 +295,16 @@ impl UPClientVsomeip {
                     _msg_handler,
                 );
 
+                trace!("{}:{} - Registered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
             RegistrationType::Request => {
+                trace!("{}:{} - Registering for Request style messages.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
                 let Some(sink_filter) = _sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
@@ -280,9 +329,16 @@ impl UPClientVsomeip {
                     _msg_handler,
                 );
 
+                trace!("{}:{} - Registered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
             RegistrationType::Response => {
+                trace!("{}:{} - Registering for Response style messages.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
                 let Some(sink_filter) = _sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
@@ -305,6 +361,10 @@ impl UPClientVsomeip {
                     instance_id,
                     method_id,
                     _msg_handler,
+                );
+
+                trace!("{}:{} - Registered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
@@ -319,6 +379,10 @@ impl UPClientVsomeip {
                 //   a SOME/IP NOTIFICATION
                 // This indirection is handled within the code generated by proc macro
 
+                trace!("{}:{} - Registering for all point-to-point style messages.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+
                 let service_id = vsomeip::ANY_SERVICE;
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let method_id = vsomeip::ANY_METHOD;
@@ -331,6 +395,10 @@ impl UPClientVsomeip {
                     _msg_handler,
                 );
 
+                trace!("{}:{} - Registered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+                
                 Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
         }
@@ -435,10 +503,12 @@ fn convert_vsomeip_msg_to_umsg(
     let payload = get_message_payload(_vsomeip_message);
     let payload_bytes = get_data_safe(&payload);
 
+    let authority_name = { AUTHORITY_NAME.lock().unwrap().clone() };
+
     match msg_type {
         message_type_e::MT_REQUEST => {
             let sink = UUri {
-                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                authority_name,
                 ue_id: service_id as u32,
                 ue_version_major: interface_version as u32,
                 resource_id: method_id as u32,
@@ -506,7 +576,7 @@ fn convert_vsomeip_msg_to_umsg(
         }
         message_type_e::MT_RESPONSE => {
             let sink = UUri {
-                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                authority_name,
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"
@@ -544,7 +614,7 @@ fn convert_vsomeip_msg_to_umsg(
         }
         message_type_e::MT_ERROR => {
             let sink = UUri {
-                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                authority_name,
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"
@@ -589,6 +659,14 @@ fn convert_vsomeip_msg_to_umsg(
         )),
     }
 }
+
+// TODO: We need to ensure that we properly cleanup / unregister all message handlers
+//  and then remote the application
+// impl Drop for UPClientVsomeip {
+//     fn drop(&mut self) {
+//         todo!()
+//     }
+// }
 
 fn convert_umsg_to_vsomeip_msg(
     umsg: &UMessage,

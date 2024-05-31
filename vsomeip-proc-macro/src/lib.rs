@@ -66,9 +66,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         //  UPClientVsomeip per process, which is fine in practice, but will make unit tests and integration
         //  tests more painful
         lazy_static! {
-            pub static ref APP_NAME: OnceLock<String> = OnceLock::new();
-            pub static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
-            pub static ref UE_ID: OnceLock<u16> = OnceLock::new();
+            pub static ref APP_NAME: Mutex<String> = Mutex::new(String::new());
+            pub static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
+            pub static ref UE_ID: Mutex<u16> = Mutex::new(0);
             pub static ref UE_REQUEST_CORRELATION: Mutex<HashMap<ClientId, ReqId>> = Mutex::new(HashMap::new());
             pub static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, RequestId>> =
                 Mutex::new(HashMap::new());
@@ -94,9 +94,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         #generated_fns
 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
-            let app_name = UPClientVsomeip::get_app_name();
+            let app_name = APP_NAME.lock().unwrap();
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
-            let_cxx_string!(app_name_cxx = app_name);
+            let_cxx_string!(app_name_cxx = &*app_name);
             let application_wrapper = make_application_wrapper(
                 get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
             );
