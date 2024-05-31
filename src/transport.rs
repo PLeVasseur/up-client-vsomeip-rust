@@ -16,8 +16,10 @@ use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
@@ -31,6 +33,7 @@ use vsomeip_sys::vsomeip;
 use crate::is_point_to_point_message;
 use crate::{convert_vsomeip_msg_to_umsg, TransportCommand};
 use crate::{determine_registration_type, RegistrationType, UPClientVsomeip};
+use crate::{ClientId, ReqId, RequestId, SessionId};
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 1;
 

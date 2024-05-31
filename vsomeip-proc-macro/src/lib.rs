@@ -62,6 +62,23 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
     let expanded = quote! {
 
+        // TODO: Architecting things this way with some lazy_static here means we can have only one
+        //  UPClientVsomeip per process, which is fine in practice, but will make unit tests and integration
+        //  tests more painful
+        lazy_static! {
+            pub static ref APP_NAME: OnceLock<String> = OnceLock::new();
+            pub static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
+            pub static ref UE_ID: OnceLock<u16> = OnceLock::new();
+            pub static ref UE_REQUEST_CORRELATION: Mutex<HashMap<ClientId, ReqId>> = Mutex::new(HashMap::new());
+            pub static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, RequestId>> =
+                Mutex::new(HashMap::new());
+            pub static ref CLIENT_ID_SESSION_ID_TRACKING: Mutex<HashMap<ClientId, SessionId>> =
+                Mutex::new(HashMap::new());
+        }
+
+        // TODO: Architecting things this way with some lazy_static here means we can have only one
+        //  UPClientVsomeip per process, which is fine in practice, but will make unit tests and integration
+        //  tests more painful
         lazy_static! {
             static ref LISTENER_REGISTRY: Mutex<HashMap<usize, Arc<dyn UListener>>> =
                 Mutex::new(HashMap::new());
