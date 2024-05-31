@@ -845,12 +845,7 @@ fn convert_umsg_to_vsomeip_msg(
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-    let Some(sink) = umsg.attributes.sink.as_ref() else {
-        return Err(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
-            "Message has no sink UUri",
-        ));
-    };
+
 
     let Some(source) = umsg.attributes.source.as_ref() else {
         return Err(UStatus::fail_with_code(
@@ -872,7 +867,6 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let (_, _client_id) = split_u32_to_u16(sink.ue_id);
             let client_id = 0; // manually setting this to 0 as according to spec
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
@@ -895,6 +889,13 @@ fn convert_umsg_to_vsomeip_msg(
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_REQUEST => {
+            let Some(sink) = umsg.attributes.sink.as_ref() else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "Message has no sink UUri",
+                ));
+            };
+
             // Implementation goes here
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
@@ -935,6 +936,13 @@ fn convert_umsg_to_vsomeip_msg(
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            let Some(sink) = umsg.attributes.sink.as_ref() else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "Message has no sink UUri",
+                ));
+            };
+
             // Implementation goes here
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
