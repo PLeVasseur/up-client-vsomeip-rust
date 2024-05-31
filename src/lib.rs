@@ -304,17 +304,17 @@ fn convert_vsomeip_msg_to_umsg(
         message_type_e::MT_REQUEST => {
             let sink = UUri {
                 authority_name: UPClientVsomeip::get_authority_name().to_string(),
-                ue_id: client_id as u32,
-                ue_version_major: 1, // TODO: I don't see a way to get this
-                resource_id: 0,      // set to 0 as this is the resource_id of "me"
+                ue_id: service_id as u32,
+                ue_version_major: interface_version as u32,
+                resource_id: method_id as u32,
                 ..Default::default()
             };
 
             let source = UUri {
                 authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
-                ue_id: service_id as u32,
-                ue_version_major: interface_version as u32,
-                resource_id: method_id as u32,
+                ue_id: client_id as u32,
+                ue_version_major: 1, // TODO: I don't see a way to get this
+                resource_id: 0,      // set to 0 as this is the resource_id of "me"
                 ..Default::default()
             };
 
@@ -336,8 +336,37 @@ fn convert_vsomeip_msg_to_umsg(
         }
         message_type_e::MT_NOTIFICATION => {
             // TODO: Implement the logic here from the table
+            let sink = UUri {
+                authority_name: UPClientVsomeip::get_authority_name().to_string(),
+                ue_id: client_id as u32,
+                ue_version_major: 1, // TODO: I don't see a way to get this
+                resource_id: 0,      // set to 0 as this is the resource_id of "me"
+                ..Default::default()
+            };
 
-            Ok(UMessage::default())
+            let source = UUri {
+                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                ue_id: service_id as u32,
+                ue_version_major: interface_version as u32,
+                resource_id: method_id as u32,
+                ..Default::default()
+            };
+
+            // TODO: Need to perform correlation to get this, this is just stand-in
+            let req_id = UUIDBuilder::build();
+
+            let umsg_res = UMessageBuilder::response(sink, req_id, source)
+                .with_comm_status(UCode::OK.value())
+                .build();
+
+            let Ok(umsg) = umsg_res else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Unable to build UMessage from vsomeip message",
+                ));
+            };
+
+            Ok(umsg)
         }
         message_type_e::MT_RESPONSE => {
             let sink = UUri {
