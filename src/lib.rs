@@ -47,6 +47,7 @@ use transport::{
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
+const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 
 const ME_AUTHORITY: &str = "me_authority";
 
@@ -293,6 +294,22 @@ impl UPClientVsomeip {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
 
+                trace!(
+                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    service_id,
+                    instance_id,
+                    method_id
+                );
+
+                get_pinned_application(_application_wrapper).request_service(
+                    service_id,
+                    instance_id,
+                    vsomeip::ANY_MAJOR,
+                    vsomeip::ANY_MINOR,
+                );
+
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
                     service_id,
@@ -330,6 +347,15 @@ impl UPClientVsomeip {
                 let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+
+                trace!(
+                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    service_id,
+                    instance_id,
+                    method_id
+                );
 
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
@@ -369,6 +395,15 @@ impl UPClientVsomeip {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
+                trace!(
+                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    service_id,
+                    instance_id,
+                    method_id
+                );
+
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
                     service_id,
@@ -404,6 +439,15 @@ impl UPClientVsomeip {
                 let service_id = vsomeip::ANY_SERVICE;
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let method_id = vsomeip::ANY_METHOD;
+
+                trace!(
+                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    service_id,
+                    instance_id,
+                    method_id
+                );
 
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
@@ -627,8 +671,18 @@ impl UPClientVsomeip {
 
                 let vsomeip_msg_res =
                     convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
+
                 match vsomeip_msg_res {
                     Ok(vsomeip_msg) => {
+                        let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
+                        let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
+                        let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
+
+                        trace!("{}:{} Sending SOME/IP message with service: {} instance: {} method: {}",
+                            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                            service_id, instance_id, method_id
+                        );
+
                         // TODO: Add logging here that we succeeded
                         let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
                         get_pinned_application(_application_wrapper).send(shared_ptr_message);
@@ -845,8 +899,6 @@ fn convert_umsg_to_vsomeip_msg(
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-
-
     let Some(source) = umsg.attributes.source.as_ref() else {
         return Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
@@ -865,6 +917,7 @@ fn convert_umsg_to_vsomeip_msg(
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_notification(true));
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
             let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let client_id = 0; // manually setting this to 0 as according to spec
@@ -901,6 +954,7 @@ fn convert_umsg_to_vsomeip_msg(
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
@@ -949,6 +1003,7 @@ fn convert_umsg_to_vsomeip_msg(
 
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
+            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
