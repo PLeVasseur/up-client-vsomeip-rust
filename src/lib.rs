@@ -226,9 +226,11 @@ impl UPClientVsomeip {
         _application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
+        // TODO: May want to add additional validation up here on the UUri filters
+
         // infer the type of message desired based on the filters provided
         let registration_type = {
-            if let Some(sink_filter) = _sink_filter {
+            if let Some(sink_filter) = &_sink_filter {
                 if sink_filter.resource_id == 0 {
                     UMessageType::UMESSAGE_TYPE_RESPONSE
                 } else {
@@ -252,12 +254,62 @@ impl UPClientVsomeip {
                     method_id,
                     _msg_handler,
                 );
+
+                Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
             UMessageType::UMESSAGE_TYPE_REQUEST => {
-                // TODO: Implementation goes here
+                let Some(sink_filter) = _sink_filter else {
+                    Self::return_oneshot_result(
+                        Err(UStatus::fail_with_code(
+                            UCode::INVALID_ARGUMENT,
+                            "Request doesn't contain sink",
+                        )),
+                        _return_channel,
+                    )
+                    .await;
+                    return;
+                };
+
+                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+
+                register_message_handler_fn_ptr_safe(
+                    _application_wrapper,
+                    service_id,
+                    instance_id,
+                    method_id,
+                    _msg_handler,
+                );
+
+                Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                // TODO: Implementation goes here
+                let Some(sink_filter) = _sink_filter else {
+                    Self::return_oneshot_result(
+                        Err(UStatus::fail_with_code(
+                            UCode::INVALID_ARGUMENT,
+                            "Request doesn't contain sink",
+                        )),
+                        _return_channel,
+                    )
+                    .await;
+                    return;
+                };
+
+                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+
+                register_message_handler_fn_ptr_safe(
+                    _application_wrapper,
+                    service_id,
+                    instance_id,
+                    method_id,
+                    _msg_handler,
+                );
+
+                Self::return_oneshot_result(Ok(()), _return_channel).await;
             }
             _ => {
                 // TODO: Add logging that we failed
@@ -269,11 +321,8 @@ impl UPClientVsomeip {
                     _return_channel,
                 )
                 .await;
-                return;
             }
         }
-
-        Self::return_oneshot_result(Ok(()), _return_channel).await;
     }
 
     fn unregister_listener_internal(
@@ -397,7 +446,7 @@ fn convert_vsomeip_msg_to_umsg(
             //  Steven said Ivan posted something to a Slack thread; need to check
             //  Hmm, didn't find this. Asked Steven for help
             //  He pointed me to something about SOME/IP-SD, but not Request AFAICT
-            let ttl = 10;
+            let ttl = 1000;
 
             let umsg_res = UMessageBuilder::request(sink, source, ttl)
                 .with_comm_status(UCode::OK.value())
