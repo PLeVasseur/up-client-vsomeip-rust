@@ -56,13 +56,15 @@ enum TransportCommand {
 type ClientId = u16;
 type ReqId = UUID;
 type SessionId = u16;
+type RequestId = u32;
 
 lazy_static! {
     static ref APP_NAME: OnceLock<String> = OnceLock::new();
     static ref AUTHORITY_NAME: OnceLock<String> = OnceLock::new();
     static ref UE_ID: OnceLock<u16> = OnceLock::new();
     static ref UE_REQUEST_CORRELATION: Mutex<HashMap<ClientId, ReqId>> = Mutex::new(HashMap::new());
-    static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, ClientId>> = Mutex::new(HashMap::new());
+    static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, RequestId>> =
+        Mutex::new(HashMap::new());
     static ref CLIENT_ID_SESSION_ID_TRACKING: Mutex<HashMap<ClientId, SessionId>> =
         Mutex::new(HashMap::new());
 }
@@ -303,6 +305,7 @@ fn convert_vsomeip_msg_to_umsg(
 ) -> Result<UMessage, UStatus> {
     let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
 
+    let request_id = get_pinned_message_base(_vsomeip_message).get_request();
     let service_id = get_pinned_message_base(_vsomeip_message).get_service();
     let client_id = get_pinned_message_base(_vsomeip_message).get_client();
     let method_id = get_pinned_message_base(_vsomeip_message).get_method();
@@ -329,6 +332,7 @@ fn convert_vsomeip_msg_to_umsg(
             };
 
             // TODO: Not sure where to get this
+            //  Steven said Ivan posted something to a Slack thread; need to check
             let ttl = 10;
 
             let umsg_res = UMessageBuilder::request(sink, source, ttl)
@@ -341,6 +345,16 @@ fn convert_vsomeip_msg_to_umsg(
                     "Unable to build UMessage from vsomeip message",
                 ));
             };
+
+            // TODO: Remove .unwrap()
+            let req_id = umsg.attributes.id.as_ref().unwrap();
+            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
+            if me_request_correlation.get(req_id).is_none() {
+                me_request_correlation.insert(req_id.clone(), request_id);
+            } else {
+                // TODO: What do we do if we have a duplicate, already-existing pair?
+                //  Eject the previous one? Fail on this one?
+            }
 
             Ok(umsg)
         }
@@ -395,8 +409,13 @@ fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
-            // TODO: Need to perform correlation to get this, this is just stand-in
-            let req_id = UUIDBuilder::build();
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            let Some(req_id) = ue_request_correlation.remove(&client_id) else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    "Corresponding reqid not found for this SOME/IP RESPONSE",
+                ));
+            };
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::OK.value())
@@ -428,11 +447,17 @@ fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
-            // TODO: Need to perform correlation to get this, this is just stand-in
-            let req_id = UUIDBuilder::build();
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            let Some(req_id) = ue_request_correlation.remove(&client_id) else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    "Corresponding reqid not found for this SOME/IP RESPONSE",
+                ));
+            };
 
             // TODO: Check with Steven on if we should be passing along the payload in the error cases for Response
             // TODO: Need to do proper mapping from error code into commstatus, for now just set INTERNAL
+            //   YES - Copy over bytes in error case
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::INTERNAL.value())
                 .build();
@@ -522,6 +547,17 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
             let (_, client_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+
+            // TODO: Remove .unwrap()
+            let req_id = umsg.attributes.id.as_ref().unwrap();
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            if ue_request_correlation.get(&client_id).is_none() {
+                ue_request_correlation.insert(client_id, req_id.clone());
+            } else {
+                // TODO: What do we do if we have a duplicate, already-existing pair?
+                //  Eject the previous one? Fail on this one?
+            }
+
             // TODO: When the SOME/IP RESPONSE is crafted within the mE, does it increment the session ID?
             let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
@@ -549,11 +585,20 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let (_, client_id) = split_u32_to_u16(source.ue_id);
-            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            let session_id = retrieve_session_id(client_id);
+
+            // TODO: Remove .unwrap()
+            let req_id = umsg.attributes.id.as_ref().unwrap();
+            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
+            let Some(request_id) = me_request_correlation.remove(req_id) else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    "Corresponding SOME/IP Request ID not found for this Request UMessage's reqid",
+                ));
+            };
+            let (client_id, session_id) = split_u32_to_u16(request_id);
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
             let ok = {
                 if let Some(commstatus) = umsg.attributes.commstatus {
@@ -582,8 +627,8 @@ fn convert_umsg_to_vsomeip_msg(
                 // TODO: Perform mapping from uProtocol UCode contained in commstatus into vsomeip::return_code_e
                 get_pinned_message_base(&vsomeip_msg)
                     .set_return_code(vsomeip::return_code_e::E_NOT_OK);
-                get_pinned_message_base(&vsomeip_msg)
-                    .set_message_type(vsomeip::message_type_e::MT_ERROR);
+                get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_ERROR);
+                // TODO: Copy over bytes in error case
             }
 
             Ok(vsomeip_msg)
