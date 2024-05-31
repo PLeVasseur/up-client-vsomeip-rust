@@ -32,7 +32,8 @@ use vsomeip_sys::glue::{
 };
 use vsomeip_sys::safe_glue::{
     get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-    get_pinned_payload, get_pinned_runtime, set_data_safe, set_message_payload,
+    get_pinned_payload, get_pinned_runtime, register_message_handler_fn_ptr_safe, set_data_safe,
+    set_message_payload,
 };
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::message_type_e;
@@ -157,7 +158,7 @@ impl UPClientVsomeip {
             runtime.block_on(async move {
                 let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
                 let_cxx_string!(app_name_cxx = app_name);
-                let application_wrapper = {
+                let mut application_wrapper = {
                     if let Some(config_path) = config_path {
                         let config_path_str = config_path.display().to_string();
                         let_cxx_string!(config_path_cxx_str = config_path_str);
@@ -182,14 +183,17 @@ impl UPClientVsomeip {
                             sink,
                             msg_handler,
                             return_channel,
-                        ) => Self::register_listener_internal(
-                            src,
-                            sink,
-                            msg_handler,
-                            return_channel,
-                            &application_wrapper,
-                            &runtime_wrapper,
-                        ),
+                        ) => {
+                            Self::register_listener_internal(
+                                src,
+                                sink,
+                                msg_handler,
+                                return_channel,
+                                &mut application_wrapper,
+                                &runtime_wrapper,
+                            )
+                            .await
+                        }
                         TransportCommand::UnregisterListener(src, sink, return_channel) => {
                             Self::unregister_listener_internal(
                                 src,
@@ -214,16 +218,62 @@ impl UPClientVsomeip {
         });
     }
 
-    fn register_listener_internal(
+    async fn register_listener_internal(
         _source_filter: UUri,
         _sink_filter: Option<UUri>,
         _msg_handler: MessageHandlerFnPtr,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
-        _application_wrapper: &UniquePtr<ApplicationWrapper>,
+        _application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
-        // Implementation goes here
-        todo!()
+        // infer the type of message desired based on the filters provided
+        let registration_type = {
+            if let Some(sink_filter) = _sink_filter {
+                if sink_filter.resource_id == 0 {
+                    UMessageType::UMESSAGE_TYPE_RESPONSE
+                } else {
+                    UMessageType::UMESSAGE_TYPE_REQUEST
+                }
+            } else {
+                UMessageType::UMESSAGE_TYPE_PUBLISH
+            }
+        };
+
+        match registration_type {
+            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+                let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
+                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+
+                register_message_handler_fn_ptr_safe(
+                    _application_wrapper,
+                    service_id,
+                    instance_id,
+                    method_id,
+                    _msg_handler,
+                );
+            }
+            UMessageType::UMESSAGE_TYPE_REQUEST => {
+                // TODO: Implementation goes here
+            }
+            UMessageType::UMESSAGE_TYPE_RESPONSE => {
+                // TODO: Implementation goes here
+            }
+            _ => {
+                // TODO: Add logging that we failed
+                Self::return_oneshot_result(
+                    Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Only able to register for Publish, Request, Response",
+                    )),
+                    _return_channel,
+                )
+                .await;
+                return;
+            }
+        }
+
+        Self::return_oneshot_result(Ok(()), _return_channel).await;
     }
 
     fn unregister_listener_internal(
@@ -249,7 +299,7 @@ impl UPClientVsomeip {
             .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
         {
             UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
-                Self::return_oneshot_value(
+                Self::return_oneshot_result(
                     Err(UStatus::fail_with_code(
                         UCode::INVALID_ARGUMENT,
                         "Unspecified message type not supported",
@@ -260,7 +310,7 @@ impl UPClientVsomeip {
                 return;
             }
             UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
-                Self::return_oneshot_value(
+                Self::return_oneshot_result(
                     Err(UStatus::fail_with_code(
                         UCode::INVALID_ARGUMENT,
                         "Notification is not supported",
@@ -297,10 +347,10 @@ impl UPClientVsomeip {
         let msg_to_send = _vsomeip_msg.as_ref().unwrap().get_shared_ptr();
         get_pinned_application(_application_wrapper).send(msg_to_send);
 
-        Self::return_oneshot_value(Ok(()), _return_channel).await;
+        Self::return_oneshot_result(Ok(()), _return_channel).await;
     }
 
-    async fn return_oneshot_value(
+    async fn return_oneshot_result(
         result: Result<(), UStatus>,
         tx: oneshot::Sender<Result<(), UStatus>>,
     ) {

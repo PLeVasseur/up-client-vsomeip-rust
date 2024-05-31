@@ -29,6 +29,8 @@ include_cpp! {
     generate!("vsomeip_v3::message_t")
     generate!("vsomeip_v3::ANY_MAJOR")
     generate!("vsomeip_v3::ANY_MINOR")
+    generate!("vsomeip_v3::ANY_INSTANCE")
+    generate!("vsomeip_v3::ANY_SERVICE")
     generate!("glue::RuntimeWrapper")
     generate!("glue::make_runtime_wrapper")
     generate!("glue::ApplicationWrapper")
