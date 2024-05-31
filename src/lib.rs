@@ -333,6 +333,8 @@ fn convert_vsomeip_msg_to_umsg(
 
             // TODO: Not sure where to get this
             //  Steven said Ivan posted something to a Slack thread; need to check
+            //  Hmm, didn't find this. Asked Steven for help
+            //  He pointed me to something about SOME/IP-SD, but not Request AFAICT
             let ttl = 10;
 
             let umsg_res = UMessageBuilder::request(sink, source, ttl)
@@ -359,15 +361,6 @@ fn convert_vsomeip_msg_to_umsg(
             Ok(umsg)
         }
         message_type_e::MT_NOTIFICATION => {
-            // TODO: Implement the logic here from the table
-            let sink = UUri {
-                authority_name: UPClientVsomeip::get_authority_name().to_string(),
-                ue_id: client_id as u32,
-                ue_version_major: 1, // TODO: I don't see a way to get this
-                resource_id: 0,      // set to 0 as this is the resource_id of "me"
-                ..Default::default()
-            };
-
             let source = UUri {
                 authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
@@ -376,10 +369,7 @@ fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
-            // TODO: Need to perform correlation to get this, this is just stand-in
-            let req_id = UUIDBuilder::build();
-
-            let umsg_res = UMessageBuilder::response(sink, req_id, source)
+            let umsg_res = UMessageBuilder::publish(source)
                 .with_comm_status(UCode::OK.value())
                 .build();
 
@@ -455,12 +445,9 @@ fn convert_vsomeip_msg_to_umsg(
                 ));
             };
 
-            // TODO: Check with Steven on if we should be passing along the payload in the error cases for Response
-            // TODO: Need to do proper mapping from error code into commstatus, for now just set INTERNAL
-            //   YES - Copy over bytes in error case
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::INTERNAL.value())
-                .build();
+                .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
 
             let Ok(umsg) = umsg_res else {
                 return Err(UStatus::fail_with_code(
@@ -558,7 +545,6 @@ fn convert_umsg_to_vsomeip_msg(
                 //  Eject the previous one? Fail on this one?
             }
 
-            // TODO: When the SOME/IP RESPONSE is crafted within the mE, does it increment the session ID?
             let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
@@ -608,27 +594,25 @@ fn convert_umsg_to_vsomeip_msg(
                     false
                 }
             };
+            let payload = {
+                if let Some(bytes) = umsg.payload.clone() {
+                    bytes.to_vec()
+                } else {
+                    Vec::new()
+                }
+            };
+            let mut vsomeip_payload =
+                make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
+            set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
+            set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
             if ok {
                 get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
                 get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_RESPONSE);
-
-                let payload = {
-                    if let Some(bytes) = umsg.payload.clone() {
-                        bytes.to_vec()
-                    } else {
-                        Vec::new()
-                    }
-                };
-                let mut vsomeip_payload =
-                    make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
-                set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
-                set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
             } else {
                 // TODO: Perform mapping from uProtocol UCode contained in commstatus into vsomeip::return_code_e
                 get_pinned_message_base(&vsomeip_msg)
                     .set_return_code(vsomeip::return_code_e::E_NOT_OK);
                 get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_ERROR);
-                // TODO: Copy over bytes in error case
             }
 
             Ok(vsomeip_msg)
