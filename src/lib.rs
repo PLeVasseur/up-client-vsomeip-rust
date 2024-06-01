@@ -15,6 +15,7 @@ use cxx::{let_cxx_string, UniquePtr};
 use protobuf::Enum;
 use std::path::Path;
 use std::thread;
+use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -175,6 +176,8 @@ impl UPClientVsomeip {
             // thread is blocked by vsomeip here
             get_pinned_application(&application_wrapper).start();
         });
+
+        thread::sleep(Duration::from_millis(500));
     }
 
     fn app_event_loop(app_name: &str, mut rx_to_event_loop: Receiver<TransportCommand>) {
@@ -192,7 +195,7 @@ impl UPClientVsomeip {
                 trace!("Within blocked runtime");
 
                 let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
-                let_cxx_string!(app_name_cxx = app_name);
+                let_cxx_string!(app_name_cxx = app_name.to_string());
                 let mut application_wrapper = make_application_wrapper(
                     get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
                 );
@@ -215,6 +218,7 @@ impl UPClientVsomeip {
                             );
 
                             Self::register_listener_internal(
+                                &app_name.clone(),
                                 src,
                                 sink,
                                 msg_handler,
@@ -226,6 +230,7 @@ impl UPClientVsomeip {
                         }
                         TransportCommand::UnregisterListener(src, sink, return_channel) => {
                             Self::unregister_listener_internal(
+                                &app_name.clone(),
                                 src,
                                 sink,
                                 return_channel,
@@ -236,6 +241,7 @@ impl UPClientVsomeip {
                         }
                         TransportCommand::Send(umsg, return_channel) => {
                             Self::send_internal(
+                                &app_name.clone(),
                                 umsg,
                                 return_channel,
                                 &application_wrapper,
@@ -254,6 +260,7 @@ impl UPClientVsomeip {
     }
 
     async fn register_listener_internal(
+        _app_name: &str,
         _source_filter: UUri,
         _sink_filter: Option<UUri>,
         _msg_handler: MessageHandlerFnPtr,
@@ -291,7 +298,8 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let instance_id = 1;
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
 
                 trace!(
@@ -303,12 +311,34 @@ impl UPClientVsomeip {
                     method_id
                 );
 
-                get_pinned_application(_application_wrapper).request_service(
+                get_pinned_application(_application_wrapper).offer_service(
                     service_id,
                     instance_id,
                     vsomeip::ANY_MAJOR,
                     vsomeip::ANY_MINOR,
                 );
+
+                // get_pinned_application(_application_wrapper).offer_service(
+                //     vsomeip::ANY_SERVICE,
+                //     vsomeip::ANY_INSTANCE,
+                //     vsomeip::ANY_MAJOR,
+                //     vsomeip::ANY_MINOR,
+                // );
+
+                // register_message_handler_fn_ptr_safe(
+                //     _application_wrapper,
+                //     vsomeip::ANY_SERVICE,
+                //     vsomeip::ANY_INSTANCE,
+                //     vsomeip::ANY_METHOD,
+                //     _msg_handler,
+                // );
+
+                // get_pinned_application(_application_wrapper).request_service(
+                //     service_id,
+                //     instance_id,
+                //     vsomeip::ANY_MAJOR,
+                //     vsomeip::ANY_MINOR,
+                // );
 
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
@@ -345,7 +375,7 @@ impl UPClientVsomeip {
                 };
 
                 let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let instance_id = 1; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
                 trace!(
@@ -357,10 +387,17 @@ impl UPClientVsomeip {
                     method_id
                 );
 
+                get_pinned_application(_application_wrapper).offer_service(
+                    service_id,
+                    instance_id,
+                    vsomeip::ANY_MAJOR,
+                    vsomeip::ANY_MINOR,
+                );
+
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
                     service_id,
-                    instance_id,
+                    vsomeip::ANY_INSTANCE,
                     method_id,
                     _msg_handler,
                 );
@@ -469,6 +506,7 @@ impl UPClientVsomeip {
     }
 
     async fn unregister_listener_internal(
+        _app_name: &str,
         _source_filter: UUri,
         _sink_filter: Option<UUri>,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
@@ -632,6 +670,7 @@ impl UPClientVsomeip {
     }
 
     async fn send_internal(
+        _app_name: &str,
         umsg: UMessage,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
         _application_wrapper: &UniquePtr<ApplicationWrapper>,
@@ -677,6 +716,24 @@ impl UPClientVsomeip {
                         let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
                         let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
                         let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
+                        let interface_version =
+                            get_pinned_message_base(&vsomeip_msg).get_interface_version();
+
+                        // trace!("Immediately prior to offer_service");
+
+                        // TODO: May want to do this the one time when we first send over this
+                        //  service and understand we already offered the service, so no need
+                        //  to repeatedly do it
+                        // get_pinned_application(&local_app_wrapper).offer_service(
+                        //     service_id,
+                        //     instance_id,
+                        //     interface_version,
+                        //     vsomeip::ANY_MINOR,
+                        // );
+
+                        // trace!("Immediately after offer_service");
+
+                        tokio::time::sleep(Duration::from_millis(100)).await;
 
                         trace!("{}:{} Sending SOME/IP message with service: {} instance: {} method: {}",
                             UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
@@ -693,13 +750,6 @@ impl UPClientVsomeip {
                 }
             }
         }
-
-        // Implementation goes here
-        let _vsomeip_msg =
-            convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
-
-        let msg_to_send = _vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-        get_pinned_application(_application_wrapper).send(msg_to_send);
 
         Self::return_oneshot_result(Ok(()), _return_channel).await;
     }
@@ -917,16 +967,17 @@ fn convert_umsg_to_vsomeip_msg(
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_notification(true));
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
-            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
+            let instance_id = 1; // TODO: Setting to 1 manually for now
+            get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
             let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let client_id = 0; // manually setting this to 0 as according to spec
-            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
-            let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
-            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            let session_id = retrieve_session_id(client_id);
-            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-            get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+            // let client_id = 0; // manually setting this to 0 as according to spec
+            // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            // let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+            // get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+            // let session_id = retrieve_session_id(client_id);
+            // get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+            // get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
@@ -938,6 +989,25 @@ fn convert_umsg_to_vsomeip_msg(
                 make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
+
+            trace!("Immediately prior to request_service: service_id: {} instance_id: {}", service_id, instance_id);
+
+            get_pinned_application(_application_wrapper).request_service(
+                service_id,
+                instance_id,
+                vsomeip::ANY_MAJOR,
+                // interface_version,
+                vsomeip::ANY_MINOR,
+            );
+
+            // get_pinned_application(_application_wrapper).offer_service(
+            //     service_id,
+            //     1,
+            //     interface_version,
+            //     vsomeip::ANY_MINOR,
+            // );
+
+            trace!("Immediately after request_service");
 
             Ok(vsomeip_msg)
         }
@@ -954,27 +1024,27 @@ fn convert_umsg_to_vsomeip_msg(
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
-            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
+            let instance_id = 1; // TODO: Setting to 1 manually for now
+            get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
-            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            let (_, client_id) = split_u32_to_u16(source.ue_id);
-            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
-
-            // TODO: Remove .unwrap()
-            let req_id = umsg.attributes.id.as_ref().unwrap();
-            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            if ue_request_correlation.get(&client_id).is_none() {
-                ue_request_correlation.insert(client_id, req_id.clone());
-            } else {
-                // TODO: What do we do if we have a duplicate, already-existing pair?
-                //  Eject the previous one? Fail on this one?
-            }
-
-            let session_id = retrieve_session_id(client_id);
-            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-            get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+            // let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+            // get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+            // let (_, client_id) = split_u32_to_u16(source.ue_id);
+            // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            //
+            // // TODO: Remove .unwrap()
+            // let req_id = umsg.attributes.id.as_ref().unwrap();
+            // let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            // if ue_request_correlation.get(&client_id).is_none() {
+            //     ue_request_correlation.insert(client_id, req_id.clone());
+            // } else {
+            //     // TODO: What do we do if we have a duplicate, already-existing pair?
+            //     //  Eject the previous one? Fail on this one?
+            // }
+            // let session_id = retrieve_session_id(client_id);
+            // get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+            // get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
@@ -986,6 +1056,15 @@ fn convert_umsg_to_vsomeip_msg(
                 make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
+
+            trace!("Request: Immediately prior to request_service: service_id: {} instance_id: {}", service_id, instance_id);
+
+            get_pinned_application(_application_wrapper).request_service(
+                service_id,
+                instance_id,
+                vsomeip::ANY_MAJOR,
+                vsomeip::ANY_MINOR,
+            );
 
             Ok(vsomeip_msg)
         }

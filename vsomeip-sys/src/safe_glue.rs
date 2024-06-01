@@ -58,6 +58,9 @@ pub fn get_pinned_runtime(wrapper: &RuntimeWrapper) -> Pin<&mut runtime> {
 /// # TODO
 ///
 /// Add some runtime safety checks on the pointer
+///
+/// I do see a runtime panic here, perhaps when we try to work with the app before it's setup
+/// should probably do a sleep of half a second or something
 pub fn get_pinned_application(wrapper: &ApplicationWrapper) -> Pin<&mut application> {
     unsafe { Pin::new_unchecked(wrapper.get_mut().as_mut().unwrap()) }
 }

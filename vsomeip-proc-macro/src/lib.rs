@@ -44,6 +44,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         let fn_code = quote! {
             #[no_mangle]
             pub extern "C" fn #extern_fn_name(vsomeip_msg: &SharedPtr<vsomeip::message>) {
+                trace!("Calling extern_fn: {}", #i);
                 call_shared_extern_fn(#i, vsomeip_msg);
             }
         };
@@ -94,6 +95,8 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         #generated_fns
 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
+            trace!("Calling call_shared_extern_fn with listener_id: {}", listener_id);
+
             let app_name = APP_NAME.lock().unwrap();
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
             let_cxx_string!(app_name_cxx = &*app_name);
@@ -108,8 +111,13 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 if !is_point_to_point_message(&mut vsomeip_msg_wrapper) {
                     // TODO: Log an INFO level message, since it's fairly likely to occur
                     //  and we don't want to spam the log
+                    trace!("We're listening for point-to-point messages, but this isn't one");
+
+                    return;
                 } else {
                     // TODO: Add logging here that this proceeded
+
+                    trace!("Not a point-to-point message");
                 }
             }
 
@@ -117,13 +125,13 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             let Ok(umsg) = res else {
                 if let Err(err) = res {
-                    // TODO: Add some logging here
+                    error!("Unable to convert vsomeip message to UMessage: {:?}", err);
                 }
                 return;
             };
 
             // TODO: Replace with the log crate
-            println!("Calling extern function #{}", listener_id);
+            trace!("Calling extern function {}", listener_id);
             let registry = LISTENER_REGISTRY.lock().unwrap();
             if let Some(listener) = registry.get(&listener_id) {
                 let listener = Arc::clone(listener);
@@ -131,19 +139,31 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                     shared_async_fn(listener, umsg).await;
                 });
             } else {
-                println!("Listener not found for ID {}", listener_id);
+                error!("Listener not found for ID {}", listener_id);
             }
         }
 
         async fn shared_async_fn(listener: Arc<dyn UListener>, umsg: UMessage) {
+            trace!("shared_async_fn with umsg: {:?}", umsg);
             listener.on_receive(umsg).await;
         }
 
         fn get_extern_fn(listener_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
+            trace!("get_extern_fn with listener_id: {}", listener_id);
             match listener_id {
                 #(#match_arms)*
                 _ => panic!("Listener ID out of range"),
             }
+        }
+
+        fn get_extern_fn_dummy(listener_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
+            trace!("giving a dummy callback for listener_id: {}", listener_id);
+
+            extern "C" fn dummy_callback(msg: &SharedPtr<vsomeip::message>) {
+                trace!("I'm a dummy callback being called")
+            }
+
+            return dummy_callback
         }
     };
 

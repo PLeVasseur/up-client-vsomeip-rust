@@ -22,7 +22,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-use log::{info, trace};
+use log::{error, info, trace};
 
 use up_rust::{ComparableListener, UCode, UListener, UMessage, UStatus, UTransport, UUri};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
@@ -135,7 +135,8 @@ impl UTransport for UPClientVsomeip {
             .unwrap()
             .insert(listener_id, listener);
 
-        let extern_fn = get_extern_fn(listener_id);
+        // let extern_fn = get_extern_fn(listener_id);
+        let extern_fn = get_extern_fn_dummy(listener_id);
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
