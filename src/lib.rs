@@ -769,6 +769,7 @@ fn convert_vsomeip_msg_to_umsg(
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UMessage, UStatus> {
+    trace!("top of convert_vsomeip_msg_to_umsg");
     let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
 
     let request_id = get_pinned_message_base(_vsomeip_message).get_request();
@@ -781,8 +782,11 @@ fn convert_vsomeip_msg_to_umsg(
 
     let authority_name = { AUTHORITY_NAME.lock().unwrap().clone() };
 
+    trace!("unloaded all relevant info from vsomeip message");
+
     match msg_type {
         message_type_e::MT_REQUEST => {
+            trace!("MT_REQUEST type");
             let sink = UUri {
                 authority_name,
                 ue_id: service_id as u32,
@@ -805,9 +809,12 @@ fn convert_vsomeip_msg_to_umsg(
             //  He pointed me to something about SOME/IP-SD, but not Request AFAICT
             let ttl = 1000;
 
+            trace!("Prior to building Request");
+
             let umsg_res = UMessageBuilder::request(sink, source, ttl)
-                .with_comm_status(UCode::OK.value())
                 .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
+
+            trace!("After building Request");
 
             let Ok(umsg) = umsg_res else {
                 return Err(UStatus::fail_with_code(

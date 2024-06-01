@@ -135,8 +135,8 @@ impl UTransport for UPClientVsomeip {
             .unwrap()
             .insert(listener_id, listener);
 
-        // let extern_fn = get_extern_fn(listener_id);
-        let extern_fn = get_extern_fn_dummy(listener_id);
+        let extern_fn = get_extern_fn(listener_id);
+        // let extern_fn = get_extern_fn_dummy(listener_id);
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let src = source_filter.clone();
         let sink = sink_filter.cloned();

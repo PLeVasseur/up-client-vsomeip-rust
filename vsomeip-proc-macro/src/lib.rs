@@ -106,6 +106,8 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             let cloned_vsomeip_msg = vsomeip_msg.clone();
             let mut vsomeip_msg_wrapper = make_message_wrapper(cloned_vsomeip_msg);
 
+            trace!("Made vsomeip_msg_wrapper");
+
             let point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
             if point_to_point_listeners.contains(&listener_id) {
                 if !is_point_to_point_message(&mut vsomeip_msg_wrapper) {
@@ -121,7 +123,11 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 }
             }
 
+            trace!("Checked point-to-point or not");
+
             let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
+
+            trace!("Ran convert_vsomeip_msg_to_umsg");
 
             let Ok(umsg) = res else {
                 if let Err(err) = res {
@@ -130,17 +136,30 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 return;
             };
 
+            trace!("Was able to convert to UMessage");
+
             // TODO: Replace with the log crate
             trace!("Calling extern function {}", listener_id);
             let registry = LISTENER_REGISTRY.lock().unwrap();
             if let Some(listener) = registry.get(&listener_id) {
+                trace!("Retrieved listener");
                 let listener = Arc::clone(listener);
-                tokio::spawn(async move {
-                    shared_async_fn(listener, umsg).await;
+
+                // TODO: Should probably push this over to an existing async runtime...
+                //  for now we will just create one here as a hack
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async move {
+                    tokio::spawn(async move {
+                        trace!("Within spawned thread -- calling shared_async_fn");
+                        shared_async_fn(listener, umsg).await;
+                        trace!("Within spawned thread -- finished shared_async_fn");
+                    });
                 });
             } else {
                 error!("Listener not found for ID {}", listener_id);
             }
+
+            trace!("Reached bottom of call_shared_extern_fn");
         }
 
         async fn shared_async_fn(listener: Arc<dyn UListener>, umsg: UMessage) {
@@ -160,7 +179,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             trace!("giving a dummy callback for listener_id: {}", listener_id);
 
             extern "C" fn dummy_callback(msg: &SharedPtr<vsomeip::message>) {
-                trace!("I'm a dummy callback being called")
+                trace!("I'm a dummy callback being called");
             }
 
             return dummy_callback
