@@ -70,7 +70,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             pub static ref APP_NAME: Mutex<String> = Mutex::new(String::new());
             pub static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
             pub static ref UE_ID: Mutex<u16> = Mutex::new(0);
-            pub static ref UE_REQUEST_CORRELATION: Mutex<HashMap<ClientId, ReqId>> = Mutex::new(HashMap::new());
+            pub static ref UE_REQUEST_CORRELATION: Mutex<HashMap<RequestId, ReqId>> = Mutex::new(HashMap::new());
             pub static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, RequestId>> =
                 Mutex::new(HashMap::new());
             pub static ref CLIENT_ID_SESSION_ID_TRACKING: Mutex<HashMap<ClientId, SessionId>> =

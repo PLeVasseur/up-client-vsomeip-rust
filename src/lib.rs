@@ -49,6 +49,7 @@ const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
+const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
 
 const ME_AUTHORITY: &str = "me_authority";
 
@@ -839,8 +840,16 @@ fn convert_vsomeip_msg_to_umsg(
 
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
+            trace!("{}:{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
+                req_id.to_hyphenated_string(), request_id
+            );
             let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
             if me_request_correlation.get(req_id).is_none() {
+                trace!("{}:{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
+                    req_id.to_hyphenated_string(), request_id
+                );
                 me_request_correlation.insert(req_id.clone(), request_id);
             } else {
                 // TODO: What do we do if we have a duplicate, already-existing pair?
@@ -850,6 +859,7 @@ fn convert_vsomeip_msg_to_umsg(
             Ok(umsg)
         }
         message_type_e::MT_NOTIFICATION => {
+            trace!("MT_NOTIFICATION type");
             let source = UUri {
                 authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
@@ -872,6 +882,7 @@ fn convert_vsomeip_msg_to_umsg(
             Ok(umsg)
         }
         message_type_e::MT_RESPONSE => {
+            trace!("MT_RESPONSE type");
             let sink = UUri {
                 authority_name,
                 ue_id: client_id as u32,
@@ -888,11 +899,16 @@ fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
+
+            trace!("{}:{} - request_id to look up to correlate to req_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
+                request_id
+            );
             let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            let Some(req_id) = ue_request_correlation.remove(&client_id) else {
+            let Some(req_id) = ue_request_correlation.remove(&request_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
-                    "Corresponding reqid not found for this SOME/IP RESPONSE",
+                    format!("Corresponding reqid not found for this SOME/IP RESPONSE: {}", request_id),
                 ));
             };
 
@@ -910,6 +926,7 @@ fn convert_vsomeip_msg_to_umsg(
             Ok(umsg)
         }
         message_type_e::MT_ERROR => {
+            trace!("MT_ERROR type");
             let sink = UUri {
                 authority_name,
                 ue_id: client_id as u32,
@@ -926,11 +943,16 @@ fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
+            // TODO: Need to update to use RequestId instead of ClientId
+            trace!("{}:{} - request_id to look up to correlate to req_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
+                request_id
+            );
             let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            let Some(req_id) = ue_request_correlation.remove(&client_id) else {
+            let Some(req_id) = ue_request_correlation.remove(&request_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
-                    "Corresponding reqid not found for this SOME/IP RESPONSE",
+                    format!("Corresponding reqid not found for this SOME/IP RESPONSE: {}", request_id),
                 ));
             };
 
@@ -1058,16 +1080,16 @@ fn convert_umsg_to_vsomeip_msg(
             let req_id = umsg.attributes.id.as_ref().unwrap();
             let session_id = retrieve_session_id(client_id);
             let request_id = create_request_id(client_id, session_id);
-            trace!("{}:{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+            trace!("{}:{} - (request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                req_id.to_hyphenated_string(), request_id
+                request_id, req_id.to_hyphenated_string(),
             );
-            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
-            if me_request_correlation.get(&req_id).is_none() {
-                me_request_correlation.insert(req_id.clone(), request_id);
-                trace!("{}:{} - (req_id, request_id) inserted for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            if ue_request_correlation.get(&request_id).is_none() {
+                ue_request_correlation.insert(request_id, req_id.clone());
+                trace!("{}:{} - (request_id, req_id)  inserted for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
                     UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                    req_id.to_hyphenated_string(), request_id
+                    request_id, req_id.to_hyphenated_string(),
                 );
             } else {
                 // TODO: What do we do if we have a duplicate, already-existing pair?
@@ -1087,7 +1109,6 @@ fn convert_umsg_to_vsomeip_msg(
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
 
-
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
@@ -1106,17 +1127,20 @@ fn convert_umsg_to_vsomeip_msg(
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
-            let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+            // let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id); // Should this be source?
+            let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let instance_id = 1; // TODO: Setting to 1 manually for now
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
-            let (_, method_id) = split_u32_to_u16(sink.resource_id);
+            // let (_, method_id) = split_u32_to_u16(sink.resource_id); // Should this be source?
+            let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+            // let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major); // Should this be source?
+            let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
 
             // TODO: Remove .unwrap()
-            let req_id = umsg.attributes.id.as_ref().unwrap();
+            let req_id = umsg.attributes.reqid.as_ref().unwrap();
             trace!("{}:{} - Looking up req_id from UMessage in ME_REQUEST_CORRELATION, req_id: {}",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
                 req_id.to_hyphenated_string()
