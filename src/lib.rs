@@ -1035,23 +1035,23 @@ fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            // let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
-            // get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            // let (_, client_id) = split_u32_to_u16(source.ue_id);
-            // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
-            //
-            // // TODO: Remove .unwrap()
-            // let req_id = umsg.attributes.id.as_ref().unwrap();
-            // let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            // if ue_request_correlation.get(&client_id).is_none() {
-            //     ue_request_correlation.insert(client_id, req_id.clone());
-            // } else {
-            //     // TODO: What do we do if we have a duplicate, already-existing pair?
-            //     //  Eject the previous one? Fail on this one?
-            // }
-            // let session_id = retrieve_session_id(client_id);
-            // get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-            // get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
+            let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+            let (_, client_id) = split_u32_to_u16(source.ue_id);
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+
+            // TODO: Remove .unwrap()
+            let req_id = umsg.attributes.id.as_ref().unwrap();
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
+            if ue_request_correlation.get(&client_id).is_none() {
+                ue_request_correlation.insert(client_id, req_id.clone());
+            } else {
+                // TODO: What do we do if we have a duplicate, already-existing pair?
+                //  Eject the previous one? Fail on this one?
+            }
+            let session_id = retrieve_session_id(client_id);
+            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+            get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()
