@@ -2,9 +2,10 @@ use log::error;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use protobuf::Enum;
 use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
-use up_rust::{UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
+use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
 pub struct PrintingListener {
     client: Arc<UPClientVsomeip>
@@ -24,7 +25,7 @@ impl UListener for PrintingListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("Received Request:\n{:?}", msg);
 
-        let response_msg = UMessageBuilder::response_for_request(&msg.attributes).build();
+        let response_msg = UMessageBuilder::response_for_request(&msg.attributes).with_comm_status(UCode::OK.value()).build();
         let Ok(response_msg) = response_msg else {
             error!("Unable to create response_msg: {:?}", response_msg.err().unwrap());
             return;

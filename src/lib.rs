@@ -1066,6 +1066,10 @@ fn convert_umsg_to_vsomeip_msg(
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+            trace!("{}:{} - sink.ue_id: {} _instance_id: {} service_id:{}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                sink.ue_id, _instance_id, service_id
+            );
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let instance_id = 1; // TODO: Setting to 1 manually for now
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
@@ -1080,6 +1084,10 @@ fn convert_umsg_to_vsomeip_msg(
             let req_id = umsg.attributes.id.as_ref().unwrap();
             let session_id = retrieve_session_id(client_id);
             let request_id = create_request_id(client_id, session_id);
+            trace!("{}:{} - client_id: {} session_id: {} request_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                client_id, session_id, request_id
+            );
             trace!("{}:{} - (request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
                 request_id, req_id.to_hyphenated_string(),
@@ -1127,6 +1135,11 @@ fn convert_umsg_to_vsomeip_msg(
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
+            // TODO: Because these must be source to allow the response to be seen, we need to give
+            //  this a tune-up, since now no longer does the service_id match what's expected on
+            //  the other end.
+            //
+            // TODO: Will need to consider what changes to make, e.g. perhaps providing
             // let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id); // Should this be source?
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
