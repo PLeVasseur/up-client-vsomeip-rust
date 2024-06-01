@@ -10,7 +10,7 @@ pub struct PrintingListener;
 #[async_trait::async_trait]
 impl UListener for PrintingListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("{:?}", msg);
+        println!("Received Response:\n{:?}", msg);
     }
 
     async fn on_error(&self, err: UStatus) {
@@ -57,18 +57,11 @@ async fn main() {
         ..Default::default()
     };
 
-    // let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
-    //
-    // let reg_res = client
-    //     .register_listener(&client_uuri, Some(&service_uuri), printing_listener)
-    //     .await;
-    //
-    // if let Err(err) = reg_res {
-    //     error!("Unable to register: {:?}", err);
-    // }
-    //
-    // let notify = Arc::new(Notify::new());
-    // notify.notified().await;
+    let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
+    let reg_res = client.register_listener(&service_uuri, Some(&client_uuri), printing_listener).await;
+    if let Err(err) = reg_res {
+        error!("Unable to register for returning Response: {:?}", err);
+    }
 
     loop {
         let request_msg_res = UMessageBuilder::request(service_uuri.clone(), client_uuri.clone(), 10000).build();

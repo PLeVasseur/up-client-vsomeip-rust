@@ -6,11 +6,34 @@ use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
-pub struct PrintingListener;
+pub struct PrintingListener {
+    client: Arc<UPClientVsomeip>
+}
+
+impl PrintingListener {
+    pub fn new(client: Arc<UPClientVsomeip>) -> Self {
+        Self {
+            client
+        }
+    }
+}
+
+
 #[async_trait::async_trait]
 impl UListener for PrintingListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("{:?}", msg);
+        println!("Received Request:\n{:?}", msg);
+
+        let response_msg = UMessageBuilder::response_for_request(&msg.attributes).build();
+        let Ok(response_msg) = response_msg else {
+            error!("Unable to create response_msg: {:?}", response_msg.err().unwrap());
+            return;
+        };
+        let client = self.client.clone();
+        let send_res = client.send(response_msg).await;
+        if let Err(err) = send_res {
+            error!("Unable to send response_msg: {:?}", err);
+        }
     }
 
     async fn on_error(&self, err: UStatus) {
@@ -46,6 +69,8 @@ async fn main() {
         return;
     };
 
+    let client = Arc::new(client);
+
     let service_uuri = UUri {
         authority_name: service_authority_name.to_string(),
         ue_id: service_ue_id as u32,
@@ -54,7 +79,7 @@ async fn main() {
         ..Default::default()
     };
 
-    let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
+    let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener::new(client.clone()));
 
     let reg_res = client
         .register_listener(&any_uuri(), Some(&service_uuri), printing_listener)

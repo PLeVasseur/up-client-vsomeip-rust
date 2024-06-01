@@ -428,9 +428,14 @@ impl UPClientVsomeip {
                     return;
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                // TODO: According to the vsomeip in 10 minutes example, don't we need to actually
+                //  set this to the source?
+                let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+                // let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                // let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -1089,7 +1094,8 @@ fn convert_umsg_to_vsomeip_msg(
 
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
-            get_pinned_message_base(&vsomeip_msg).set_instance(1); // TODO: Setting to 1 manually for now
+            let instance_id = 1; // TODO: Setting to 1 manually for now
+            get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
             let (_, method_id) = split_u32_to_u16(sink.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
@@ -1135,6 +1141,15 @@ fn convert_umsg_to_vsomeip_msg(
                     .set_return_code(vsomeip::return_code_e::E_NOT_OK);
                 get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_ERROR);
             }
+
+            trace!("Response: Immediately prior to request_service: service_id: {} instance_id: {}", service_id, instance_id);
+
+            get_pinned_application(_application_wrapper).request_service(
+                service_id,
+                instance_id,
+                vsomeip::ANY_MAJOR,
+                vsomeip::ANY_MINOR,
+            );
 
             Ok(vsomeip_msg)
         }
