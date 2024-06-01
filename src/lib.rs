@@ -20,7 +20,7 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use log::trace;
+use log::{error, trace};
 
 use up_rust::{
     UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri, UUID,
@@ -240,6 +240,12 @@ impl UPClientVsomeip {
                             .await
                         }
                         TransportCommand::Send(umsg, return_channel) => {
+                            trace!(
+                                "{}:{} - Attempting to send UMessage: {:?}",
+                                UP_CLIENT_VSOMEIP_TAG,
+                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                                umsg
+                            );
                             Self::send_internal(
                                 &app_name.clone(),
                                 umsg,
@@ -749,8 +755,11 @@ impl UPClientVsomeip {
                         let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
                         get_pinned_application(_application_wrapper).send(shared_ptr_message);
                     }
-                    Err(_e) => {
-                        // TODO: Add logging that we failed
+                    Err(err) => {
+                        error!("{}:{} Converting UMessage to vsomeip message failed: {:?}",
+                            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                            err
+                        );
                     }
                 }
             }
@@ -1047,14 +1056,23 @@ fn convert_umsg_to_vsomeip_msg(
 
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
-            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            if ue_request_correlation.get(&client_id).is_none() {
-                ue_request_correlation.insert(client_id, req_id.clone());
+            let session_id = retrieve_session_id(client_id);
+            let request_id = create_request_id(client_id, session_id);
+            trace!("{}:{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                req_id.to_hyphenated_string(), request_id
+            );
+            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
+            if me_request_correlation.get(&req_id).is_none() {
+                me_request_correlation.insert(req_id.clone(), request_id);
+                trace!("{}:{} - (req_id, request_id) inserted for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
+                    UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                    req_id.to_hyphenated_string(), request_id
+                );
             } else {
                 // TODO: What do we do if we have a duplicate, already-existing pair?
                 //  Eject the previous one? Fail on this one?
             }
-            let session_id = retrieve_session_id(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
@@ -1069,18 +1087,14 @@ fn convert_umsg_to_vsomeip_msg(
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
 
-            trace!("Request: Immediately prior to request_service: service_id: {} instance_id: {}", service_id, instance_id);
-
-            get_pinned_application(_application_wrapper).request_service(
-                service_id,
-                instance_id,
-                vsomeip::ANY_MAJOR,
-                vsomeip::ANY_MINOR,
-            );
 
             Ok(vsomeip_msg)
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            trace!("{}:{} - Attempting to send Response",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL
+            );
+
             let Some(sink) = umsg.attributes.sink.as_ref() else {
                 return Err(UStatus::fail_with_code(
                     UCode::INVALID_ARGUMENT,
@@ -1103,13 +1117,21 @@ fn convert_umsg_to_vsomeip_msg(
 
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
+            trace!("{}:{} - Looking up req_id from UMessage in ME_REQUEST_CORRELATION, req_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                req_id.to_hyphenated_string()
+            );
             let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().unwrap();
             let Some(request_id) = me_request_correlation.remove(req_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
-                    "Corresponding SOME/IP Request ID not found for this Request UMessage's reqid",
+                    format!("Corresponding SOME/IP Request ID not found for this Request UMessage's reqid: {}",
+                            req_id.to_hyphenated_string()),
                 ));
             };
+            trace!("{}:{} - Found correlated request_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, request_id
+            );
             let (client_id, session_id) = split_u32_to_u16(request_id);
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
@@ -1142,14 +1164,9 @@ fn convert_umsg_to_vsomeip_msg(
                 get_pinned_message_base(&vsomeip_msg).set_message_type(message_type_e::MT_ERROR);
             }
 
-            trace!("Response: Immediately prior to request_service: service_id: {} instance_id: {}", service_id, instance_id);
-
-            get_pinned_application(_application_wrapper).request_service(
-                service_id,
-                instance_id,
-                vsomeip::ANY_MAJOR,
-                vsomeip::ANY_MINOR,
-            );
+            trace!("{}:{} - Response: Finished building vsomeip message: service_id: {} instance_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                service_id, instance_id);
 
             Ok(vsomeip_msg)
         }
@@ -1177,10 +1194,18 @@ fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
 fn retrieve_session_id(client_id: ClientId) -> SessionId {
     let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.lock().unwrap();
 
+    trace!("retrieve_session_id: client_id: {}", client_id);
     let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(0);
+    trace!("retrieve_session_id: current_session_id: {}", current_sesion_id);
     let returned_session_id = *current_sesion_id;
+    trace!("retrieve_session_id: returned_session_id: {}", returned_session_id);
     *current_sesion_id += 1;
+    trace!("retrieve_session_id: newly updated current_session_id: {}", current_sesion_id);
     returned_session_id
+}
+
+fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
+    ((client_id as u32) << 16) | (session_id as u32)
 }
 
 // infer the type of message desired based on the filters provided
