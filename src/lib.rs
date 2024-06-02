@@ -14,6 +14,7 @@
 use cxx::{let_cxx_string, UniquePtr};
 use protobuf::Enum;
 use std::path::Path;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
@@ -790,10 +791,17 @@ fn convert_vsomeip_msg_to_umsg(
     let request_id = get_pinned_message_base(_vsomeip_message).get_request();
     let service_id = get_pinned_message_base(_vsomeip_message).get_service();
     let client_id = get_pinned_message_base(_vsomeip_message).get_client();
+    let session_id = get_pinned_message_base(_vsomeip_message).get_session();
     let method_id = get_pinned_message_base(_vsomeip_message).get_method();
+    let instance_id = get_pinned_message_base(_vsomeip_message).get_instance();
     let interface_version = get_pinned_message_base(_vsomeip_message).get_interface_version();
     let payload = get_message_payload(_vsomeip_message);
     let payload_bytes = get_data_safe(&payload);
+
+    trace!("{}:{} - : request_id: {} client_id: {} session_id: {} service_id: {} instance_id: {} method_id: {} interface_version: {}",
+        UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
+        request_id, client_id, session_id, service_id, instance_id, method_id, interface_version
+    );
 
     let authority_name = { AUTHORITY_NAME.lock().unwrap().clone() };
 
@@ -1066,9 +1074,9 @@ fn convert_umsg_to_vsomeip_msg(
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
-            trace!("{}:{} - sink.ue_id: {} _instance_id: {} service_id:{}",
+            trace!("{}:{} - sink.ue_id: {} source.ue_id: {} _instance_id: {} service_id:{}",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                sink.ue_id, _instance_id, service_id
+                sink.ue_id, source.ue_id, _instance_id, service_id
             );
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let instance_id = 1; // TODO: Setting to 1 manually for now
@@ -1078,32 +1086,35 @@ fn convert_umsg_to_vsomeip_msg(
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
             let (_, client_id) = split_u32_to_u16(source.ue_id);
-            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            // get_pinned_message_base(&vsomeip_msg).set_client(client_id); // doesn't matter at all; rewritten by send()
 
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
             let session_id = retrieve_session_id(client_id);
             let request_id = create_request_id(client_id, session_id);
-            trace!("{}:{} - client_id: {} session_id: {} request_id: {}",
+            let app_client_id = get_pinned_application(_application_wrapper).get_client();
+            let app_session_id = get_request_session_id();
+            trace!("{}:{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                client_id, session_id, request_id
+                client_id, session_id, request_id, service_id, app_client_id, app_session_id
             );
-            trace!("{}:{} - (request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
+            let app_request_id = create_request_id(app_client_id, app_session_id);
+            trace!("{}:{} - (app_request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                request_id, req_id.to_hyphenated_string(),
+                app_request_id, req_id.to_hyphenated_string(),
             );
             let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().unwrap();
-            if ue_request_correlation.get(&request_id).is_none() {
-                ue_request_correlation.insert(request_id, req_id.clone());
-                trace!("{}:{} - (request_id, req_id)  inserted for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
+            if ue_request_correlation.get(&app_request_id).is_none() {
+                ue_request_correlation.insert(app_request_id, req_id.clone());
+                trace!("{}:{} - (app_request_id, req_id)  inserted for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
                     UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                    request_id, req_id.to_hyphenated_string(),
+                    app_request_id, req_id.to_hyphenated_string(),
                 );
             } else {
                 // TODO: What do we do if we have a duplicate, already-existing pair?
                 //  Eject the previous one? Fail on this one?
             }
-            get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+            // get_pinned_message_base(&vsomeip_msg).set_session(session_id); // doesn't matter at all, rewritten by send()
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
@@ -1116,6 +1127,22 @@ fn convert_umsg_to_vsomeip_msg(
                 make_payload_wrapper(get_pinned_runtime(runtime_wrapper).create_payload());
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
+
+            let request_id = get_pinned_message_base(&vsomeip_msg).get_request();
+            let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
+            let client_id = get_pinned_message_base(&vsomeip_msg).get_client();
+            let session_id = get_pinned_message_base(&vsomeip_msg).get_session();
+            let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
+            let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
+            let interface_version = get_pinned_message_base(&vsomeip_msg).get_interface_version();
+
+            // let payload = get_message_payload(&vsomeip_msg);
+            // let payload_bytes = get_data_safe(&payload);
+
+            trace!("{}:{} - : request_id: {} client_id: {} session_id: {} service_id: {} instance_id: {} method_id: {} interface_version: {} app_client_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                request_id, client_id, session_id, service_id, instance_id, method_id, interface_version, app_client_id
+            );
 
             Ok(vsomeip_msg)
         }
@@ -1139,7 +1166,7 @@ fn convert_umsg_to_vsomeip_msg(
             //  this a tune-up, since now no longer does the service_id match what's expected on
             //  the other end.
             //
-            // TODO: Will need to consider what changes to make, e.g. perhaps providing
+            // TODO: Will need to consider what changes to make
             // let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id); // Should this be source?
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
@@ -1172,6 +1199,10 @@ fn convert_umsg_to_vsomeip_msg(
             let (client_id, session_id) = split_u32_to_u16(request_id);
             get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             get_pinned_message_base(&vsomeip_msg).set_session(session_id);
+            trace!("{}:{} - request_id: {} client_id: {} session_id: {}",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                request_id, client_id, session_id
+            );
             let ok = {
                 if let Some(commstatus) = umsg.attributes.commstatus {
                     let commstatus = commstatus.enum_value_or(UCode::UNIMPLEMENTED);
@@ -1283,4 +1314,10 @@ fn is_point_to_point_message(_vsomeip_message: &mut UniquePtr<MessageWrapper>) -
         msg_type,
         message_type_e::MT_REQUEST | message_type_e::MT_RESPONSE | message_type_e::MT_ERROR
     )
+}
+
+static SESSION_COUNTER: AtomicU16 = AtomicU16::new(1);
+
+fn get_request_session_id() -> u16 {
+    SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
 }
