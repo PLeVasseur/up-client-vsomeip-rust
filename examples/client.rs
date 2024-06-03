@@ -58,13 +58,16 @@ async fn main() {
     };
 
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
-    let reg_res = client.register_listener(&service_uuri, Some(&client_uuri), printing_listener).await;
+    let reg_res = client
+        .register_listener(&service_uuri, Some(&client_uuri), printing_listener)
+        .await;
     if let Err(err) = reg_res {
         error!("Unable to register for returning Response: {:?}", err);
     }
 
     loop {
-        let request_msg_res = UMessageBuilder::request(service_uuri.clone(), client_uuri.clone(), 10000).build();
+        let request_msg_res =
+            UMessageBuilder::request(service_uuri.clone(), client_uuri.clone(), 10000).build();
 
         let Ok(request_msg) = request_msg_res else {
             error!(
