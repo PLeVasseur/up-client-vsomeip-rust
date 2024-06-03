@@ -1428,7 +1428,10 @@ fn determine_registration_type(
             Ok(RegistrationType::Request(sink_filter.ue_id as ClientId))
         }
     } else {
-        Ok(RegistrationType::Publish(0))
+        // TODO: Have to consider how to handle the publish case, I suppose this is not ClientId,
+        //  but instead ServiceId
+        //  In any case, it should probably have its own application spun up
+        Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
     }
 }
 
