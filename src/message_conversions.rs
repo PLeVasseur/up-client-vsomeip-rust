@@ -35,7 +35,7 @@ const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsom
 
 pub fn convert_umsg_to_vsomeip_msg(
     umsg: &UMessage,
-    _application_wrapper: &UniquePtr<ApplicationWrapper>,
+    application_wrapper: &UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
     let Some(source) = umsg.attributes.source.as_ref() else {
@@ -85,7 +85,7 @@ pub fn convert_umsg_to_vsomeip_msg(
                 instance_id
             );
 
-            get_pinned_application(_application_wrapper).request_service(
+            get_pinned_application(application_wrapper).request_service(
                 service_id,
                 instance_id,
                 vsomeip::ANY_MAJOR,
@@ -138,7 +138,7 @@ pub fn convert_umsg_to_vsomeip_msg(
             let req_id = umsg.attributes.id.as_ref().unwrap();
             let session_id = retrieve_session_id(client_id);
             let request_id = create_request_id(client_id, session_id);
-            let app_client_id = get_pinned_application(_application_wrapper).get_client();
+            let app_client_id = get_pinned_application(application_wrapper).get_client();
             let app_session_id = get_request_session_id();
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
@@ -302,21 +302,21 @@ pub fn convert_umsg_to_vsomeip_msg(
 }
 
 pub fn convert_vsomeip_msg_to_umsg(
-    _vsomeip_message: &mut UniquePtr<MessageWrapper>,
+    vsomeip_message: &mut UniquePtr<MessageWrapper>,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UMessage, UStatus> {
     trace!("top of convert_vsomeip_msg_to_umsg");
-    let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
+    let msg_type = get_pinned_message_base(vsomeip_message).get_message_type();
 
-    let request_id = get_pinned_message_base(_vsomeip_message).get_request();
-    let service_id = get_pinned_message_base(_vsomeip_message).get_service();
-    let client_id = get_pinned_message_base(_vsomeip_message).get_client();
-    let session_id = get_pinned_message_base(_vsomeip_message).get_session();
-    let method_id = get_pinned_message_base(_vsomeip_message).get_method();
-    let instance_id = get_pinned_message_base(_vsomeip_message).get_instance();
-    let interface_version = get_pinned_message_base(_vsomeip_message).get_interface_version();
-    let payload = get_message_payload(_vsomeip_message);
+    let request_id = get_pinned_message_base(vsomeip_message).get_request();
+    let service_id = get_pinned_message_base(vsomeip_message).get_service();
+    let client_id = get_pinned_message_base(vsomeip_message).get_client();
+    let session_id = get_pinned_message_base(vsomeip_message).get_session();
+    let method_id = get_pinned_message_base(vsomeip_message).get_method();
+    let instance_id = get_pinned_message_base(vsomeip_message).get_instance();
+    let interface_version = get_pinned_message_base(vsomeip_message).get_interface_version();
+    let payload = get_message_payload(vsomeip_message);
     let payload_bytes = get_data_safe(&payload);
 
     trace!("{} - : request_id: {} client_id: {} session_id: {} service_id: {} instance_id: {} method_id: {} interface_version: {}",
