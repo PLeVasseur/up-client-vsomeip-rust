@@ -67,9 +67,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         //  UPClientVsomeip per process, which is fine in practice, but will make unit tests and integration
         //  tests more painful
         lazy_static! {
-            pub static ref APP_NAME: Mutex<String> = Mutex::new(String::new());
             pub static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
-            pub static ref UE_ID: Mutex<u16> = Mutex::new(0);
+            pub static ref LISTENER_CLIENT_ID_MAPPING: Mutex<HashMap<usize, ClientId>> = Mutex::new(HashMap::new());
+            pub static ref CLIENT_ID_APP_MAPPING: Mutex<HashMap<ClientId, String>> = Mutex::new(HashMap::new());
             pub static ref UE_REQUEST_CORRELATION: Mutex<HashMap<RequestId, ReqId>> = Mutex::new(HashMap::new());
             pub static ref ME_REQUEST_CORRELATION: Mutex<HashMap<ReqId, RequestId>> =
                 Mutex::new(HashMap::new());
@@ -97,9 +97,26 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
             trace!("Calling call_shared_extern_fn with listener_id: {}", listener_id);
 
-            let app_name = APP_NAME.lock().unwrap();
+            let app_name = {
+                let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
+                    let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                    if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                        Ok(app_name.clone())
+                    } else {
+                        Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no app_name found for listener_id: {} and client_id: {}", listener_id, client_id)))
+                    }
+                } else {
+                    Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no client_id found for listener_id: {}", listener_id)))
+                }
+            };
+            let Ok(app_name) = app_name else {
+                error!("App wasn't found to interact with");
+                return;
+            };
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
             let_cxx_string!(app_name_cxx = &*app_name);
+            // TODO: May want to add a check here that we did succeed. Perhaps within make_application_wrapper
             let application_wrapper = make_application_wrapper(
                 get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
             );
@@ -126,6 +143,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             trace!("Checked point-to-point or not");
 
             let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
+
+            // TODO: Add another function, call it shared_async_fn_err and that's where we can
+            //  send error cases when their listener should be called back
 
             trace!("Ran convert_vsomeip_msg_to_umsg");
 
@@ -173,16 +193,6 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 #(#match_arms)*
                 _ => panic!("Listener ID out of range"),
             }
-        }
-
-        fn get_extern_fn_dummy(listener_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
-            trace!("giving a dummy callback for listener_id: {}", listener_id);
-
-            extern "C" fn dummy_callback(msg: &SharedPtr<vsomeip::message>) {
-                trace!("I'm a dummy callback being called");
-            }
-
-            return dummy_callback
         }
     };
 

@@ -65,12 +65,35 @@ impl UTransport for UPClientVsomeip {
         // implementation goes here
         println!("Sending message: {:?}", message);
 
-        let (tx, rx) = oneshot::channel();
+        let Some(source_filter) = message.attributes.source.as_ref() else {
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "UMessage provided with no source"));
+        };
 
+        let sink_filter = message.attributes.sink.as_ref();
+
+        let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
+
+        let client_id = match message_type {
+            RegistrationType::Publish(client_id) => {client_id}
+            RegistrationType::Request(client_id) => {client_id}
+            RegistrationType::Response(client_id) => {client_id}
+            RegistrationType::AllPointToPoint(client_id) => {client_id}
+        };
+
+        let app_name = {
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                Ok(app_name.clone())
+            } else {
+                Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no app_name found for client_id: {}", client_id)))
+            }
+        }?;
+
+        let (tx, rx) = oneshot::channel();
         // consider using a worker pool for these, otherwise this will block
         let _tx_res = self
             .tx_to_event_loop
-            .send(TransportCommand::Send(message, tx))
+            .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
         await_internal_function(rx).await
     }
@@ -115,7 +138,7 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained listener_id: {}", listener_id);
 
-        if registration_type == RegistrationType::AllPointToPoint {
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
             let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
             point_to_point_listeners.insert(listener_id);
         }
@@ -130,10 +153,26 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Inserted into LISTENER_ID_MAP");
 
+        // TODO: Need to do some verification on returned Option<>
         LISTENER_REGISTRY
             .lock()
             .unwrap()
             .insert(listener_id, listener);
+
+        // TODO: Ask for initialization of app if not initialized yet
+        let app_name = {
+            let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+            if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
+                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                    Ok(app_name.clone())
+                } else {
+                    Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no app_name found for listener_id: {} and client_id: {}", listener_id, client_id)))
+                }
+            } else {
+                Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no client_id found for listener_id: {}", listener_id)))
+            }
+        };
 
         let extern_fn = get_extern_fn(listener_id);
         // let extern_fn = get_extern_fn_dummy(listener_id);
@@ -143,16 +182,44 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained extern_fn");
 
+        if let Err(err) = app_name {
+
+            let client_id = match registration_type {
+                RegistrationType::Publish(client_id) => {client_id}
+                RegistrationType::Request(client_id) => {client_id}
+                RegistrationType::Response(client_id) => {client_id}
+                RegistrationType::AllPointToPoint(client_id) => {client_id}
+            };
+
+            let app_name = format!("{}_{}", self.authority_name, client_id);
+
+            // consider using a worker pool for these, otherwise this will block
+            let (tx, rx) = oneshot::channel();
+            let _tx_res = self
+                .tx_to_event_loop
+                .send(TransportCommand::InitializeNewApp(
+                    client_id,
+                    app_name,
+                    tx
+                ))
+                .await;
+            await_internal_function(rx).await?;
+        }
+
+        let client_id = match registration_type {
+            RegistrationType::Publish(client_id) => {client_id}
+            RegistrationType::Request(client_id) => {client_id}
+            RegistrationType::Response(client_id) => {client_id}
+            RegistrationType::AllPointToPoint(client_id) => {client_id}
+        };
+
+        let app_name = format!("{}_{}", self.authority_name, client_id);
+
         // consider using a worker pool for these, otherwise this will block
         let (tx, rx) = oneshot::channel();
         let _tx_res = self
             .tx_to_event_loop
-            .send(TransportCommand::RegisterListener(
-                src,
-                sink,
-                msg_handler,
-                tx,
-            ))
+            .send(TransportCommand::RegisterListener(src, sink, msg_handler, app_name, tx))
             .await;
         await_internal_function(rx).await
     }
@@ -184,13 +251,29 @@ impl UTransport for UPClientVsomeip {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
+        let client_id = match registration_type {
+            RegistrationType::Publish(client_id) => {client_id}
+            RegistrationType::Request(client_id) => {client_id}
+            RegistrationType::Response(client_id) => {client_id}
+            RegistrationType::AllPointToPoint(client_id) => {client_id}
+        };
+
+        let app_name = {
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                Ok(app_name.clone())
+            } else {
+                Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no app_name found for client_id: {}", client_id)))
+            }
+        }?;
+
         let comp_listener = ComparableListener::new(listener);
 
         // consider using a worker pool for these, otherwise this will block
         let (tx, rx) = oneshot::channel();
         let _tx_res = self
             .tx_to_event_loop
-            .send(TransportCommand::UnregisterListener(src, sink, tx))
+            .send(TransportCommand::UnregisterListener(src, sink, app_name.to_string(), tx))
             .await;
         await_internal_function(rx).await?;
 
@@ -221,7 +304,7 @@ impl UTransport for UPClientVsomeip {
             free_ids.insert(listener_id);
         }
 
-        if registration_type == RegistrationType::AllPointToPoint {
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
             let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
             point_to_point_listeners.remove(&listener_id);
         }
