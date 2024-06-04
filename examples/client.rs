@@ -25,9 +25,13 @@ async fn main() {
     let service_authority_name = "foo";
     let streamer_ue_id = 0x7878;
 
-    let service_ue_id = 0x1234;
-    let service_ue_version_major = 1;
-    let service_resource_id = 0x0421;
+    let service_1_ue_id = 0x1234;
+    let service_1_ue_version_major = 1;
+    let service_1_resource_id = 0x0421;
+
+    let service_2_ue_id = 0x1235;
+    let service_2_ue_version_major = 1;
+    let service_2_resource_id = 0x0422;
 
     let client_authority_name = "bar";
     let client_ue_id = 0x0345;
@@ -49,37 +53,70 @@ async fn main() {
         ..Default::default()
     };
 
-    let service_uuri = UUri {
+    let service_1_uuri = UUri {
         authority_name: service_authority_name.to_string(),
-        ue_id: service_ue_id as u32,
-        ue_version_major: service_ue_version_major,
-        resource_id: service_resource_id,
+        ue_id: service_1_ue_id as u32,
+        ue_version_major: service_1_ue_version_major,
+        resource_id: service_1_resource_id,
+        ..Default::default()
+    };
+
+    let service_2_uuri = UUri {
+        authority_name: service_authority_name.to_string(),
+        ue_id: service_2_ue_id as u32,
+        ue_version_major: service_2_ue_version_major,
+        resource_id: service_2_resource_id,
         ..Default::default()
     };
 
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
-    let reg_res = client
-        .register_listener(&service_uuri, Some(&client_uuri), printing_listener)
+    let reg_res_1 = client
+        .register_listener(&service_1_uuri, Some(&client_uuri), printing_listener.clone())
         .await;
-    if let Err(err) = reg_res {
+    if let Err(err) = reg_res_1 {
+        error!("Unable to register for returning Response: {:?}", err);
+    }
+
+    let reg_res_1 = client
+        .register_listener(&service_2_uuri, Some(&client_uuri), printing_listener)
+        .await;
+    if let Err(err) = reg_res_1 {
         error!("Unable to register for returning Response: {:?}", err);
     }
 
     loop {
-        let request_msg_res =
-            UMessageBuilder::request(service_uuri.clone(), client_uuri.clone(), 10000).build();
+        let request_msg_res_1  =
+            UMessageBuilder::request(service_1_uuri.clone(), client_uuri.clone(), 10000).build();
 
-        let Ok(request_msg) = request_msg_res else {
+        let Ok(request_msg_1) = request_msg_res_1 else {
             error!(
                 "Unable to create Request UMessage: {:?}",
-                request_msg_res.err().unwrap()
+                request_msg_res_1.err().unwrap()
             );
             continue;
         };
 
-        let send_res = client.send(request_msg).await;
+        let send_res_1   = client.send(request_msg_1).await;
 
-        if let Err(err) = send_res {
+        if let Err(err) = send_res_1 {
+            error!("Unable to send Request UMessage: {:?}", err);
+            continue;
+        }
+
+        let request_msg_res_2  =
+            UMessageBuilder::request(service_2_uuri.clone(), client_uuri.clone(), 10000).build();
+
+        let Ok(request_msg_2) = request_msg_res_2 else {
+            error!(
+                "Unable to create Request UMessage: {:?}",
+                request_msg_res_2.err().unwrap()
+            );
+            continue;
+        };
+
+        let send_res_2   = client.send(request_msg_2).await;
+
+        if let Err(err) = send_res_2 {
             error!("Unable to send Request UMessage: {:?}", err);
             continue;
         }

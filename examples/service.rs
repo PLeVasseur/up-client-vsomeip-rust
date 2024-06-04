@@ -65,6 +65,10 @@ async fn main() {
     let service_1_ue_version_major = 1;
     let service_1_resource_id = 0x0421;
 
+    let service_2_ue_id = 0x1235;
+    let service_2_ue_version_major = 1;
+    let service_2_resource_id = 0x0422;
+
     let client_res = UPClientVsomeip::new(&service_authority_name.to_string(), streamer_ue_id);
 
     let Ok(client) = client_res else {
@@ -74,7 +78,7 @@ async fn main() {
 
     let client = Arc::new(client);
 
-    let service_uuri = UUri {
+    let service_1_uuri = UUri {
         authority_name: service_authority_name.to_string(),
         ue_id: service_1_ue_id as u32,
         ue_version_major: service_1_ue_version_major,
@@ -82,13 +86,29 @@ async fn main() {
         ..Default::default()
     };
 
+    let service_2_uuri = UUri {
+        authority_name: service_authority_name.to_string(),
+        ue_id: service_2_ue_id as u32,
+        ue_version_major: service_2_ue_version_major,
+        resource_id: service_2_resource_id,
+        ..Default::default()
+    };
+
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener::new(client.clone()));
 
-    let reg_res = client
-        .register_listener(&any_uuri(), Some(&service_uuri), printing_listener)
+    let reg_service_1 = client
+        .register_listener(&any_uuri(), Some(&service_1_uuri), printing_listener.clone())
         .await;
 
-    if let Err(err) = reg_res {
+    if let Err(err) = reg_service_1 {
+        error!("Unable to register: {:?}", err);
+    }
+
+    let reg_service_2 = client
+        .register_listener(&any_uuri(), Some(&service_2_uuri), printing_listener)
+        .await;
+
+    if let Err(err) = reg_service_2 {
         error!("Unable to register: {:?}", err);
     }
 
