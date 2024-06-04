@@ -20,6 +20,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use log::{error, info, trace};
+use rand::random;
 
 use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
@@ -47,6 +48,7 @@ use determinations::{
 };
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
+const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL: &str = "unregister_listener_internal";
@@ -146,6 +148,11 @@ impl UPClientVsomeip {
         Self::app_event_loop(rx, config_path);
 
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
+
+        trace!("{}:{} - Initializing UPClientVsomeip with authority_name: {} ue_id: {}",
+            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL,
+            authority_name, ue_id
+        );
 
         Ok(Self {
             authority_name: authority_name.to_string(),
@@ -295,8 +302,6 @@ impl UPClientVsomeip {
                             }
                         }
                         TransportCommand::UnregisterListener(src, sink, application_name, return_channel) => {
-
-                            // TODO: Extract ApplicationWrapper from hashmap
 
                             let registration_type = determine_registration_type(&src, &sink);
 
@@ -989,7 +994,7 @@ impl UPClientVsomeip {
         let_cxx_string!(app_name_cxx = app_name);
 
         let app_wrapper = make_application_wrapper(
-            get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
+            get_pinned_runtime(runtime_wrapper).get_application(&app_name_cxx),
         );
         Ok(app_wrapper)
     }

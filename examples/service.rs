@@ -58,14 +58,14 @@ fn any_uuri() -> UUri {
 async fn main() {
     env_logger::init();
 
-    let app_name = "service";
-
     let service_authority_name = "foo";
-    let service_ue_id = 0x1234;
-    let service_ue_version_major = 1;
-    let service_resource_id = 0x0421;
+    let streamer_ue_id = 0x9876;
 
-    let client_res = UPClientVsomeip::new(service_authority_name, service_ue_id);
+    let service_1_ue_id = 0x1234;
+    let service_1_ue_version_major = 1;
+    let service_1_resource_id = 0x0421;
+
+    let client_res = UPClientVsomeip::new(&service_authority_name.to_string(), streamer_ue_id);
 
     let Ok(client) = client_res else {
         error!("Unable to establish subscriber");
@@ -76,9 +76,9 @@ async fn main() {
 
     let service_uuri = UUri {
         authority_name: service_authority_name.to_string(),
-        ue_id: service_ue_id as u32,
-        ue_version_major: service_ue_version_major,
-        resource_id: service_resource_id,
+        ue_id: service_1_ue_id as u32,
+        ue_version_major: service_1_ue_version_major,
+        resource_id: service_1_resource_id,
         ..Default::default()
     };
 

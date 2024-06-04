@@ -14,7 +14,7 @@ async fn main() {
     let ue_version_major = 1;
     let resource_id = 0x8001;
 
-    let client_res = UPClientVsomeip::new(authority_name, ue_id);
+    let client_res = UPClientVsomeip::new(&authority_name.to_string(), ue_id);
 
     let Ok(client) = client_res else {
         error!("Unable to establish publisher");

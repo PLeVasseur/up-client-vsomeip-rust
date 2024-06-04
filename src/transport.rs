@@ -74,7 +74,6 @@ async fn await_internal_function(
 #[async_trait]
 impl UTransport for UPClientVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        // implementation goes here
         println!("Sending message: {:?}", message);
 
         let Some(source_filter) = message.attributes.source.as_ref() else {
@@ -182,7 +181,7 @@ impl UTransport for UPClientVsomeip {
             let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
             if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
                 let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
-                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                if let Some(app_name) = client_id_app_mapping.get(client_id) {
                     Ok(app_name.clone())
                 } else {
                     Err(UStatus::fail_with_code(
@@ -211,7 +210,7 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained extern_fn");
 
-        if let Err(_) = app_name {
+        if app_name.is_err() {
             let client_id = match registration_type {
                 RegistrationType::Publish(client_id) => client_id,
                 RegistrationType::Request(client_id) => client_id,
@@ -240,7 +239,9 @@ impl UTransport for UPClientVsomeip {
                     let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
                     listener_client_id_mapping.insert(listener_id, client_id);
                 }
-                Err(_) => {}
+                Err(_) => {
+                    // TODO: Add logging
+                }
             }
         }
 

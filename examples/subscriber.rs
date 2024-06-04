@@ -26,7 +26,7 @@ async fn main() {
     let authority_name = "foo";
     let ue_id = 20;
 
-    let client_res = UPClientVsomeip::new(authority_name, ue_id);
+    let client_res = UPClientVsomeip::new(&authority_name.to_string(), ue_id);
 
     let Ok(client) = client_res else {
         error!("Unable to establish subscriber");
