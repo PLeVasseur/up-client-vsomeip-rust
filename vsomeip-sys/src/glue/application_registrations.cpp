@@ -13,7 +13,20 @@
 
 #include "application_registrations.h"
 
+#include <set>
+
 namespace glue {
+
+void offer_single_event(ApplicationWrapper* application_wrapper,
+                        vsomeip_v3::service_t _service,
+                        vsomeip_v3::instance_t _instance,
+                        vsomeip_v3::event_t _notifier,
+                        vsomeip_v3::eventgroup_t _eventgroup) {
+
+    std::set<vsomeip_v3::eventgroup_t> eventgroups = {_eventgroup};
+
+    application_wrapper->get_shared_ptr()->offer_event(_service, _instance, _notifier, eventgroups);
+}
 
 void register_message_handler_fn_ptr(ApplicationWrapper* application_wrapper,
                                      vsomeip_v3::service_t _service,
