@@ -13,8 +13,7 @@
 
 use crate::transport::{AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
 use crate::{
-    create_request_id, get_request_session_id, retrieve_session_id, split_u32_to_u16,
-    split_u32_to_u8, ME_AUTHORITY,
+    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, ME_AUTHORITY,
 };
 use cxx::UniquePtr;
 use log::trace;
@@ -135,12 +134,11 @@ pub fn convert_umsg_to_vsomeip_msg(
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
             let app_client_id = get_pinned_application(application_wrapper).get_client();
-            let session_id = retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
-            let request_id = create_request_id(app_client_id, session_id);
-            let app_session_id = get_request_session_id();
+            let app_session_id = retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
+            let request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
-                app_client_id, session_id, request_id, service_id, app_client_id, app_session_id
+                app_client_id, app_session_id, request_id, service_id, app_client_id, app_session_id
             );
             let app_request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - (app_request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
@@ -195,13 +193,6 @@ pub fn convert_umsg_to_vsomeip_msg(
                 "{} - Attempting to send Response",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
             );
-
-            let Some(sink) = umsg.attributes.sink.as_ref() else {
-                return Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "Message has no sink UUri",
-                ));
-            };
 
             // Implementation goes here
             let mut vsomeip_msg =

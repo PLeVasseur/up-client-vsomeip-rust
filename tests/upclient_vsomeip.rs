@@ -50,7 +50,10 @@ mod tests {
 
         let after = Instant::now();
 
-        trace!("Took {} milliseconds to register_listener.", Duration::from(after - before).as_millis());
+        trace!(
+            "Took {} milliseconds to register_listener.",
+            Duration::from(after - before).as_millis()
+        );
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 

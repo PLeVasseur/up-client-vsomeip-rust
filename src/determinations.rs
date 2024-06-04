@@ -38,7 +38,7 @@ pub fn retrieve_session_id(client_id: ClientId) -> SessionId {
     let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.lock().unwrap();
 
     trace!("retrieve_session_id: client_id: {}", client_id);
-    let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(0);
+    let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(1);
     trace!(
         "retrieve_session_id: current_session_id: {}",
         current_sesion_id

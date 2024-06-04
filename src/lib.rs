@@ -12,10 +12,7 @@
  ********************************************************************************/
 
 use cxx::{let_cxx_string, UniquePtr};
-use protobuf::Enum;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
@@ -24,28 +21,20 @@ use tokio::sync::oneshot;
 
 use log::{error, info, trace};
 
-use up_rust::{
-    UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri, UUID,
-};
+use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
-    make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
-    ApplicationWrapper, MessageWrapper, RuntimeWrapper,
+    make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
 use vsomeip_sys::safe_glue::{
-    get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-    get_pinned_payload, get_pinned_runtime, register_message_handler_fn_ptr_safe, set_data_safe,
-    set_message_payload,
+    get_pinned_application, get_pinned_message_base, get_pinned_runtime,
+    register_message_handler_fn_ptr_safe,
 };
 use vsomeip_sys::vsomeip;
-use vsomeip_sys::vsomeip::message_type_e;
 
 pub mod transport;
 
-use transport::{
-    AUTHORITY_NAME, CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION,
-    UE_REQUEST_CORRELATION,
-};
+use transport::{AUTHORITY_NAME, CLIENT_ID_APP_MAPPING};
 
 mod message_conversions;
 
@@ -53,8 +42,8 @@ use message_conversions::convert_umsg_to_vsomeip_msg;
 mod determinations;
 
 use determinations::{
-    create_request_id, determine_registration_type, is_point_to_point_message, retrieve_session_id,
-    split_u32_to_u16, split_u32_to_u8,
+    create_request_id, determine_registration_type, retrieve_session_id, split_u32_to_u16,
+    split_u32_to_u8,
 };
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
@@ -97,6 +86,7 @@ enum TransportCommand {
 
 type ApplicationName = String;
 type AuthorityName = String;
+type UeId = u16;
 type ClientId = u16;
 type ReqId = UUID;
 type SessionId = u16;
@@ -110,41 +100,23 @@ enum RegistrationType {
     AllPointToPoint(ClientId),
 }
 
-struct VsomeipAppName {
-    authority_name: AuthorityName,
-    client_id: ClientId,
-    app_name: String,
-}
-
-impl VsomeipAppName {
-    pub fn new(authority_name: &AuthorityName, client_id: ClientId) -> Self {
-        Self {
-            authority_name: authority_name.clone(),
-            client_id,
-            app_name: format!("{}_{}", authority_name, client_id),
-        }
-    }
-
-    pub fn app_name(&self) -> String {
-        self.app_name.clone()
-    }
-}
-
 pub struct UPClientVsomeip {
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
-    authority_name: String,
+    authority_name: AuthorityName,
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
-    ue_id: u16,
+    ue_id: UeId,
+    // we're going to be using this for error messages, so suppress this warning for now
+    #[allow(dead_code)]
     config_path: Option<PathBuf>,
     tx_to_event_loop: Sender<TransportCommand>,
 }
 
 impl UPClientVsomeip {
     pub fn new_with_config(
-        authority_name: &str,
-        ue_id: u16,
+        authority_name: &AuthorityName,
+        ue_id: UeId,
         config_path: &Path,
     ) -> Result<Self, UStatus> {
         if !config_path.exists() {
@@ -157,13 +129,13 @@ impl UPClientVsomeip {
         Self::new_internal(authority_name, ue_id, Some(config_path))
     }
 
-    pub fn new(authority_name: &str, ue_id: u16) -> Result<Self, UStatus> {
+    pub fn new(authority_name: &AuthorityName, ue_id: UeId) -> Result<Self, UStatus> {
         Self::new_internal(authority_name, ue_id, None)
     }
 
     fn new_internal(
-        authority_name: &str,
-        ue_id: u16,
+        authority_name: &AuthorityName,
+        ue_id: UeId,
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
@@ -183,13 +155,15 @@ impl UPClientVsomeip {
         })
     }
 
-    fn start_app(app_name: &str, config_path: Option<&Path>) {
+    fn start_app(app_name: &ApplicationName, config_path: Option<&Path>) {
         let app_name = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
 
         thread::spawn(move || {
-            trace!("{}:{} - Within start_app, spawned dedicated thread to park app",
-                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_START_APP
+            trace!(
+                "{}:{} - Within start_app, spawned dedicated thread to park app",
+                UP_CLIENT_VSOMEIP_TAG,
+                UP_CLIENT_VSOMEIP_FN_TAG_START_APP
             );
             let config_path = config_path.map(|p| p.to_path_buf());
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
@@ -217,8 +191,10 @@ impl UPClientVsomeip {
             get_pinned_application(&application_wrapper).start();
         });
 
-        trace!("{}:{} - Made it past creating app and starting it on dedicated thread",
-            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_START_APP
+        trace!(
+            "{}:{} - Made it past creating app and starting it on dedicated thread",
+            UP_CLIENT_VSOMEIP_TAG,
+            UP_CLIENT_VSOMEIP_FN_TAG_START_APP
         );
 
         // TODO: Should be removed in favor of a signal-based strategy
@@ -446,7 +422,7 @@ impl UPClientVsomeip {
                             );
 
                             match new_app_res {
-                                Ok(app) => {
+                                Ok(_app) => {
                                     let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
                                     if !client_id_app_mapping.contains_key(&client_id) {
                                         if client_id_app_mapping.insert(client_id, app_name.clone()).is_some() {
@@ -493,7 +469,6 @@ impl UPClientVsomeip {
                                     continue;
                                 }
                             }
-                            trace!("Bottom of initialize_new_app match arm");
                         }
                     }
                     trace!("Hit bottom of event loop");
@@ -631,12 +606,6 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let Some(sink_filter) = _sink_filter else {
-                    return Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        "Request doesn't contain sink",
-                    ));
-                };
 
                 // TODO: According to the vsomeip in 10 minutes example, don't we need to actually
                 //  set this to the source?
@@ -928,7 +897,7 @@ impl UPClientVsomeip {
                         let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
                         let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
                         let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
-                        let interface_version =
+                        let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
 
                         // trace!("Immediately prior to offer_service");
@@ -984,9 +953,12 @@ impl UPClientVsomeip {
         config_path: Option<PathBuf>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<ApplicationWrapper>, UStatus> {
-        trace!("{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
-            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-            client_id, app_name
+        trace!(
+            "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+            UP_CLIENT_VSOMEIP_TAG,
+            UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+            client_id,
+            app_name
         );
         let existing_app = {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
@@ -1006,9 +978,12 @@ impl UPClientVsomeip {
 
         // TODO: Should this be fallible?
         Self::start_app(&app_name, config_path.as_deref());
-        trace!("{}:{} - After starting app for client_id: {} app_name: {}",
-            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-            client_id, app_name
+        trace!(
+            "{}:{} - After starting app for client_id: {} app_name: {}",
+            UP_CLIENT_VSOMEIP_TAG,
+            UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+            client_id,
+            app_name
         );
 
         let_cxx_string!(app_name_cxx = app_name);
@@ -1027,11 +1002,3 @@ impl UPClientVsomeip {
 //         todo!()
 //     }
 // }
-
-// TODO: I think this will go away with the transition we made to use 1 x vsomeip application per
-//  Request / Response, but I'll need to try this
-static SESSION_COUNTER: AtomicU16 = AtomicU16::new(1);
-
-fn get_request_session_id() -> u16 {
-    SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
-}

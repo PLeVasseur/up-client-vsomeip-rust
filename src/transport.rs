@@ -31,12 +31,12 @@ use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_run
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 
-use crate::determinations::{
-    create_request_id, determine_registration_type, is_point_to_point_message, retrieve_session_id,
-    split_u32_to_u16, split_u32_to_u8,
-};
+use crate::determinations::{determine_registration_type, is_point_to_point_message};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
-use crate::{ClientId, ReqId, RequestId, SessionId, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL};
+use crate::{
+    ClientId, ReqId, RequestId, SessionId, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+    UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
+};
 use crate::{RegistrationType, UPClientVsomeip};
 use crate::{
     TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
@@ -56,14 +56,16 @@ async fn await_internal_function(
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err(UStatus::fail_with_code(
             UCode::INTERNAL,
-            format!("Unable to receive status back from internal function: {}", function_id),
+            format!(
+                "Unable to receive status back from internal function: {}",
+                function_id
+            ),
         )),
         Err(_) => Err(UStatus::fail_with_code(
             UCode::DEADLINE_EXCEEDED,
             format!(
                 "Unable to receive status back from internal function: {} within {} second window.",
-                function_id,
-                INTERNAL_FUNCTION_TIMEOUT
+                function_id, INTERNAL_FUNCTION_TIMEOUT
             ),
         )),
     }
@@ -111,8 +113,7 @@ impl UTransport for UPClientVsomeip {
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx)
-            .await
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
     async fn register_listener(
@@ -210,7 +211,7 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained extern_fn");
 
-        if let Err(err) = app_name {
+        if let Err(_) = app_name {
             let client_id = match registration_type {
                 RegistrationType::Publish(client_id) => client_id,
                 RegistrationType::Request(client_id) => client_id,
@@ -231,8 +232,9 @@ impl UTransport for UPClientVsomeip {
                 .tx_to_event_loop
                 .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
                 .await;
-            let app_created_res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
-                .await;
+            let app_created_res =
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                    .await;
             match app_created_res {
                 Ok(_) => {
                     let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
@@ -263,8 +265,7 @@ impl UTransport for UPClientVsomeip {
                 tx,
             ))
             .await;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
-            .await
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
     }
 
     async fn unregister_listener(
@@ -326,8 +327,7 @@ impl UTransport for UPClientVsomeip {
                 tx,
             ))
             .await;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx)
-            .await?;
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let listener_id = {
             let mut id_map = LISTENER_ID_MAP.lock().unwrap();

@@ -118,7 +118,7 @@ fn download_and_write_file(url: &str, dest_path: &PathBuf) -> Result<(), Box<dyn
 
     while retries > 0 {
         match client.get(url).send() {
-            Ok(mut response) => {
+            Ok(response) => {
                 // Log the response headers
                 println!("Headers: {:?}", response.headers());
 
