@@ -22,7 +22,7 @@ use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
-use log::{error, trace};
+use log::{error, info, trace};
 
 use up_rust::{
     UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri, UUID,
@@ -60,7 +60,10 @@ use determinations::{
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
+const UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL: &str = "unregister_listener_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
+const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str = "initialize_new_app_internal";
+const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 
 const ME_AUTHORITY: &str = "me_authority";
 
@@ -185,7 +188,9 @@ impl UPClientVsomeip {
         let config_path = config_path.map(|p| p.to_path_buf());
 
         thread::spawn(move || {
-            trace!("Within start_app, spawned dedicated thread to park app");
+            trace!("{}:{} - Within start_app, spawned dedicated thread to park app",
+                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_START_APP
+            );
             let config_path = config_path.map(|p| p.to_path_buf());
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
             let_cxx_string!(app_name_cxx = app_name);
@@ -212,6 +217,11 @@ impl UPClientVsomeip {
             get_pinned_application(&application_wrapper).start();
         });
 
+        trace!("{}:{} - Made it past creating app and starting it on dedicated thread",
+            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_START_APP
+        );
+
+        // TODO: Should be removed in favor of a signal-based strategy
         thread::sleep(Duration::from_millis(500));
     }
 
@@ -231,7 +241,7 @@ impl UPClientVsomeip {
                 .expect("Failed to create Tokio runtime");
 
             runtime.block_on(async move {
-                let mut client_application_mapping: HashMap<ClientId, UniquePtr<ApplicationWrapper>> = HashMap::new();
+                // let mut client_application_mapping: HashMap<ClientId, UniquePtr<ApplicationWrapper>> = HashMap::new();
 
                 trace!("Within blocked runtime");
 
@@ -267,23 +277,40 @@ impl UPClientVsomeip {
                                         RegistrationType::AllPointToPoint(client_id) => {client_id}
                                     };
 
-                                    let application_wrapper = client_application_mapping.get_mut(&client_id);
+                                    let app_name = {
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                            Ok(app_name.clone())
+                                        } else {
+                                            Err(UStatus::fail_with_code(
+                                                UCode::NOT_FOUND,
+                                                format!("There was no app_name found for client_id: {}", client_id),
+                                            ))
+                                        }
+                                    };
 
-                                    let Some(app_wrapper) = application_wrapper else {
-                                        Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::NOT_FOUND, "Unable to find application")), return_channel).await;
+                                    let Ok(app_name) = app_name else {
+                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
                                         continue;
                                     };
 
-                                    Self::register_listener_internal(
+                                    let_cxx_string!(app_name_cxx = app_name);
+
+                                    let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
+
+                                    let res = Self::register_listener_internal(
                                         &application_name,
                                         src,
                                         sink,
                                         msg_handler,
-                                        return_channel,
-                                        app_wrapper,
+                                        &mut application_wrapper,
                                         &runtime_wrapper,
                                     )
-                                    .await
+                                    .await;
+                                    trace!("Sending back results of registration");
+                                    Self::return_oneshot_result(res, return_channel).await;
+                                    trace!("Sent back results of registration");
+                                    continue;
                                 }
                                 Err(e) => {
                                     Self::return_oneshot_result(Err(e), return_channel).await;
@@ -307,19 +334,33 @@ impl UPClientVsomeip {
                                         RegistrationType::AllPointToPoint(client_id) => {client_id}
                                     };
 
-                                    let application_wrapper = client_application_mapping.get(&client_id);
+                                    let app_name = {
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                            Ok(app_name.clone())
+                                        } else {
+                                            Err(UStatus::fail_with_code(
+                                                UCode::NOT_FOUND,
+                                                format!("There was no app_name found for client_id: {}", client_id),
+                                            ))
+                                        }
+                                    };
 
-                                    let Some(app_wrapper) = application_wrapper else {
-                                        Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::NOT_FOUND, "Unable to find application")), return_channel).await;
+                                    let Ok(app_name) = app_name else {
+                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
                                         continue;
                                     };
+
+                                    let_cxx_string!(app_name_cxx = app_name);
+
+                                    let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
 
                                     Self::unregister_listener_internal(
                                         &application_name,
                                         src,
                                         sink,
                                         return_channel,
-                                        app_wrapper,
+                                        &application_wrapper,
                                         &runtime_wrapper,
                                     )
                                     .await
@@ -357,18 +398,32 @@ impl UPClientVsomeip {
                                         RegistrationType::AllPointToPoint(client_id) => {client_id}
                                     };
 
-                                    let application_wrapper = client_application_mapping.get(&client_id);
+                                    let app_name = {
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                            Ok(app_name.clone())
+                                        } else {
+                                            Err(UStatus::fail_with_code(
+                                                UCode::NOT_FOUND,
+                                                format!("There was no app_name found for client_id: {}", client_id),
+                                            ))
+                                        }
+                                    };
 
-                                    let Some(app_wrapper) = application_wrapper else {
-                                        Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::NOT_FOUND, "Unable to find application")), return_channel).await;
+                                    let Ok(app_name) = app_name else {
+                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
                                         continue;
                                     };
+
+                                    let_cxx_string!(app_name_cxx = app_name);
+
+                                    let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
 
                                     Self::send_internal(
                                         &application_name,
                                         umsg,
                                         return_channel,
-                                        app_wrapper,
+                                        &application_wrapper,
                                         &runtime_wrapper,
                                     )
                                     .await
@@ -378,32 +433,72 @@ impl UPClientVsomeip {
                                     continue;
                                 }
                             }
-
-                            // TODO: Extract ApplicationWrapper from hashmap
-
-
                         }
                         TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
-                            let new_app_res = Self::initialize_new_app_internal(client_id, app_name, config_path.clone(), &runtime_wrapper, return_channel).await;
+                            trace!("{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+                                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                                client_id, app_name
+                            );
+                            let new_app_res = Self::initialize_new_app_internal(client_id, app_name.clone(), config_path.clone(), &runtime_wrapper).await;
+                            trace!("{}:{} - Created new app for client_id: {} app_name: {}",
+                                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                                client_id, app_name
+                            );
 
                             match new_app_res {
                                 Ok(app) => {
-                                    if !client_application_mapping.contains_key(&client_id) {
-                                        if client_application_mapping.insert(client_id, app).is_some() {
-                                            error!("Somehow we already had an application running for client_id: {}", client_id);
+                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                    if !client_id_app_mapping.contains_key(&client_id) {
+                                        if client_id_app_mapping.insert(client_id, app_name.clone()).is_some() {
+                                            let err_msg = format!("Insertion showed key existsed. Somehow we already had an application running for client_id: {}", client_id);
+                                            let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                                            Self::return_oneshot_result(Err(err), return_channel).await;
+                                            continue;
+                                        } else {
+                                            trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
+                                            Self::return_oneshot_result(Ok(()), return_channel).await;
+                                            continue;
                                         }
                                     } else {
-                                        // TODO: Need to decide on behavior when there was already
-                                        //  an application running with that client ID
+                                        let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
+                                        let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                                        Self::return_oneshot_result(Err(err), return_channel).await;
+                                        continue;
                                     }
+
+
+                                    // if !client_application_mapping.contains_key(&client_id) {
+                                    //     if client_application_mapping.insert(client_id, app).is_some() {
+                                    //         let err_msg = format!("Somehow we already had an application running for client_id: {}", client_id);
+                                    //         let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                                    //         Self::return_oneshot_result(Err(err), return_channel).await;
+                                    //         continue;
+                                    //     } else {
+                                    //         trace!("Inserted client_id: {} and application into event loop hashmap", client_id);
+                                    //         Self::return_oneshot_result(Ok(()), return_channel).await;
+                                    //         continue;
+                                    //     }
+                                    // } else {
+                                    //     let err_msg = format!("There already exists an application for client_id: {}", client_id);
+                                    //     let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                                    //     Self::return_oneshot_result(Err(err), return_channel).await;
+                                    //     continue;
+                                    //     // TODO: Need to decide on behavior when there was already
+                                    //     //  an application running with that client ID
+                                    // }
                                 }
                                 Err(err) => {
                                     error!("Unable to create new app: {:?}", err);
+                                    Self::return_oneshot_result(Err(err), return_channel).await;
+                                    continue;
                                 }
                             }
+                            trace!("Bottom of initialize_new_app match arm");
                         }
                     }
+                    trace!("Hit bottom of event loop");
                 }
+                info!("Broke out of loop! You probably dropped the UPClientVsomeip");
             });
             trace!("Parking dedicated thread");
             thread::park();
@@ -417,10 +512,9 @@ impl UPClientVsomeip {
         _source_filter: UUri,
         _sink_filter: Option<UUri>,
         _msg_handler: MessageHandlerFnPtr,
-        _return_channel: oneshot::Sender<Result<(), UStatus>>,
         _application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-    ) {
+    ) -> Result<(), UStatus> {
         // TODO: May want to add additional validation up here on the UUri filters
 
         trace!(
@@ -433,15 +527,10 @@ impl UPClientVsomeip {
 
         let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
         let Ok(registration_type) = registration_type_res else {
-            Self::return_oneshot_result(
-                Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "Unable to map source and sink filters to uProtocol message type",
-                )),
-                _return_channel,
-            )
-            .await;
-            return;
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "Unable to map source and sink filters to uProtocol message type",
+            ));
         };
         match registration_type {
             RegistrationType::Publish(_) => {
@@ -485,7 +574,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Ok(())
             }
             RegistrationType::Request(_) => {
                 trace!(
@@ -494,15 +583,10 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = _sink_filter else {
-                    Self::return_oneshot_result(
-                        Err(UStatus::fail_with_code(
-                            UCode::INVALID_ARGUMENT,
-                            "Request doesn't contain sink",
-                        )),
-                        _return_channel,
-                    )
-                    .await;
-                    return;
+                    return Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Unable to map source and sink filters to uProtocol message type",
+                    ));
                 };
 
                 let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
@@ -539,7 +623,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Ok(())
             }
             RegistrationType::Response(_) => {
                 trace!(
@@ -548,15 +632,10 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = _sink_filter else {
-                    Self::return_oneshot_result(
-                        Err(UStatus::fail_with_code(
-                            UCode::INVALID_ARGUMENT,
-                            "Request doesn't contain sink",
-                        )),
-                        _return_channel,
-                    )
-                    .await;
-                    return;
+                    return Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Request doesn't contain sink",
+                    ));
                 };
 
                 // TODO: According to the vsomeip in 10 minutes example, don't we need to actually
@@ -588,7 +667,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Ok(())
             }
             RegistrationType::AllPointToPoint(_) => {
                 // Note that there's another layer of indirection needed here, as when we register for
@@ -633,7 +712,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Ok(())
             }
         }
     }
@@ -904,8 +983,11 @@ impl UPClientVsomeip {
         app_name: ApplicationName,
         config_path: Option<PathBuf>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-        return_channel: oneshot::Sender<Result<(), UStatus>>,
     ) -> Result<UniquePtr<ApplicationWrapper>, UStatus> {
+        trace!("{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+            client_id, app_name
+        );
         let existing_app = {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
             client_id_app_mapping.contains_key(&client_id)
@@ -919,12 +1001,15 @@ impl UPClientVsomeip {
                     client_id, app_name
                 ),
             );
-            Self::return_oneshot_result(Err(err.clone()), return_channel).await;
             return Err(err);
         }
 
         // TODO: Should this be fallible?
         Self::start_app(&app_name, config_path.as_deref());
+        trace!("{}:{} - After starting app for client_id: {} app_name: {}",
+            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+            client_id, app_name
+        );
 
         let_cxx_string!(app_name_cxx = app_name);
 

@@ -36,27 +36,33 @@ use crate::determinations::{
     split_u32_to_u16, split_u32_to_u8,
 };
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
-use crate::TransportCommand;
-use crate::{ClientId, ReqId, RequestId, SessionId};
+use crate::{ClientId, ReqId, RequestId, SessionId, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL};
 use crate::{RegistrationType, UPClientVsomeip};
+use crate::{
+    TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
+};
 
-const INTERNAL_FUNCTION_TIMEOUT: u64 = 2;
+const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
+
+const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 
 generate_message_handler_extern_c_fns!(10000);
 
 async fn await_internal_function(
+    function_id: &str,
     rx: oneshot::Receiver<Result<(), UStatus>>,
 ) -> Result<(), UStatus> {
     match timeout(Duration::from_secs(INTERNAL_FUNCTION_TIMEOUT), rx).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err(UStatus::fail_with_code(
             UCode::INTERNAL,
-            "Unable to receive status back for send_internal()",
+            format!("Unable to receive status back from internal function: {}", function_id),
         )),
         Err(_) => Err(UStatus::fail_with_code(
             UCode::DEADLINE_EXCEEDED,
             format!(
-                "Unable to receive status back from send_internal() within {} second window.",
+                "Unable to receive status back from internal function: {} within {} second window.",
+                function_id,
                 INTERNAL_FUNCTION_TIMEOUT
             ),
         )),
@@ -105,7 +111,8 @@ impl UTransport for UPClientVsomeip {
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
-        await_internal_function(rx).await
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx)
+            .await
     }
 
     async fn register_listener(
@@ -197,7 +204,6 @@ impl UTransport for UPClientVsomeip {
         };
 
         let extern_fn = get_extern_fn(listener_id);
-        // let extern_fn = get_extern_fn_dummy(listener_id);
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
@@ -216,11 +222,24 @@ impl UTransport for UPClientVsomeip {
 
             // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
+            trace!(
+                "{}:{} - Sending TransportCommand for InitializeNewApp",
+                UP_CLIENT_VSOMEIP_TAG,
+                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+            );
             let _tx_res = self
                 .tx_to_event_loop
                 .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
                 .await;
-            await_internal_function(rx).await?;
+            let app_created_res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                .await;
+            match app_created_res {
+                Ok(_) => {
+                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                    listener_client_id_mapping.insert(listener_id, client_id);
+                }
+                Err(_) => {}
+            }
         }
 
         let client_id = match registration_type {
@@ -244,7 +263,8 @@ impl UTransport for UPClientVsomeip {
                 tx,
             ))
             .await;
-        await_internal_function(rx).await
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+            .await
     }
 
     async fn unregister_listener(
@@ -306,7 +326,8 @@ impl UTransport for UPClientVsomeip {
                 tx,
             ))
             .await;
-        await_internal_function(rx).await?;
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx)
+            .await?;
 
         let listener_id = {
             let mut id_map = LISTENER_ID_MAP.lock().unwrap();
@@ -334,6 +355,9 @@ impl UTransport for UPClientVsomeip {
             let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
             free_ids.insert(listener_id);
         }
+
+        // TODO: Handle the delisting of this client_id and listener_id from CLIENT_ID_APP_MAPPING and
+        //  LISTENER_CLIENT_ID_MAPPING
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
             let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();

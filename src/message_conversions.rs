@@ -131,18 +131,16 @@ pub fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
             let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            let (_, client_id) = split_u32_to_u16(source.ue_id);
-            // get_pinned_message_base(&vsomeip_msg).set_client(client_id); // doesn't matter at all; rewritten by send()
 
             // TODO: Remove .unwrap()
             let req_id = umsg.attributes.id.as_ref().unwrap();
-            let session_id = retrieve_session_id(client_id);
-            let request_id = create_request_id(client_id, session_id);
             let app_client_id = get_pinned_application(application_wrapper).get_client();
+            let session_id = retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
+            let request_id = create_request_id(app_client_id, session_id);
             let app_session_id = get_request_session_id();
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
-                client_id, session_id, request_id, service_id, app_client_id, app_session_id
+                app_client_id, session_id, request_id, service_id, app_client_id, app_session_id
             );
             let app_request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - (app_request_id, req_id) to store for later correlation in UE_REQUEST_CORRELATION: ({}, {})",

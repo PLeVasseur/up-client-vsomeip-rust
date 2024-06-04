@@ -14,6 +14,10 @@
 use decompress::ExtractOptsBuilder;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
+use std::error::Error;
+use std::io::Write;
+use std::time::Duration;
+use reqwest::blocking::Client;
 
 const VSOMEIP_TAGGED_RELEASE_BASE: &str = "https://github.com/COVESA/vsomeip/archive/refs/tags/";
 const VSOMEIP_VERSION_ARCHIVE: &str = "3.4.10.tar.gz";
@@ -106,25 +110,81 @@ fn main() -> miette::Result<()> {
 
 // Retrieves a file from `url` (from GitHub, for instance) and places it in the build directory (`OUT_DIR`) with the name
 // provided by `destination` parameter.
-fn download_and_write_file(
-    url: &str,
-    dest_path: &PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Send a GET request to the URL
-    match reqwest::blocking::get(url) {
-        Ok(mut response) => {
-            if let Some(parent_path) = dest_path.parent() {
-                std::fs::create_dir_all(parent_path)?;
+fn download_and_write_file(url: &str, dest_path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(120)) // Set a timeout of 60 seconds
+        .build()?;
+    let mut retries = 3;
+
+    while retries > 0 {
+        match client.get(url).send() {
+            Ok(mut response) => {
+                // Log the response headers
+                println!("Headers: {:?}", response.headers());
+
+                // Check rate limiting headers
+                let rate_limit_remaining = response.headers().get("X-RateLimit-Remaining");
+                let rate_limit_reset = response.headers().get("X-RateLimit-Reset");
+                println!("Rate Limit Remaining: {:?}", rate_limit_remaining);
+                println!("Rate Limit Reset: {:?}", rate_limit_reset);
+
+                // Get the response body as bytes
+                let response_body = response.bytes()?;
+                println!("Body length: {:?}", response_body.len());
+
+                // Create parent directories if necessary
+                if let Some(parent_path) = dest_path.parent() {
+                    std::fs::create_dir_all(parent_path)?;
+                }
+
+                // Create or open the destination file
+                let mut out_file = fs::File::create(dest_path)?;
+
+                // Write the response body to the file
+                let result: Result<(), Box<dyn Error>> = out_file
+                    .write_all(&response_body)
+                    .map_err(|e| e.to_string().into());
+
+                // Return the result if successful
+                if result.is_ok() {
+                    return result;
+                } else {
+                    println!("Error copying response body to file: {:?}", result);
+                }
             }
-            let mut out_file = fs::File::create(dest_path)?;
-
-            let result: Result<(), Box<dyn std::error::Error>> = response
-                .copy_to(&mut out_file)
-                .map(|_| ())
-                .map_err(|e| e.to_string().into());
-
-            result
+            Err(e) => {
+                println!("Error: {:?}", e);
+                retries -= 1;
+                if retries > 0 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                } else {
+                    return Err(Box::from(e));
+                }
+            }
         }
-        Err(e) => Err(Box::from(e)),
     }
+
+    Err("Failed to download file after multiple attempts".into())
 }
+// fn download_and_write_file(
+//     url: &str,
+//     dest_path: &PathBuf,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     // Send a GET request to the URL
+//     match reqwest::blocking::get(url) {
+//         Ok(mut response) => {
+//             if let Some(parent_path) = dest_path.parent() {
+//                 std::fs::create_dir_all(parent_path)?;
+//             }
+//             let mut out_file = fs::File::create(dest_path)?;
+//
+//             let result: Result<(), Box<dyn std::error::Error>> = response
+//                 .copy_to(&mut out_file)
+//                 .map(|_| ())
+//                 .map_err(|e| e.to_string().into());
+//
+//             result
+//         }
+//         Err(e) => Err(Box::from(e)),
+//     }
+// }

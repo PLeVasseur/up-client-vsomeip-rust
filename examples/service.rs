@@ -65,7 +65,7 @@ async fn main() {
     let service_ue_version_major = 1;
     let service_resource_id = 0x0421;
 
-    let client_res = UPClientVsomeip::new(app_name, service_authority_name, service_ue_id);
+    let client_res = UPClientVsomeip::new(service_authority_name, service_ue_id);
 
     let Ok(client) = client_res else {
         error!("Unable to establish subscriber");

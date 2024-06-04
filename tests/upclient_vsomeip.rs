@@ -5,10 +5,10 @@ use up_client_vsomeip_rust::UPClientVsomeip;
 mod tests {
     use crate::test_lib::PrintingListener;
     use crate::{test_lib, UPClientVsomeip};
-    use log::error;
+    use log::{error, trace};
     use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
     use tokio::task;
     use up_rust::{UListener, UTransport, UUri};
 
@@ -16,7 +16,7 @@ mod tests {
     fn test_constructing_client() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10);
+        let client = UPClientVsomeip::new("foo", 10);
 
         thread::sleep(Duration::from_millis(100));
 
@@ -27,7 +27,7 @@ mod tests {
     async fn test_registering_publish() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -38,13 +38,21 @@ mod tests {
         };
         let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let before = Instant::now();
 
         let reg_res = client
             .register_listener(&source_filter, None, printing_helper)
             .await;
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let after = Instant::now();
+
+        trace!("Took {} milliseconds to register_listener.", Duration::from(after - before).as_millis());
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         if let Err(ref err) = reg_res {
             error!("Issue registering listener for publishes: {:?}", err);
@@ -57,7 +65,7 @@ mod tests {
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -99,7 +107,7 @@ mod tests {
     async fn test_registering_request() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -136,7 +144,7 @@ mod tests {
     async fn test_registering_unregistering_request() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -185,7 +193,7 @@ mod tests {
     async fn test_registering_response() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -222,7 +230,7 @@ mod tests {
     async fn test_registering_unregistering_response() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -273,7 +281,7 @@ mod tests {
     async fn test_registering_all_point_to_point() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "me_authority".to_string(),
@@ -310,7 +318,7 @@ mod tests {
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new("my_app", "foo", 10).unwrap();
+        let client = UPClientVsomeip::new("foo", 10).unwrap();
 
         let source_filter = UUri {
             authority_name: "me_authority".to_string(),
