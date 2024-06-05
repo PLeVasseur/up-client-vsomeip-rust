@@ -30,6 +30,7 @@ use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
+use vsomeip_sys::vsomeip::message;
 
 use crate::determinations::{determine_registration_type, is_point_to_point_message};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
@@ -104,7 +105,42 @@ impl UTransport for UPClientVsomeip {
                     format!("There was no app_name found for client_id: {}", client_id),
                 ))
             }
-        }?;
+        };
+
+        if app_name.is_err() {
+            let client_id = match message_type {
+                RegistrationType::Publish(client_id) => client_id,
+                RegistrationType::Request(client_id) => client_id,
+                RegistrationType::Response(client_id) => client_id,
+                RegistrationType::AllPointToPoint(client_id) => client_id,
+            };
+
+            let app_name = format!("{}_{}", self.authority_name, client_id);
+
+            // consider using a worker pool for these, otherwise this will block
+            let (tx, rx) = oneshot::channel();
+            trace!(
+                "{}:{} - Sending TransportCommand for InitializeNewApp",
+                UP_CLIENT_VSOMEIP_TAG,
+                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+            );
+            let _tx_res = self
+                .tx_to_event_loop
+                .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
+                .await;
+            let app_created_res =
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                .await?;
+        }
+
+        let client_id = match message_type {
+            RegistrationType::Publish(client_id) => client_id,
+            RegistrationType::Request(client_id) => client_id,
+            RegistrationType::Response(client_id) => client_id,
+            RegistrationType::AllPointToPoint(client_id) => client_id,
+        };
+
+        let app_name = format!("{}_{}", self.authority_name, client_id);
 
         let (tx, rx) = oneshot::channel();
         // consider using a worker pool for these, otherwise this will block

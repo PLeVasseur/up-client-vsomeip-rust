@@ -22,19 +22,16 @@ use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, US
 use vsomeip_sys::glue::{
     make_message_wrapper, make_payload_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{
-    get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-    get_pinned_payload, get_pinned_runtime, set_data_safe, set_message_payload,
-};
+use vsomeip_sys::safe_glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, request_single_event_safe, set_data_safe, set_message_payload};
 use vsomeip_sys::vsomeip;
-use vsomeip_sys::vsomeip::message_type_e;
+use vsomeip_sys::vsomeip::{ANY_MAJOR, message_type_e};
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
 
 pub fn convert_umsg_to_vsomeip_msg(
     umsg: &UMessage,
-    application_wrapper: &UniquePtr<ApplicationWrapper>,
+    application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
     let Some(source) = umsg.attributes.source.as_ref() else {
@@ -57,8 +54,8 @@ pub fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let instance_id = 1; // TODO: Setting to 1 manually for now
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
-            let (_, method_id) = split_u32_to_u16(source.resource_id);
-            get_pinned_message_base(&vsomeip_msg).set_method(method_id);
+            let (_, event_id) = split_u32_to_u16(source.resource_id);
+            get_pinned_message_base(&vsomeip_msg).set_method(event_id);
             // let client_id = 0; // manually setting this to 0 as according to spec
             // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             // let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
@@ -84,20 +81,30 @@ pub fn convert_umsg_to_vsomeip_msg(
                 instance_id
             );
 
+            // TODO: These things need only be done once -- consider how to know we already did this
             get_pinned_application(application_wrapper).request_service(
                 service_id,
                 instance_id,
-                vsomeip::ANY_MAJOR,
+                ANY_MAJOR,
                 // interface_version,
                 vsomeip::ANY_MINOR,
             );
+            request_single_event_safe(
+                application_wrapper,
+                service_id,
+                instance_id,
+                event_id,
+                event_id,
+            );
+            get_pinned_application(&application_wrapper).subscribe(
+                service_id,
+                instance_id,
+                event_id,
+                ANY_MAJOR,
+                event_id,
+            );
 
-            // get_pinned_application(_application_wrapper).offer_service(
-            //     service_id,
-            //     1,
-            //     interface_version,
-            //     vsomeip::ANY_MINOR,
-            // );
+            // TODO: These things need only be done once -- consider how to know we already did this
 
             trace!("Immediately after request_service");
 

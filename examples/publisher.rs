@@ -10,6 +10,7 @@ async fn main() {
 
     let app_name = "publisher";
     let authority_name = "foo";
+
     let ue_id = 10;
     let ue_version_major = 1;
     let resource_id = 0x8001;

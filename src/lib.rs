@@ -395,13 +395,13 @@ impl UPClientVsomeip {
 
                                     let_cxx_string!(app_name_cxx = app_name);
 
-                                    let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
+                                    let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
 
                                     Self::send_internal(
                                         &application_name,
                                         umsg,
                                         return_channel,
-                                        &application_wrapper,
+                                        &mut application_wrapper,
                                         &runtime_wrapper,
                                     )
                                     .await
@@ -869,7 +869,7 @@ impl UPClientVsomeip {
         _app_name: &str,
         umsg: UMessage,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
-        _application_wrapper: &UniquePtr<ApplicationWrapper>,
+        _application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
         match umsg
