@@ -25,7 +25,7 @@ pub mod handler_registration {
             _service: u16,
             _instance: u16,
             _notifier: u16,
-            _eventgroup: u16
+            _eventgroup: u16,
         );
 
         pub unsafe fn offer_single_event(
@@ -33,7 +33,7 @@ pub mod handler_registration {
             _service: u16,
             _instance: u16,
             _notifier: u16,
-            _eventgroup: u16
+            _eventgroup: u16,
         );
 
         type message_handler_fn_ptr = crate::extern_callback_wrappers::MessageHandlerFnPtr;

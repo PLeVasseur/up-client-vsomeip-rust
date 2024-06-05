@@ -11,15 +11,17 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::cxx_bridge::handler_registration::{offer_single_event, register_availability_handler_fn_ptr, request_single_event};
 use crate::cxx_bridge::handler_registration::register_message_handler_fn_ptr;
+use crate::cxx_bridge::handler_registration::{
+    offer_single_event, register_availability_handler_fn_ptr, request_single_event,
+};
 use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
 use crate::ffi::glue::{get_payload_raw, set_payload_raw};
 use crate::glue::upcast;
 use crate::glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use crate::unsafe_fns::create_payload_wrapper;
-use crate::vsomeip::{message_base};
-use crate::vsomeip::{application, message, payload, runtime, eventgroup_t};
+use crate::vsomeip::message_base;
+use crate::vsomeip::{application, eventgroup_t, message, payload, runtime};
 use cxx::UniquePtr;
 use std::pin::Pin;
 use std::slice;
@@ -290,7 +292,7 @@ pub fn request_single_event_safe(
             _service,
             _instance,
             _notifier,
-            _eventgroup
+            _eventgroup,
         );
     }
 }
@@ -322,7 +324,7 @@ pub fn offer_single_event_safe(
             _service,
             _instance,
             _notifier,
-            _eventgroup
+            _eventgroup,
         );
     }
 }

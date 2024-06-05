@@ -12,12 +12,12 @@
  ********************************************************************************/
 
 use decompress::ExtractOptsBuilder;
-use std::path::{Path, PathBuf};
-use std::{env, fs};
+use reqwest::blocking::Client;
 use std::error::Error;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use reqwest::blocking::Client;
+use std::{env, fs};
 
 const VSOMEIP_TAGGED_RELEASE_BASE: &str = "https://github.com/COVESA/vsomeip/archive/refs/tags/";
 const VSOMEIP_VERSION_ARCHIVE: &str = "3.4.10.tar.gz";
