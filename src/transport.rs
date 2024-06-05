@@ -357,8 +357,15 @@ impl UTransport for UPClientVsomeip {
             free_ids.insert(listener_id);
         }
 
-        // TODO: Handle the delisting of this client_id and listener_id from CLIENT_ID_APP_MAPPING and
-        //  LISTENER_CLIENT_ID_MAPPING
+        {
+            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+            client_id_app_mapping.remove(&client_id);
+        }
+
+        {
+            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+            listener_client_id_mapping.remove(&listener_id);
+        }
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
             let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
