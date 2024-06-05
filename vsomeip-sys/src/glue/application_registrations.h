@@ -19,6 +19,12 @@
 
 namespace glue {
 
+void request_single_event(ApplicationWrapper* application_wrapper,
+                          vsomeip_v3::service_t _service,
+                          vsomeip_v3::instance_t _instance,
+                          vsomeip_v3::event_t _notifier,
+                          vsomeip_v3::eventgroup_t _eventgroup);
+
 void offer_single_event(ApplicationWrapper* application_wrapper,
                         vsomeip_v3::service_t _service,
                         vsomeip_v3::instance_t _instance,

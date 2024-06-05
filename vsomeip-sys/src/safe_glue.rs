@@ -11,7 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::cxx_bridge::handler_registration::{offer_single_event, register_availability_handler_fn_ptr};
+use crate::cxx_bridge::handler_registration::{offer_single_event, register_availability_handler_fn_ptr, request_single_event};
 use crate::cxx_bridge::handler_registration::register_message_handler_fn_ptr;
 use crate::extern_callback_wrappers::{AvailabilityHandlerFnPtr, MessageHandlerFnPtr};
 use crate::ffi::glue::{get_payload_raw, set_payload_raw};
@@ -19,7 +19,7 @@ use crate::glue::upcast;
 use crate::glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use crate::unsafe_fns::create_payload_wrapper;
 use crate::vsomeip::{message_base};
-use crate::vsomeip::{application, message, payload, runtime};
+use crate::vsomeip::{application, message, payload, runtime, eventgroup_t};
 use cxx::UniquePtr;
 use std::pin::Pin;
 use std::slice;
@@ -263,7 +263,7 @@ pub fn get_message_payload(
     }
 }
 
-/// Offers a single [eventgroup_t] from the application
+/// Requests a single [eventgroup_t] for the application
 ///
 /// # Rationale
 ///
@@ -272,6 +272,38 @@ pub fn get_message_payload(
 ///
 /// We also have agreed to have a 1:1 mapping between eventgroup_t and std::set<eventgroup_t>
 /// so this functio will be fine for now
+///
+/// If this changes in the future, we can instead create a wrapper called an EventGroup which will
+/// have a single method on it to add a single [eventgroup_t] so that we're able to have more than
+/// one [eventgroup_t]
+pub fn request_single_event_safe(
+    application_wrapper: &mut UniquePtr<ApplicationWrapper>,
+    _service: u16,
+    _instance: u16,
+    _notifier: u16,
+    _eventgroup: u16,
+) {
+    unsafe {
+        let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
+        request_single_event(
+            application_wrapper_ptr,
+            _service,
+            _instance,
+            _notifier,
+            _eventgroup
+        );
+    }
+}
+
+/// Offers a single [eventgroup_t] from the application
+///
+/// # Rationale
+///
+/// autocxx and cxx cannot generate bindings to a C++ function which contains
+/// a templated std::set
+///
+/// We also have agreed to have a 1:1 mapping between eventgroup_t and std::set<eventgroup_t>
+/// so this function will be fine for now
 ///
 /// If this changes in the future, we can instead create a wrapper called an EventGroup which will
 /// have a single method on it to add a single [eventgroup_t] so that we're able to have more than

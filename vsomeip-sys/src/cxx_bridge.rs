@@ -20,6 +20,14 @@ pub mod handler_registration {
         include!("include/application_wrapper.h");
         include!("application_registrations.h");
 
+        pub unsafe fn request_single_event(
+            _application_wrapper: *mut ApplicationWrapper,
+            _service: u16,
+            _instance: u16,
+            _notifier: u16,
+            _eventgroup: u16
+        );
+
         pub unsafe fn offer_single_event(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,

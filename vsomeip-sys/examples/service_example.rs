@@ -49,7 +49,6 @@ fn main() {
 
     get_pinned_application(&app_wrapper).offer_service(
         SAMPLE_SERVICE_ID,
-        // vsomeip::ANY_INSTANCE,
         SAMPLE_INSTANCE_ID,
         vsomeip::ANY_MAJOR,
         vsomeip::ANY_MINOR,
@@ -64,7 +63,6 @@ fn main() {
         &mut app_wrapper,
         SAMPLE_SERVICE_ID,
         vsomeip::ANY_INSTANCE,
-        // SAMPLE_INSTANCE_ID,
         SAMPLE_METHOD_ID,
         my_callback,
     );
