@@ -20,18 +20,15 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 
 use log::{error, info, trace};
-use rand::random;
 
 use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{
-    get_pinned_application, get_pinned_message_base, get_pinned_runtime,
-    register_message_handler_fn_ptr_safe,
-};
+use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_message_base, get_pinned_runtime, register_message_handler_fn_ptr_safe, request_single_event_safe};
 use vsomeip_sys::vsomeip;
+use vsomeip_sys::vsomeip::ANY_MAJOR;
 
 pub mod transport;
 
@@ -522,7 +519,7 @@ impl UPClientVsomeip {
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let instance_id = 1;
-                let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+                let (_, event_id) = split_u32_to_u16(_source_filter.resource_id);
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -530,21 +527,34 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                     service_id,
                     instance_id,
-                    method_id
+                    event_id
                 );
 
-                get_pinned_application(_application_wrapper).offer_service(
+                get_pinned_application(_application_wrapper).request_service(
                     service_id,
                     instance_id,
                     vsomeip::ANY_MAJOR,
                     vsomeip::ANY_MINOR,
                 );
-
+                request_single_event_safe(
+                    _application_wrapper,
+                    service_id,
+                    instance_id,
+                    event_id,
+                    event_id,
+                );
+                get_pinned_application(_application_wrapper).subscribe(
+                    service_id,
+                    instance_id,
+                    event_id,
+                    ANY_MAJOR,
+                    event_id,
+                );
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
                     service_id,
                     instance_id,
-                    method_id,
+                    event_id,
                     _msg_handler,
                 );
 
