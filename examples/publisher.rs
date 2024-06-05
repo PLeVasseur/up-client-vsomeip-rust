@@ -1,4 +1,4 @@
-use log::error;
+use log::{error, trace};
 use std::thread;
 use std::time::Duration;
 use up_client_vsomeip_rust::UPClientVsomeip;
@@ -40,6 +40,8 @@ async fn main() {
             );
             continue;
         };
+
+        trace!("Publish message we're about to send:\n{publish_msg:?}");
 
         let send_res = client.send(publish_msg).await;
 

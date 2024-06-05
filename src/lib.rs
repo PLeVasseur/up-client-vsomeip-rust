@@ -26,7 +26,7 @@ use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_pinned_application, get_pinned_message_base, get_pinned_runtime, register_message_handler_fn_ptr_safe, request_single_event_safe};
+use vsomeip_sys::safe_glue::{get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime, register_message_handler_fn_ptr_safe, request_single_event_safe};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::ANY_MAJOR;
 
@@ -533,7 +533,7 @@ impl UPClientVsomeip {
                 get_pinned_application(_application_wrapper).request_service(
                     service_id,
                     instance_id,
-                    vsomeip::ANY_MAJOR,
+                    ANY_MAJOR,
                     vsomeip::ANY_MINOR,
                 );
                 request_single_event_safe(
@@ -899,8 +899,39 @@ impl UPClientVsomeip {
                 .await;
                 return;
             }
-            UMessageType::UMESSAGE_TYPE_PUBLISH
-            | UMessageType::UMESSAGE_TYPE_REQUEST
+            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+
+                let vsomeip_msg_res =
+                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
+
+                match vsomeip_msg_res {
+                    Ok(mut vsomeip_msg) => {
+                        let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
+                        let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
+                        let event_id = get_pinned_message_base(&vsomeip_msg).get_method();
+                        let _interface_version =
+                            get_pinned_message_base(&vsomeip_msg).get_interface_version();
+
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+
+                        trace!("{}:{} Sending SOME/IP NOTIFICATION with service: {} instance: {} event: {}",
+                            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
+                            service_id, instance_id, event_id
+                        );
+
+                        let payload = get_message_payload(&mut vsomeip_msg).get_shared_ptr();
+                        // TODO: Talk about with @StevenHartley. Note that we cannot set the interface_version
+                        get_pinned_application(_application_wrapper).notify(service_id, instance_id, event_id, payload, true);
+                    }
+                    Err(err) => {
+                        error!(
+                            "{}:{} Converting UMessage to vsomeip message failed: {:?}",
+                            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, err
+                        );
+                    }
+                }
+            }
+            UMessageType::UMESSAGE_TYPE_REQUEST
             | UMessageType::UMESSAGE_TYPE_RESPONSE => {
                 // TODO: Add logging that we succeeded
 
@@ -914,20 +945,6 @@ impl UPClientVsomeip {
                         let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
                         let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
-
-                        // trace!("Immediately prior to offer_service");
-
-                        // TODO: May want to do this the one time when we first send over this
-                        //  service and understand we already offered the service, so no need
-                        //  to repeatedly do it
-                        // get_pinned_application(&local_app_wrapper).offer_service(
-                        //     service_id,
-                        //     instance_id,
-                        //     interface_version,
-                        //     vsomeip::ANY_MINOR,
-                        // );
-
-                        // trace!("Immediately after offer_service");
 
                         tokio::time::sleep(Duration::from_millis(100)).await;
 

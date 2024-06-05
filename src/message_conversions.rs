@@ -22,7 +22,7 @@ use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, US
 use vsomeip_sys::glue::{
     make_message_wrapper, make_payload_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, request_single_event_safe, set_data_safe, set_message_payload};
+use vsomeip_sys::safe_glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, offer_single_event_safe, request_single_event_safe, set_data_safe, set_message_payload};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, message_type_e};
 
@@ -58,8 +58,9 @@ pub fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_method(event_id);
             // let client_id = 0; // manually setting this to 0 as according to spec
             // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
-            // let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
-            // get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
+            let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+            trace!("uProtocol Publish message's interface_version: {interface_version}");
+            get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
             // let session_id = retrieve_session_id(client_id);
             // get_pinned_message_base(&vsomeip_msg).set_session(session_id);
             // get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
@@ -82,25 +83,18 @@ pub fn convert_umsg_to_vsomeip_msg(
             );
 
             // TODO: These things need only be done once -- consider how to know we already did this
-            get_pinned_application(application_wrapper).request_service(
+            get_pinned_application(application_wrapper).offer_service(
                 service_id,
                 instance_id,
                 ANY_MAJOR,
                 // interface_version,
                 vsomeip::ANY_MINOR,
             );
-            request_single_event_safe(
+            offer_single_event_safe(
                 application_wrapper,
                 service_id,
                 instance_id,
                 event_id,
-                event_id,
-            );
-            get_pinned_application(&application_wrapper).subscribe(
-                service_id,
-                instance_id,
-                event_id,
-                ANY_MAJOR,
                 event_id,
             );
 
@@ -385,6 +379,10 @@ pub fn convert_vsomeip_msg_to_umsg(
         }
         message_type_e::MT_NOTIFICATION => {
             trace!("MT_NOTIFICATION type");
+
+            // TODO: Talk with @StevenHartley. It seems like vsomeip notify doesn't let us set the
+            //  interface_version... going to set this manually to 1 for now
+            let interface_version = 1;
             let source = UUri {
                 authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
@@ -394,13 +392,12 @@ pub fn convert_vsomeip_msg_to_umsg(
             };
 
             let umsg_res = UMessageBuilder::publish(source)
-                .with_comm_status(UCode::OK.value())
                 .build();
 
             let Ok(umsg) = umsg_res else {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
-                    "Unable to build UMessage from vsomeip message",
+                    format!("Unable to build UMessage from vsomeip message: {:?}", umsg_res.err().unwrap()),
                 ));
             };
 
