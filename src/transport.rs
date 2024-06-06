@@ -87,7 +87,6 @@ impl UTransport for UPClientVsomeip {
         let sink_filter = message.attributes.sink.as_ref();
 
         let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
-
         let client_id = match message_type {
             RegistrationType::Publish(client_id) => client_id,
             RegistrationType::Request(client_id) => client_id,
@@ -176,6 +175,30 @@ impl UTransport for UPClientVsomeip {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
+        trace!("registration_type: {registration_type:?}");
+
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+            let mut point_to_point_listener = self.point_to_point_listener.lock().await;
+            *point_to_point_listener = Some(listener.clone());
+
+            // TODO: Read the config file & then for each instance of application go ahead and
+            //  start a new vsomeip application by sending an InitializeNewApp command
+            // TODO: Goal is to check whether we can "get away with" setting up just the application
+            //  array atm and confirm that the client_id set for the application matches the id
+            //  we set in the vsomeip config file
+            // let _tx_res = self
+            //     .tx_to_event_loop
+            //     .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
+            //     .await;
+
+            trace!("We found a point-to-point listener and set it");
+
+            return Ok(());
+
+            // let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
+            // point_to_point_listeners.insert(listener_id);
+        }
+
         let listener_id = {
             let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
             if let Some(&id) = free_ids.iter().next() {
@@ -190,11 +213,6 @@ impl UTransport for UPClientVsomeip {
         };
 
         trace!("Obtained listener_id: {}", listener_id);
-
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
-            point_to_point_listeners.insert(listener_id);
-        }
 
         let comp_listener = ComparableListener::new(Arc::clone(&listener));
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);

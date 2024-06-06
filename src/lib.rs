@@ -13,15 +13,16 @@
 
 use cxx::{let_cxx_string, UniquePtr};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 
 use log::{error, info, trace};
 
-use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID};
+use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID, UListener};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
@@ -91,7 +92,7 @@ type ReqId = UUID;
 type SessionId = u16;
 type RequestId = u32;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum RegistrationType {
     Publish(ClientId),
     Request(ClientId),
@@ -109,6 +110,8 @@ pub struct UPClientVsomeip {
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
     config_path: Option<PathBuf>,
+    // if this is not None, indicates that we are in a dedicated point-to-point mode
+    point_to_point_listener: Mutex<Option<Arc<dyn UListener>>>,
     tx_to_event_loop: Sender<TransportCommand>,
 }
 
@@ -155,6 +158,7 @@ impl UPClientVsomeip {
             authority_name: authority_name.to_string(),
             ue_id,
             tx_to_event_loop: tx,
+            point_to_point_listener: None.into(),
             config_path,
         })
     }
