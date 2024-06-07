@@ -200,35 +200,97 @@ impl UTransport for UPClientVsomeip {
 
             for app_config in &application_configs {
                 let (tx, rx) = oneshot::channel();
+                let app_name = format!("{}_{}", self.authority_name, app_config.name);
                 let tx_res = self
                     .tx_to_event_loop
                     .send(TransportCommand::InitializeNewApp(
                         app_config.id,
-                        app_config.name.clone(),
+                        app_name.clone(),
                         tx,
                     ))
                     .await;
-                await_internal_function(
+                let app_created_res = await_internal_function(
                     "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
                     rx,
                 )
-                .await?;
+                .await;
+
+                // TODO: Now we need to register a listener for all uProtocol Request style messages
+                //  incoming on that application which match our client_id
+                let listener_id = {
+                    let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
+                    if let Some(&id) = free_ids.iter().next() {
+                        free_ids.remove(&id);
+                        id
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::RESOURCE_EXHAUSTED,
+                            "No more extern C fns available",
+                        ));
+                    }
+                };
+                let comp_listener = ComparableListener::new(Arc::clone(&listener));
+                let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+                {
+                    let mut id_map = LISTENER_ID_MAP.lock().unwrap();
+                    id_map.insert(key, listener_id);
+                }
+                trace!("Inserted into LISTENER_ID_MAP");
+
+                // TODO: Need to do some verification on returned Option<>
+                LISTENER_REGISTRY
+                    .lock()
+                    .unwrap()
+                    .insert(listener_id, listener.clone());
+                match app_created_res {
+                    Ok(_) => {
+                        let mut listener_client_id_mapping =
+                            LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                        listener_client_id_mapping.insert(listener_id, app_config.id);
+                    }
+                    Err(_) => {
+                        // TODO: Add logging
+                    }
+                }
+
+                let extern_fn = get_extern_fn(listener_id);
+                let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+                let src = UUri {
+                    authority_name: "*".to_string(),
+                    ue_id: 0x0000_FFFF,     // any instance, any service
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                };
+
+                // TODO: How to explicitly handle instance_id?
+                //  I'm not sure it's possible to set within the vsomeip config file
+                let sink = Some(UUri {
+                    authority_name: self.authority_name.clone(),
+                    ue_id: app_config.id as u32,
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                });
+
+                // consider using a worker pool for these, otherwise this will block
+                let (tx, rx) = oneshot::channel();
+                let _tx_res = self
+                    .tx_to_event_loop
+                    .send(TransportCommand::RegisterListener(
+                        src,
+                        sink,
+                        msg_handler,
+                        app_name,
+                        tx,
+                    ))
+                    .await;
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+                    .await?;
             }
 
-            // TODO: Read the config file & then for each instance of application go ahead and
-            //  start a new vsomeip application by sending an InitializeNewApp command
-            // TODO: Goal is to check whether we can "get away with" setting up just the application
-            //  array atm and confirm that the client_id set for the application matches the id
-            //  we set in the vsomeip config file
-            // let _tx_res = self
-            //     .tx_to_event_loop
-            //     .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
-            //     .await;
-
             return Ok(());
-
-            // let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
-            // point_to_point_listeners.insert(listener_id);
         }
 
         let listener_id = {

@@ -2,6 +2,7 @@ use log::error;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::Arc;
+use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UListener, UMessage, UStatus, UTransport, UUri};
 
@@ -75,4 +76,7 @@ async fn main() {
     if reg_res.is_err() {
         error!("Unable to register with UTransport");
     }
+
+    let notify = Arc::new(Notify::new());
+    notify.notified().await;
 }

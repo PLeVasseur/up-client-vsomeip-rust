@@ -514,6 +514,7 @@ impl UPClientVsomeip {
             _sink_filter
         );
 
+        // TODO: We call determine_registration_type one level up from this as well... maybe only do this once?
         let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
         let Ok(registration_type) = registration_type_res else {
             return Err(UStatus::fail_with_code(
