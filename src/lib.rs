@@ -18,16 +18,19 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 use log::{error, info, trace};
 
-use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri, UUID, UListener};
+use up_rust::{UCode, UListener, UMessage, UMessageType, UStatus, UUri, UUID};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime, register_message_handler_fn_ptr_safe, request_single_event_safe};
+use vsomeip_sys::safe_glue::{
+    get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime,
+    register_message_handler_fn_ptr_safe, request_single_event_safe,
+};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::ANY_MAJOR;
 
@@ -39,11 +42,13 @@ mod message_conversions;
 
 use message_conversions::convert_umsg_to_vsomeip_msg;
 mod determinations;
-
 use determinations::{
     create_request_id, determine_registration_type, retrieve_session_id, split_u32_to_u16,
     split_u32_to_u8,
 };
+
+mod vsomeip_config;
+use vsomeip_config::extract_applications;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -149,9 +154,12 @@ impl UPClientVsomeip {
 
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        trace!("{}:{} - Initializing UPClientVsomeip with authority_name: {} ue_id: {}",
-            UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL,
-            authority_name, ue_id
+        trace!(
+            "{}:{} - Initializing UPClientVsomeip with authority_name: {} ue_id: {}",
+            UP_CLIENT_VSOMEIP_TAG,
+            UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL,
+            authority_name,
+            ue_id
         );
 
         Ok(Self {
@@ -904,7 +912,6 @@ impl UPClientVsomeip {
                 return;
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
-
                 let vsomeip_msg_res =
                     convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
 
@@ -925,7 +932,13 @@ impl UPClientVsomeip {
 
                         let payload = get_message_payload(&mut vsomeip_msg).get_shared_ptr();
                         // TODO: Talk about with @StevenHartley. Note that we cannot set the interface_version
-                        get_pinned_application(_application_wrapper).notify(service_id, instance_id, event_id, payload, true);
+                        get_pinned_application(_application_wrapper).notify(
+                            service_id,
+                            instance_id,
+                            event_id,
+                            payload,
+                            true,
+                        );
                     }
                     Err(err) => {
                         error!(
@@ -935,8 +948,7 @@ impl UPClientVsomeip {
                     }
                 }
             }
-            UMessageType::UMESSAGE_TYPE_REQUEST
-            | UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            UMessageType::UMESSAGE_TYPE_REQUEST | UMessageType::UMESSAGE_TYPE_RESPONSE => {
                 // TODO: Add logging that we succeeded
 
                 let vsomeip_msg_res =

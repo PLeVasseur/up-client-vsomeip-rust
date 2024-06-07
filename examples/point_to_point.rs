@@ -1,9 +1,9 @@
+use log::error;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::Arc;
-use log::error;
-use up_rust::{UListener, UMessage, UStatus, UTransport, UUri};
 use up_client_vsomeip_rust::UPClientVsomeip;
+use up_rust::{UListener, UMessage, UStatus, UTransport, UUri};
 
 pub struct PrintingListener;
 #[async_trait::async_trait]
@@ -55,7 +55,11 @@ async fn main() {
     let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
     println!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
 
-    let client_res = UPClientVsomeip::new_with_config(&service_authority_name.to_string(), streamer_ue_id, &abs_vsomeip_config_path.unwrap());
+    let client_res = UPClientVsomeip::new_with_config(
+        &service_authority_name.to_string(),
+        streamer_ue_id,
+        &abs_vsomeip_config_path.unwrap(),
+    );
     let Ok(client) = client_res else {
         error!("Unable to establish UTransport");
         return;
@@ -65,7 +69,9 @@ async fn main() {
     let sink = any_uuri();
 
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
-    let reg_res = client.register_listener(&source, Some(&sink), printing_listener).await;
+    let reg_res = client
+        .register_listener(&source, Some(&sink), printing_listener)
+        .await;
     if reg_res.is_err() {
         error!("Unable to register with UTransport");
     }

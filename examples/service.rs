@@ -97,7 +97,11 @@ async fn main() {
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener::new(client.clone()));
 
     let reg_service_1 = client
-        .register_listener(&any_uuri(), Some(&service_1_uuri), printing_listener.clone())
+        .register_listener(
+            &any_uuri(),
+            Some(&service_1_uuri),
+            printing_listener.clone(),
+        )
         .await;
 
     if let Err(err) = reg_service_1 {

@@ -71,7 +71,11 @@ async fn main() {
 
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
     let reg_res_1 = client
-        .register_listener(&service_1_uuri, Some(&client_uuri), printing_listener.clone())
+        .register_listener(
+            &service_1_uuri,
+            Some(&client_uuri),
+            printing_listener.clone(),
+        )
         .await;
     if let Err(err) = reg_res_1 {
         error!("Unable to register for returning Response: {:?}", err);
@@ -85,7 +89,7 @@ async fn main() {
     }
 
     loop {
-        let request_msg_res_1  =
+        let request_msg_res_1 =
             UMessageBuilder::request(service_1_uuri.clone(), client_uuri.clone(), 10000).build();
 
         let Ok(request_msg_1) = request_msg_res_1 else {
@@ -96,14 +100,14 @@ async fn main() {
             continue;
         };
 
-        let send_res_1   = client.send(request_msg_1).await;
+        let send_res_1 = client.send(request_msg_1).await;
 
         if let Err(err) = send_res_1 {
             error!("Unable to send Request UMessage: {:?}", err);
             continue;
         }
 
-        let request_msg_res_2  =
+        let request_msg_res_2 =
             UMessageBuilder::request(service_2_uuri.clone(), client_uuri.clone(), 10000).build();
 
         let Ok(request_msg_2) = request_msg_res_2 else {
@@ -114,7 +118,7 @@ async fn main() {
             continue;
         };
 
-        let send_res_2   = client.send(request_msg_2).await;
+        let send_res_2 = client.send(request_msg_2).await;
 
         if let Err(err) = send_res_2 {
             error!("Unable to send Request UMessage: {:?}", err);

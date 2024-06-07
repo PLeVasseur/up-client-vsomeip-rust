@@ -34,6 +34,7 @@ use vsomeip_sys::vsomeip::message;
 
 use crate::determinations::{determine_registration_type, is_point_to_point_message};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
+use crate::vsomeip_config::extract_applications;
 use crate::{
     ClientId, ReqId, RequestId, SessionId, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
@@ -129,7 +130,7 @@ impl UTransport for UPClientVsomeip {
                 .await;
             let app_created_res =
                 await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
-                .await?;
+                    .await?;
         }
 
         let client_id = match message_type {
@@ -178,8 +179,41 @@ impl UTransport for UPClientVsomeip {
         trace!("registration_type: {registration_type:?}");
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+            let Some(config_path) = &self.config_path else {
+                let err_msg = "No path to a vsomeip config file was provided";
+                error!("{err_msg}");
+                return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+            };
+
+            let application_configs = extract_applications(config_path)?;
+            trace!("Got vsomeip application_configs: {application_configs:?}");
+
             let mut point_to_point_listener = self.point_to_point_listener.lock().await;
+            if point_to_point_listener.is_some() {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "We already have a point-to-point UListener registered",
+                ));
+            }
             *point_to_point_listener = Some(listener.clone());
+            trace!("We found a point-to-point listener and set it");
+
+            for app_config in &application_configs {
+                let (tx, rx) = oneshot::channel();
+                let tx_res = self
+                    .tx_to_event_loop
+                    .send(TransportCommand::InitializeNewApp(
+                        app_config.id,
+                        app_config.name.clone(),
+                        tx,
+                    ))
+                    .await;
+                await_internal_function(
+                    "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
+                    rx,
+                )
+                .await?;
+            }
 
             // TODO: Read the config file & then for each instance of application go ahead and
             //  start a new vsomeip application by sending an InitializeNewApp command
@@ -190,8 +224,6 @@ impl UTransport for UPClientVsomeip {
             //     .tx_to_event_loop
             //     .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
             //     .await;
-
-            trace!("We found a point-to-point listener and set it");
 
             return Ok(());
 

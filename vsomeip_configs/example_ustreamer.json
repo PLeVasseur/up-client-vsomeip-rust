@@ -2,8 +2,12 @@
   "applications" :
   [
     {
-      "name" : "0x1234",
+      "name" : "foo",
       "id" : "0x1234"
+    },
+    {
+      "name" : "bar",
+      "id" : "0x4321"
     }
   ]
 }

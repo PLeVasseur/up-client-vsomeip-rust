@@ -22,9 +22,13 @@ use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, US
 use vsomeip_sys::glue::{
     make_message_wrapper, make_payload_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime, offer_single_event_safe, request_single_event_safe, set_data_safe, set_message_payload};
+use vsomeip_sys::safe_glue::{
+    get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
+    get_pinned_payload, get_pinned_runtime, offer_single_event_safe, request_single_event_safe,
+    set_data_safe, set_message_payload,
+};
 use vsomeip_sys::vsomeip;
-use vsomeip_sys::vsomeip::{ANY_MAJOR, message_type_e};
+use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
@@ -391,13 +395,15 @@ pub fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
-            let umsg_res = UMessageBuilder::publish(source)
-                .build();
+            let umsg_res = UMessageBuilder::publish(source).build();
 
             let Ok(umsg) = umsg_res else {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
-                    format!("Unable to build UMessage from vsomeip message: {:?}", umsg_res.err().unwrap()),
+                    format!(
+                        "Unable to build UMessage from vsomeip message: {:?}",
+                        umsg_res.err().unwrap()
+                    ),
                 ));
             };
 
