@@ -95,6 +95,41 @@ pub fn determine_registration_type(
     }
 }
 
+
+pub fn determine_message_type(
+    source_filter: &UUri,
+    sink_filter: &Option<UUri>,
+) -> Result<RegistrationType, UStatus> {
+    if let Some(sink_filter) = &sink_filter {
+        // determine if we're in the uStreamer use-case of capturing all point-to-point messages
+        let streamer_use_case = {
+            source_filter.authority_name != "*" // TODO: Is this good enough? Maybe have configurable in UPClientVsomeip?
+                && source_filter.ue_id == 0x0000_FFFF
+                && source_filter.ue_version_major == 0xFF
+                && source_filter.resource_id == 0xFFFF
+                && sink_filter.authority_name == "*"
+                && sink_filter.ue_id == 0x0000_FFFF
+                && sink_filter.ue_version_major == 0xFF
+                && sink_filter.resource_id == 0xFFFF
+        };
+
+        if streamer_use_case {
+            return Ok(RegistrationType::AllPointToPoint(0xFFFF));
+        }
+
+        if sink_filter.resource_id == 0 {
+            Ok(RegistrationType::Response(source_filter.ue_id as ClientId))
+        } else {
+            Ok(RegistrationType::Request(source_filter.ue_id as ClientId))
+        }
+    } else {
+        // TODO: Have to consider how to handle the publish case, I suppose this is not ClientId,
+        //  but instead ServiceId
+        //  In any case, it should probably have its own application spun up
+        Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
+    }
+}
+
 pub fn is_point_to_point_message(_vsomeip_message: &mut UniquePtr<MessageWrapper>) -> bool {
     let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
     matches!(

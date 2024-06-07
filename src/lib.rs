@@ -32,7 +32,7 @@ use vsomeip_sys::safe_glue::{
     register_message_handler_fn_ptr_safe, request_single_event_safe,
 };
 use vsomeip_sys::vsomeip;
-use vsomeip_sys::vsomeip::ANY_MAJOR;
+use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
 
@@ -49,6 +49,7 @@ use determinations::{
 
 mod vsomeip_config;
 use vsomeip_config::extract_applications;
+use crate::determinations::determine_message_type;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -377,9 +378,10 @@ impl UPClientVsomeip {
                             let sink_filter = umsg.attributes.sink.as_ref();
 
                             let message_type = determine_registration_type(source_filter, &sink_filter.cloned());
+                            // let message_type = determine_message_type(source_filter, &sink_filter.cloned());
 
                             match message_type {
-                                Ok(registration_type) => {
+                                Ok(ref registration_type) => {
 
                                     let client_id = match registration_type {
                                         RegistrationType::Publish(client_id) => {client_id}
@@ -388,9 +390,12 @@ impl UPClientVsomeip {
                                         RegistrationType::AllPointToPoint(client_id) => {client_id}
                                     };
 
+                                    trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
+
                                     let app_name = {
                                         let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                            trace!("For client_id we found app_name: client_id: {client_id} app_name: {app_name}");
                                             Ok(app_name.clone())
                                         } else {
                                             Err(UStatus::fail_with_code(
@@ -405,9 +410,17 @@ impl UPClientVsomeip {
                                         continue;
                                     };
 
-                                    let_cxx_string!(app_name_cxx = app_name);
+                                    let_cxx_string!(app_name_cxx = app_name.clone());
 
-                                    let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
+                                    let application = get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
+                                    if application.is_null() {
+                                        let err = format!("No application exists for {app_name} under client_id: {client_id}");
+                                        Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INTERNAL, err)), return_channel).await;
+                                        continue;
+                                    }
+                                    let mut application_wrapper = make_application_wrapper(application);
+                                    let app_client_id = get_pinned_application(&application_wrapper).get_client();
+                                    trace!("Application existed for {app_name}, listed under client_id: {client_id}, with app_client_id: {app_client_id}");
 
                                     Self::send_internal(
                                         &application_name,
@@ -640,6 +653,9 @@ impl UPClientVsomeip {
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+
+                // TODO: Fix this, should not be ANY_MAJOR and ANY_MINOR
+                get_pinned_application(_application_wrapper).request_service(service_id, instance_id, ANY_MAJOR, ANY_MINOR);
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",

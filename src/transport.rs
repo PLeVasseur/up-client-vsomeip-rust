@@ -32,7 +32,7 @@ use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::message;
 
-use crate::determinations::{determine_registration_type, is_point_to_point_message};
+use crate::determinations::{determine_message_type, determine_registration_type, is_point_to_point_message};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
@@ -88,12 +88,15 @@ impl UTransport for UPClientVsomeip {
         let sink_filter = message.attributes.sink.as_ref();
 
         let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
+        // let message_type = determine_message_type(source_filter, &sink_filter.cloned())?;
         let client_id = match message_type {
             RegistrationType::Publish(client_id) => client_id,
             RegistrationType::Request(client_id) => client_id,
             RegistrationType::Response(client_id) => client_id,
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
+
+        trace!("inside send(), message_type: {message_type:?}");
 
         let app_name = {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
@@ -133,6 +136,7 @@ impl UTransport for UPClientVsomeip {
                     .await?;
         }
 
+
         let client_id = match message_type {
             RegistrationType::Publish(client_id) => client_id,
             RegistrationType::Request(client_id) => client_id,
@@ -140,6 +144,14 @@ impl UTransport for UPClientVsomeip {
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
+        let point_to_point_listener = self.point_to_point_listener.lock().await;
+        if let Some(ref point_to_point_listener) = *point_to_point_listener {
+            if message_type == RegistrationType::Request(client_id) {
+                trace!("Sending a Request and we have a point-to-point listener");
+
+                // TODO: Register a RESPONSE listener to listen for the response coming back
+            }
+        }
         let app_name = format!("{}_{}", self.authority_name, client_id);
 
         let (tx, rx) = oneshot::channel();

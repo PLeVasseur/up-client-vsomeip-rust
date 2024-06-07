@@ -1,7 +1,8 @@
-use log::{error, trace, warn};
+use log::{error, info, trace, warn};
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::Arc;
+use std::time::Duration;
 use protobuf::Enum;
 use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
@@ -31,19 +32,23 @@ impl UListener for PrintingListener {
                 return;
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
-
+                warn!("uProtocol PUBLISH received. This shouldn't happen!");
+                panic!();
             }
             UMessageType::UMESSAGE_TYPE_REQUEST => {
                 let response_build_res = UMessageBuilder::response_for_request(msg.attributes.as_ref().unwrap()).with_comm_status(UCode::OK.value()).build();
                 let Ok(response_msg) = response_build_res else {
+                    warn!("Unable to make uProtocol Response message: {:?}", response_build_res.err().unwrap());
                     return;
                 };
                 let _ = self.client.send(response_msg).await.inspect_err(|err| {
                     warn!("Unable to send response: {err:?}");
                 });
+                info!("Able to send RESPONSE");
             }
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
-
+                info!("Received RESPONSE");
+                return;
             }
             UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
                 warn!("Not supported message type: NOTIFICATION");
@@ -84,7 +89,8 @@ async fn main() {
     let service_authority_name = "foo";
     let streamer_ue_id = 0x9876;
 
-    let service_1_ue_id = 0x1234;
+    // let service_1_ue_id = 0x1234; // TODO: Temporarily commented out just to try sending a Request to service
+    let service_1_ue_id = 0x1236;
     let service_1_ue_version_major = 1;
     let service_1_resource_id = 0x0421;
 
@@ -117,6 +123,36 @@ async fn main() {
         error!("Unable to register with UTransport");
     }
 
-    let notify = Arc::new(Notify::new());
-    notify.notified().await;
+    // craft a Request that can be served
+    let service_2_ue_id = 0x1235;
+    let service_2_ue_version_major = 1;
+    let service_2_resource_id = 0x0422;
+
+    let req_sink = UUri {
+        authority_name: "foo".to_string(),
+        ue_id: service_2_ue_id,
+        ue_version_major: service_2_ue_version_major,
+        resource_id: service_2_resource_id,
+        ..Default::default()
+    };
+
+    let req_source = UUri {
+        authority_name: "bar".to_string(),
+        ue_id: service_1_ue_id,
+        ue_version_major: service_1_ue_version_major,
+        resource_id: 0x0, // i.e. me
+        ..Default::default()
+    };
+
+    loop {
+        let request_msg_res = UMessageBuilder::request(req_sink.clone(), req_source.clone(), 10000).build().unwrap();
+        let send_res = client.send(request_msg_res.clone()).await;
+
+        if let Err(err) = send_res {
+            warn!("Unable to send message: {err:?}");
+            continue;
+        }
+
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+    }
 }
