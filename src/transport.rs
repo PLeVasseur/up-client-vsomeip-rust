@@ -32,7 +32,9 @@ use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::message;
 
-use crate::determinations::{determine_message_type, determine_registration_type, is_point_to_point_message};
+use crate::determinations::{
+    determine_message_type, determine_registration_type, is_point_to_point_message,
+};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
@@ -136,7 +138,6 @@ impl UTransport for UPClientVsomeip {
                     .await?;
         }
 
-
         let client_id = match message_type {
             RegistrationType::Publish(client_id) => client_id,
             RegistrationType::Request(client_id) => client_id,
@@ -144,15 +145,86 @@ impl UTransport for UPClientVsomeip {
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
+        let app_name = format!("{}_{}", self.authority_name, client_id);
+        trace!("app_name: {app_name}");
+
         let point_to_point_listener = self.point_to_point_listener.lock().await;
         if let Some(ref point_to_point_listener) = *point_to_point_listener {
             if message_type == RegistrationType::Request(client_id) {
                 trace!("Sending a Request and we have a point-to-point listener");
 
                 // TODO: Register a RESPONSE listener to listen for the response coming back
+
+                // TODO: Now we need to register a listener for all uProtocol Request style messages
+                //  incoming on that application which match our client_id
+                let listener_id = {
+                    let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
+                    if let Some(&id) = free_ids.iter().next() {
+                        free_ids.remove(&id);
+                        id
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::RESOURCE_EXHAUSTED,
+                            "No more extern C fns available",
+                        ));
+                    }
+                };
+                let listener = point_to_point_listener.clone();
+                let comp_listener = ComparableListener::new(Arc::clone(&listener));
+                let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+                {
+                    let mut id_map = LISTENER_ID_MAP.lock().unwrap();
+                    id_map.insert(key, listener_id);
+                }
+                trace!("Inserted into LISTENER_ID_MAP");
+
+                // TODO: Need to do some verification on returned Option<>
+                LISTENER_REGISTRY
+                    .lock()
+                    .unwrap()
+                    .insert(listener_id, listener.clone());
+
+                let extern_fn = get_extern_fn(listener_id);
+                let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+                let Some(src) = message.attributes.sink.as_ref() else {
+                    let err_msg = "Request message doesn't have a sink";
+                    error!("{err_msg}");
+                    return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                };
+                let Some(sink) = message.attributes.source.as_ref() else {
+                    let err_msg = "Request message doesn't have a source";
+                    error!("{err_msg}");
+                    return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                };
+
+                trace!("source used when registering:\n{src:?}");
+                trace!("sink used when registering:\n{sink:?}");
+
+                {
+                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                    // TODO: Check that this succeeds
+                    listener_client_id_mapping.insert(listener_id, client_id);
+                }
+
+                trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
+
+                // consider using a worker pool for these, otherwise this will block
+                let (tx, rx) = oneshot::channel();
+                let _tx_res = self
+                    .tx_to_event_loop
+                    .send(TransportCommand::RegisterListener(
+                        src.clone(),
+                        Some(sink.clone()),
+                        msg_handler,
+                        app_name.clone(),
+                        tx,
+                    ))
+                    .await;
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+                    .await?;
             }
         }
-        let app_name = format!("{}_{}", self.authority_name, client_id);
 
         let (tx, rx) = oneshot::channel();
         // consider using a worker pool for these, otherwise this will block

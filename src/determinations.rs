@@ -95,7 +95,6 @@ pub fn determine_registration_type(
     }
 }
 
-
 pub fn determine_message_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,

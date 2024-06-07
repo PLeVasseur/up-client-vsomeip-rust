@@ -111,7 +111,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 }
             };
             let Ok(app_name) = app_name else {
-                error!("App wasn't found to interact with");
+                error!("App wasn't found to interact with: {:?}", app_name.err().unwrap());
                 return;
             };
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());

@@ -48,8 +48,8 @@ use determinations::{
 };
 
 mod vsomeip_config;
-use vsomeip_config::extract_applications;
 use crate::determinations::determine_message_type;
+use vsomeip_config::extract_applications;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -655,7 +655,12 @@ impl UPClientVsomeip {
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
 
                 // TODO: Fix this, should not be ANY_MAJOR and ANY_MINOR
-                get_pinned_application(_application_wrapper).request_service(service_id, instance_id, ANY_MAJOR, ANY_MINOR);
+                get_pinned_application(_application_wrapper).request_service(
+                    service_id,
+                    instance_id,
+                    ANY_MAJOR,
+                    ANY_MINOR,
+                );
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",

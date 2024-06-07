@@ -1,23 +1,23 @@
 use log::{error, info, trace, warn};
+use protobuf::Enum;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::Arc;
 use std::time::Duration;
-use protobuf::Enum;
 use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UStatus, UTransport, UUri};
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
+use up_rust::{
+    UCode, UListener, UMessage, UMessageBuilder, UMessageType, UStatus, UTransport, UUri,
+};
 
 pub struct PrintingListener {
-    client: Arc<UPClientVsomeip>
+    client: Arc<UPClientVsomeip>,
 }
 
 impl PrintingListener {
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
-        Self {
-            client
-        }
+        Self { client }
     }
 }
 
@@ -26,7 +26,11 @@ impl UListener for PrintingListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("Received in point-to-point listener:\n{:?}", msg);
 
-        match msg.attributes.type_.enum_value_or(UMESSAGE_TYPE_UNSPECIFIED) {
+        match msg
+            .attributes
+            .type_
+            .enum_value_or(UMESSAGE_TYPE_UNSPECIFIED)
+        {
             UMESSAGE_TYPE_UNSPECIFIED => {
                 warn!("Not supported message type: UNSPECIFIED");
                 return;
@@ -36,9 +40,15 @@ impl UListener for PrintingListener {
                 panic!();
             }
             UMessageType::UMESSAGE_TYPE_REQUEST => {
-                let response_build_res = UMessageBuilder::response_for_request(msg.attributes.as_ref().unwrap()).with_comm_status(UCode::OK.value()).build();
+                let response_build_res =
+                    UMessageBuilder::response_for_request(msg.attributes.as_ref().unwrap())
+                        .with_comm_status(UCode::OK.value())
+                        .build();
                 let Ok(response_msg) = response_build_res else {
-                    warn!("Unable to make uProtocol Response message: {:?}", response_build_res.err().unwrap());
+                    warn!(
+                        "Unable to make uProtocol Response message: {:?}",
+                        response_build_res.err().unwrap()
+                    );
                     return;
                 };
                 let _ = self.client.send(response_msg).await.inspect_err(|err| {
@@ -145,7 +155,9 @@ async fn main() {
     };
 
     loop {
-        let request_msg_res = UMessageBuilder::request(req_sink.clone(), req_source.clone(), 10000).build().unwrap();
+        let request_msg_res = UMessageBuilder::request(req_sink.clone(), req_source.clone(), 10000)
+            .build()
+            .unwrap();
         let send_res = client.send(request_msg_res.clone()).await;
 
         if let Err(err) = send_res {

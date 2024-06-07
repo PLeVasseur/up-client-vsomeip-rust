@@ -99,7 +99,8 @@ async fn main() {
 
     loop {
         let request_msg_res_1_a =
-            UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000).build();
+            UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
+                .build();
 
         let Ok(request_msg_1_a) = request_msg_res_1_a else {
             error!(
@@ -117,7 +118,8 @@ async fn main() {
         }
 
         let request_msg_res_1_b =
-            UMessageBuilder::request(service_1_uuri_method_b.clone(), client_uuri.clone(), 10000).build();
+            UMessageBuilder::request(service_1_uuri_method_b.clone(), client_uuri.clone(), 10000)
+                .build();
 
         let Ok(request_msg_1_b) = request_msg_res_1_b else {
             error!(
