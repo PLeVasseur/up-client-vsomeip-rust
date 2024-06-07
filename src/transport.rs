@@ -22,7 +22,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 
 use up_rust::{ComparableListener, UCode, UListener, UMessage, UStatus, UTransport, UUri};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
@@ -89,8 +89,8 @@ impl UTransport for UPClientVsomeip {
 
         let sink_filter = message.attributes.sink.as_ref();
 
-        let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
-        // let message_type = determine_message_type(source_filter, &sink_filter.cloned())?;
+        // let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
+        let message_type = determine_message_type(source_filter, &sink_filter.cloned())?;
         let client_id = match message_type {
             RegistrationType::Publish(client_id) => client_id,
             RegistrationType::Request(client_id) => client_id,
@@ -112,7 +112,9 @@ impl UTransport for UPClientVsomeip {
             }
         };
 
-        if app_name.is_err() {
+        if let Err(err) = app_name {
+            warn!("{err:?}");
+
             let client_id = match message_type {
                 RegistrationType::Publish(client_id) => client_id,
                 RegistrationType::Request(client_id) => client_id,
@@ -125,9 +127,11 @@ impl UTransport for UPClientVsomeip {
             // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
             trace!(
-                "{}:{} - Sending TransportCommand for InitializeNewApp",
+                "{}:{} - Sending TransportCommand for InitializeNewApp. client_id: {} app_name: {}",
                 UP_CLIENT_VSOMEIP_TAG,
-                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER,
+                client_id,
+                app_name
             );
             let _tx_res = self
                 .tx_to_event_loop
@@ -284,12 +288,13 @@ impl UTransport for UPClientVsomeip {
 
             for app_config in &application_configs {
                 let (tx, rx) = oneshot::channel();
-                let app_name = format!("{}_{}", self.authority_name, app_config.name);
+                // let app_name = format!("{}_{}", self.authority_name, app_config.name);
                 let tx_res = self
                     .tx_to_event_loop
                     .send(TransportCommand::InitializeNewApp(
                         app_config.id,
-                        app_name.clone(),
+                        app_config.name.clone(),
+                        // app_name.clone(),
                         tx,
                     ))
                     .await;
@@ -330,6 +335,7 @@ impl UTransport for UPClientVsomeip {
                     Ok(_) => {
                         let mut listener_client_id_mapping =
                             LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                        trace!("Adding listener_id -> client_id: listener_id: {listener_id} app_config.id: {}", app_config.id);
                         listener_client_id_mapping.insert(listener_id, app_config.id);
                     }
                     Err(_) => {
@@ -366,7 +372,7 @@ impl UTransport for UPClientVsomeip {
                         src,
                         sink,
                         msg_handler,
-                        app_name,
+                        app_config.name.clone(),
                         tx,
                     ))
                     .await;
@@ -408,31 +414,38 @@ impl UTransport for UPClientVsomeip {
             .unwrap()
             .insert(listener_id, listener);
 
+        let client_id = match registration_type {
+            RegistrationType::Publish(client_id) => client_id,
+            RegistrationType::Request(client_id) => client_id,
+            RegistrationType::Response(client_id) => client_id,
+            RegistrationType::AllPointToPoint(client_id) => client_id,
+        };
+
         // TODO: Ask for initialization of app if not initialized yet
         let app_name = {
-            let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
-            if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
-                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
-                if let Some(app_name) = client_id_app_mapping.get(client_id) {
-                    Ok(app_name.clone())
-                } else {
-                    Err(UStatus::fail_with_code(
-                        UCode::NOT_FOUND,
-                        format!(
-                            "There was no app_name found for listener_id: {} and client_id: {}",
-                            listener_id, client_id
-                        ),
-                    ))
-                }
+            // let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+            // if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                Ok(app_name.clone())
             } else {
                 Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
                     format!(
-                        "There was no client_id found for listener_id: {}",
-                        listener_id
+                        "Within register_listener: There was no app_name found for client_id: {}",
+                        client_id
                     ),
                 ))
             }
+            // } else {
+            //     Err(UStatus::fail_with_code(
+            //         UCode::NOT_FOUND,
+            //         format!(
+            //             "There was no client_id found for listener_id: {}",
+            //             listener_id
+            //         ),
+            //     ))
+            // }
         };
 
         let extern_fn = get_extern_fn(listener_id);
@@ -442,39 +455,53 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained extern_fn");
 
-        if app_name.is_err() {
-            let client_id = match registration_type {
-                RegistrationType::Publish(client_id) => client_id,
-                RegistrationType::Request(client_id) => client_id,
-                RegistrationType::Response(client_id) => client_id,
-                RegistrationType::AllPointToPoint(client_id) => client_id,
-            };
+        let app_name = {
+            if let Err(err) = app_name {
+                warn!("No app found for client_id: {client_id}, err: {err:?}");
 
-            let app_name = format!("{}_{}", self.authority_name, client_id);
+                let client_id = match registration_type {
+                    RegistrationType::Publish(client_id) => client_id,
+                    RegistrationType::Request(client_id) => client_id,
+                    RegistrationType::Response(client_id) => client_id,
+                    RegistrationType::AllPointToPoint(client_id) => client_id,
+                };
 
-            // consider using a worker pool for these, otherwise this will block
-            let (tx, rx) = oneshot::channel();
-            trace!(
-                "{}:{} - Sending TransportCommand for InitializeNewApp",
-                UP_CLIENT_VSOMEIP_TAG,
-                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
-            );
-            let _tx_res = self
-                .tx_to_event_loop
-                .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
-                .await;
-            let app_created_res =
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                let app_name = format!("{}_{}", self.authority_name, client_id);
+
+                // consider using a worker pool for these, otherwise this will block
+                let (tx, rx) = oneshot::channel();
+                trace!(
+                    "{}:{} - Sending TransportCommand for InitializeNewApp",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+                );
+                let _tx_res = self
+                    .tx_to_event_loop
+                    .send(TransportCommand::InitializeNewApp(
+                        client_id,
+                        app_name.clone(),
+                        tx,
+                    ))
                     .await;
-            match app_created_res {
-                Ok(_) => {
-                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
-                    listener_client_id_mapping.insert(listener_id, client_id);
+                let app_created_res = await_internal_function(
+                    UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+                    rx,
+                )
+                .await;
+
+                if let Err(err) = app_created_res {
+                    Err(err)
+                } else {
+                    Ok(app_name)
                 }
-                Err(_) => {
-                    // TODO: Add logging
-                }
+            } else {
+                Ok(app_name.ok().unwrap())
             }
+        };
+
+        {
+            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+            listener_client_id_mapping.insert(listener_id, client_id);
         }
 
         let client_id = match registration_type {

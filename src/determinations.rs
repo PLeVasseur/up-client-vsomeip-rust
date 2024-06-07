@@ -83,7 +83,8 @@ pub fn determine_registration_type(
         }
 
         if sink_filter.resource_id == 0 {
-            Ok(RegistrationType::Response(source_filter.ue_id as ClientId))
+            Ok(RegistrationType::Response(sink_filter.ue_id as ClientId))
+            // Ok(RegistrationType::Response(source_filter.ue_id as ClientId))
         } else {
             Ok(RegistrationType::Request(sink_filter.ue_id as ClientId))
         }

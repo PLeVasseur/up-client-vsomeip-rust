@@ -129,8 +129,8 @@ async fn main() {
     let reg_res = client
         .register_listener(&source, Some(&sink), printing_listener)
         .await;
-    if reg_res.is_err() {
-        error!("Unable to register with UTransport");
+    if let Err(err) = reg_res {
+        error!("Unable to register with UTransport: {err}");
     }
 
     // craft a Request that can be served
@@ -155,6 +155,8 @@ async fn main() {
     };
 
     loop {
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+
         let request_msg_res = UMessageBuilder::request(req_sink.clone(), req_source.clone(), 10000)
             .build()
             .unwrap();
@@ -164,7 +166,5 @@ async fn main() {
             warn!("Unable to send message: {err:?}");
             continue;
         }
-
-        tokio::time::sleep(Duration::from_millis(2000)).await;
     }
 }

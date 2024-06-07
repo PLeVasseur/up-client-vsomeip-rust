@@ -204,6 +204,8 @@ impl UPClientVsomeip {
             };
 
             get_pinned_application(&application_wrapper).init();
+            let client_id = get_pinned_application(&application_wrapper).get_client();
+            trace!("start_app: after starting app we see its client_id: {client_id}");
             // thread is blocked by vsomeip here
             get_pinned_application(&application_wrapper).start();
         });
@@ -253,12 +255,15 @@ impl UPClientVsomeip {
                             return_channel,
                         ) => {
                             trace!(
-                                "{}:{} - Attempting to register listener",
+                                "{}:{} - Attempting to register listener: src: {src:?} sink: {sink:?}",
                                 UP_CLIENT_VSOMEIP_TAG,
-                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP
+                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
                             );
 
+                            // let registration_type = determine_message_type(&src, &sink);
                             let registration_type = determine_registration_type(&src, &sink);
+
+                            trace!("registration_type: {registration_type:?}");
 
                             match registration_type {
                                 Ok(registration_type) => {
@@ -377,8 +382,8 @@ impl UPClientVsomeip {
 
                             let sink_filter = umsg.attributes.sink.as_ref();
 
-                            let message_type = determine_registration_type(source_filter, &sink_filter.cloned());
-                            // let message_type = determine_message_type(source_filter, &sink_filter.cloned());
+                            // let message_type = determine_registration_type(source_filter, &sink_filter.cloned());
+                            let message_type = determine_message_type(source_filter, &sink_filter.cloned());
 
                             match message_type {
                                 Ok(ref registration_type) => {
