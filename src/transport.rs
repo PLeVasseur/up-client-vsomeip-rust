@@ -226,6 +226,7 @@ impl UTransport for UPClientVsomeip {
                         src.clone(),
                         Some(sink.clone()),
                         msg_handler,
+                        client_id,
                         app_name.clone(),
                         tx,
                     ))
@@ -384,6 +385,7 @@ impl UTransport for UPClientVsomeip {
                         src,
                         Some(sink),
                         msg_handler,
+                        app_config.id,
                         app_config.name.clone(),
                         tx,
                     ))
@@ -427,16 +429,19 @@ impl UTransport for UPClientVsomeip {
             .insert(listener_id, listener);
 
         let client_id = match registration_type {
-            RegistrationType::Publish(client_id) => client_id,
+            RegistrationType::Publish(_client_id) => {
+                // in the case that we are registering a listener for a Publish message, we will
+                // defer the usage of source_filter.ue_id for the actual Publisher
+                // we will instead use our configured ue_id
+                self.ue_id
+                // client_id
+            },
             RegistrationType::Request(client_id) => client_id,
             RegistrationType::Response(client_id) => client_id,
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
-        // TODO: Ask for initialization of app if not initialized yet
         let app_name = {
-            // let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
-            // if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
             if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                 Ok(app_name.clone())
@@ -449,15 +454,6 @@ impl UTransport for UPClientVsomeip {
                     ),
                 ))
             }
-            // } else {
-            //     Err(UStatus::fail_with_code(
-            //         UCode::NOT_FOUND,
-            //         format!(
-            //             "There was no client_id found for listener_id: {}",
-            //             listener_id
-            //         ),
-            //     ))
-            // }
         };
 
         let extern_fn = get_extern_fn(listener_id);
@@ -471,14 +467,6 @@ impl UTransport for UPClientVsomeip {
             if let Err(err) = app_name {
                 warn!("No app found for client_id: {client_id}, err: {err:?}");
 
-                let client_id = match registration_type {
-                    RegistrationType::Publish(client_id) => client_id,
-                    RegistrationType::Request(client_id) => client_id,
-                    RegistrationType::Response(client_id) => client_id,
-                    RegistrationType::AllPointToPoint(client_id) => client_id,
-                };
-
-                // let app_name = format!("{}_{}", self.authority_name, client_id);
                 let app_name = format!("{}", client_id);
 
                 // consider using a worker pool for these, otherwise this will block
@@ -503,12 +491,12 @@ impl UTransport for UPClientVsomeip {
                 .await;
 
                 if let Err(err) = app_created_res {
-                    Err(err)
+                    return Err(err);
                 } else {
-                    Ok(app_name)
+                    app_name
                 }
             } else {
-                Ok(app_name.ok().unwrap())
+                app_name.ok().unwrap()
             }
         };
 
@@ -516,15 +504,6 @@ impl UTransport for UPClientVsomeip {
             let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
             listener_client_id_mapping.insert(listener_id, client_id);
         }
-
-        let client_id = match registration_type {
-            RegistrationType::Publish(client_id) => client_id,
-            RegistrationType::Request(client_id) => client_id,
-            RegistrationType::Response(client_id) => client_id,
-            RegistrationType::AllPointToPoint(client_id) => client_id,
-        };
-
-        let app_name = format!("{}_{}", self.authority_name, client_id);
 
         // consider using a worker pool for these, otherwise this will block
         let (tx, rx) = oneshot::channel();
@@ -534,6 +513,7 @@ impl UTransport for UPClientVsomeip {
                 src,
                 sink,
                 msg_handler,
+                client_id,
                 app_name,
                 tx,
             ))
