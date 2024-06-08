@@ -113,6 +113,8 @@ impl UTransport for UPClientVsomeip {
             }
         };
 
+        trace!("app_name: {app_name:?}");
+
         if let Err(err) = app_name {
             warn!("{err:?}");
 
@@ -151,7 +153,8 @@ impl UTransport for UPClientVsomeip {
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
-        let app_name = format!("{}_{}", self.authority_name, client_id);
+        // let app_name = format!("{}_{}", self.authority_name, client_id);
+        let app_name = format!("{client_id}");
         trace!("app_name: {app_name}");
 
         let point_to_point_listener = self.point_to_point_listener.lock().await;

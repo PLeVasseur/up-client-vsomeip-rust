@@ -6,9 +6,9 @@ use tokio::sync::Notify;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
-pub struct PrintingListener;
+pub struct SubscriberListener;
 #[async_trait::async_trait]
-impl UListener for PrintingListener {
+impl UListener for SubscriberListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("{:?}", msg);
     }
@@ -45,10 +45,10 @@ async fn main() {
         ..Default::default()
     };
 
-    let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
+    let subscriber_listener: Arc<dyn UListener> = Arc::new(SubscriberListener);
 
     let reg_res = client
-        .register_listener(&subscriber_topic, None, printing_listener)
+        .register_listener(&subscriber_topic, None, subscriber_listener)
         .await;
 
     if let Err(err) = reg_res {
