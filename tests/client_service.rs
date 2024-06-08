@@ -130,6 +130,8 @@ async fn client_service() {
         panic!("Unable to establish client");
     };
 
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
     let client_uuri = UUri {
         authority_name: client_authority_name.to_string(),
         ue_id: client_ue_id as u32,
@@ -160,6 +162,8 @@ async fn client_service() {
         panic!("Unable to register for returning Response: {:?}", err);
     }
 
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
     let service_config = "vsomeip_configs/service.json";
     let service_config = canonicalize(service_config).ok();
     println!("service_config: {service_config:?}");
@@ -173,6 +177,8 @@ async fn client_service() {
     let Ok(service) = service_res else {
         panic!("Unable to establish subscriber");
     };
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     let service = Arc::new(service);
 
@@ -195,7 +201,9 @@ async fn client_service() {
         error!("Unable to register: {:?}", err);
     }
 
-    for i in 1..5 {
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    for i in 1..=4 {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -216,7 +224,7 @@ async fn client_service() {
         tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(2000)).await;
 
     assert!(request_listener_check.received_request());
     assert!(response_listener_check.received_response());

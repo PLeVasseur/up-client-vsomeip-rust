@@ -57,6 +57,8 @@ async fn publisher_subscriber() {
         panic!("Unable to establish subscriber");
     };
 
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
     let subscriber_listener_check = Arc::new(SubscriberListener::new());
     let subscriber_listener: Arc<dyn UListener> = subscriber_listener_check.clone();
 
@@ -68,13 +70,17 @@ async fn publisher_subscriber() {
         panic!("Unable to register: {:?}", err);
     }
 
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
     let publisher_res = UPClientVsomeip::new(&authority_name.to_string(), ue_id);
 
     let Ok(publisher) = publisher_res else {
         panic!("Unable to establish publisher");
     };
 
-    for i in 1..5 {
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    for i in 1..=4 {
         let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone()).build();
 
         let Ok(publish_msg) = publish_msg_res else {
