@@ -95,12 +95,25 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         #generated_fns
 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
+                            // Create a new single-threaded runtime
+            let rt = Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create Tokio runtime");
+
+                // Create a LocalSet for running !Send futures
+    let local_set = LocalSet::new();
+
+       let vsomeip_msg = make_message_wrapper(vsomeip_msg.clone()).get_shared_ptr();
+
+    // Use the runtime to run the async function within the LocalSet
+    local_set.spawn_local(async move {
             trace!("Calling call_shared_extern_fn with listener_id: {}", listener_id);
 
             let app_name = {
-                let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().await;
                 if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
-                    let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                    let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
                     if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                         Ok(app_name.clone())
                     } else {
@@ -125,7 +138,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             trace!("Made vsomeip_msg_wrapper");
 
-            let point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
+            let point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().await;
             if point_to_point_listeners.contains(&listener_id) {
                 if !is_point_to_point_message(&mut vsomeip_msg_wrapper) {
                     // TODO: Log an INFO level message, since it's fairly likely to occur
@@ -142,7 +155,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             trace!("Checked point-to-point or not");
 
-            let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper);
+            let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper).await;
 
             // TODO: Add another function, call it shared_async_fn_err and that's where we can
             //  send error cases when their listener should be called back
@@ -160,24 +173,26 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             // TODO: Replace with the log crate
             trace!("Calling extern function {}", listener_id);
-            let registry = LISTENER_REGISTRY.lock().unwrap();
+            let registry = LISTENER_REGISTRY.lock().await;
             if let Some(listener) = registry.get(&listener_id) {
                 trace!("Retrieved listener");
                 let listener = Arc::clone(listener);
 
                 // TODO: Should probably push this over to an existing async runtime...
                 //  for now we will just create one here as a hack
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(async move {
-                    tokio::spawn(async move {
+
                         trace!("Within spawned thread -- calling shared_async_fn");
                         shared_async_fn(listener, umsg).await;
                         trace!("Within spawned thread -- finished shared_async_fn");
-                    });
-                });
+
             } else {
                 error!("Listener not found for ID {}", listener_id);
             }
+
+
+                });
+
+            rt.block_on(local_set);
 
             trace!("Reached bottom of call_shared_extern_fn");
         }

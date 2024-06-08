@@ -150,8 +150,8 @@ impl UPClientVsomeip {
     ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
 
-        let mut authority_name_static = AUTHORITY_NAME.lock().unwrap();
-        *authority_name_static = authority_name.to_string();
+        // let mut authority_name_static = AUTHORITY_NAME.lock().await;
+        // *authority_name_static = authority_name.to_string();
 
         Self::app_event_loop(rx, config_path);
 
@@ -271,7 +271,7 @@ impl UPClientVsomeip {
                             match registration_type {
                                 Ok(_) => {
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             Ok(app_name.clone())
                                         } else {
@@ -319,7 +319,7 @@ impl UPClientVsomeip {
                                 Ok(_) => {
 
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             Ok(app_name.clone())
                                         } else {
@@ -386,7 +386,7 @@ impl UPClientVsomeip {
                                     trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
 
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             trace!("For client_id we found app_name: client_id: {client_id} app_name: {app_name}");
                                             Ok(app_name.clone())
@@ -443,7 +443,7 @@ impl UPClientVsomeip {
 
                             match new_app_res {
                                 Ok(_app) => {
-                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
                                     if !client_id_app_mapping.contains_key(&client_id) {
                                         if client_id_app_mapping.insert(client_id, app_name.clone()).is_some() {
                                             let err_msg = format!("Insertion showed key existsed. Somehow we already had an application running for client_id: {}", client_id);
@@ -928,7 +928,8 @@ impl UPClientVsomeip {
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
                 let vsomeip_msg_res =
-                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
+                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper)
+                        .await;
 
                 match vsomeip_msg_res {
                     Ok(mut vsomeip_msg) => {
@@ -967,7 +968,8 @@ impl UPClientVsomeip {
                 // TODO: Add logging that we succeeded
 
                 let vsomeip_msg_res =
-                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper);
+                    convert_umsg_to_vsomeip_msg(&umsg, _application_wrapper, _runtime_wrapper)
+                        .await;
 
                 match vsomeip_msg_res {
                     Ok(vsomeip_msg) => {
@@ -1024,7 +1026,7 @@ impl UPClientVsomeip {
             app_name
         );
         let existing_app = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
             client_id_app_mapping.contains_key(&client_id)
         };
 

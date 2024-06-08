@@ -206,7 +206,8 @@ async fn point_to_point() {
     let source = any_from_authority(service_authority_name);
     let sink = any_uuri();
 
-    let point_to_point_listener_check = Arc::new(PointToPointListener::new(point_to_point_client.clone()));
+    let point_to_point_listener_check =
+        Arc::new(PointToPointListener::new(point_to_point_client.clone()));
     let point_to_point_listener: Arc<dyn UListener> = point_to_point_listener_check.clone();
     let reg_res = point_to_point_client
         .register_listener(&source, Some(&sink), point_to_point_listener)
@@ -366,10 +367,22 @@ async fn point_to_point() {
         tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 
-    trace!("request_listener_check.received_request(): {}", request_listener_check.received_request());
-    trace!("point_to_point_listener_check.received_request(): {}", point_to_point_listener_check.received_request());
-    trace!("point_to_point_listener_check.received_response(): {}", point_to_point_listener_check.received_response());
-    trace!("response_listener_check.received_response(): {}", response_listener_check.received_response());
+    trace!(
+        "request_listener_check.received_request(): {}",
+        request_listener_check.received_request()
+    );
+    trace!(
+        "point_to_point_listener_check.received_request(): {}",
+        point_to_point_listener_check.received_request()
+    );
+    trace!(
+        "point_to_point_listener_check.received_response(): {}",
+        point_to_point_listener_check.received_response()
+    );
+    trace!(
+        "response_listener_check.received_response(): {}",
+        response_listener_check.received_response()
+    );
 
     assert!(request_listener_check.received_request());
     assert!(point_to_point_listener_check.received_request());
