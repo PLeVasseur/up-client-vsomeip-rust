@@ -1,4 +1,5 @@
 use log::error;
+use std::fs::canonicalize;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -43,7 +44,15 @@ async fn main() {
     let client_ue_version_major = 1;
     let client_resource_id = 0x0000;
 
-    let client_res = UPClientVsomeip::new(&client_authority_name.to_string(), streamer_ue_id);
+    let vsomeip_config_path = "vsomeip_configs/client.json";
+    let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
+    println!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
+
+    let client_res = UPClientVsomeip::new_with_config(
+        &client_authority_name.to_string(),
+        streamer_ue_id,
+        &abs_vsomeip_config_path.unwrap(),
+    );
 
     let Ok(client) = client_res else {
         error!("Unable to establish subscriber");

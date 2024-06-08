@@ -122,7 +122,8 @@ impl UTransport for UPClientVsomeip {
                 RegistrationType::AllPointToPoint(client_id) => client_id,
             };
 
-            let app_name = format!("{}_{}", self.authority_name, client_id);
+            // let app_name = format!("{}_{}", self.authority_name, client_id);
+            let app_name = format!("{client_id}");
 
             // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
@@ -466,7 +467,8 @@ impl UTransport for UPClientVsomeip {
                     RegistrationType::AllPointToPoint(client_id) => client_id,
                 };
 
-                let app_name = format!("{}_{}", self.authority_name, client_id);
+                // let app_name = format!("{}_{}", self.authority_name, client_id);
+                let app_name = format!("{}", client_id);
 
                 // consider using a worker pool for these, otherwise this will block
                 let (tx, rx) = oneshot::channel();
