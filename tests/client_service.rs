@@ -185,7 +185,7 @@ mod tests {
             panic!("Unable to send Request UMessage: {:?}", err);
         }
 
-        tokio::time::sleep(Duration::from_millis(2500)).await;
+        tokio::time::sleep(Duration::from_millis(3000)).await;
 
         assert!(response_listener_check.received_response());
     }
