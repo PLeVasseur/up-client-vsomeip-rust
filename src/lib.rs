@@ -75,6 +75,7 @@ enum TransportCommand {
     UnregisterListener(
         UUri,
         Option<UUri>,
+        ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
@@ -310,19 +311,12 @@ impl UPClientVsomeip {
                                 }
                             }
                         }
-                        TransportCommand::UnregisterListener(src, sink, application_name, return_channel) => {
+                        TransportCommand::UnregisterListener(src, sink, client_id, application_name, return_channel) => {
 
                             let registration_type = determine_registration_type(&src, &sink);
 
                             match registration_type {
-                                Ok(registration_type) => {
-
-                                    let client_id = match registration_type {
-                                        RegistrationType::Publish(client_id) => {client_id}
-                                        RegistrationType::Request(client_id) => {client_id}
-                                        RegistrationType::Response(client_id) => {client_id}
-                                        RegistrationType::AllPointToPoint(client_id) => {client_id}
-                                    };
+                                Ok(_) => {
 
                                     let app_name = {
                                         let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();

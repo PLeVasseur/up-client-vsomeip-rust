@@ -435,7 +435,7 @@ impl UTransport for UPClientVsomeip {
                 // we will instead use our configured ue_id
                 self.ue_id
                 // client_id
-            },
+            }
             RegistrationType::Request(client_id) => client_id,
             RegistrationType::Response(client_id) => client_id,
             RegistrationType::AllPointToPoint(client_id) => client_id,
@@ -549,7 +549,13 @@ impl UTransport for UPClientVsomeip {
         };
 
         let client_id = match registration_type {
-            RegistrationType::Publish(client_id) => client_id,
+            RegistrationType::Publish(client_id) => {
+                // in the case that we are registering a listener for a Publish message, we will
+                // defer the usage of source_filter.ue_id for the actual Publisher
+                // we will instead use our configured ue_id
+                self.ue_id
+                // client_id
+            }
             RegistrationType::Request(client_id) => client_id,
             RegistrationType::Response(client_id) => client_id,
             RegistrationType::AllPointToPoint(client_id) => client_id,
@@ -684,6 +690,7 @@ impl UTransport for UPClientVsomeip {
             .send(TransportCommand::UnregisterListener(
                 src,
                 sink,
+                client_id,
                 app_name.to_string(),
                 tx,
             ))

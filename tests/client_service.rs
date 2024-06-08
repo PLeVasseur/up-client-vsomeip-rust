@@ -37,17 +37,26 @@ mod tests {
     }
     pub struct RequestListener {
         client: Arc<UPClientVsomeip>,
+        received_request: AtomicBool,
     }
 
     impl RequestListener {
         pub fn new(client: Arc<UPClientVsomeip>) -> Self {
-            Self { client }
+            Self {
+                client,
+                received_request: AtomicBool::new(false),
+            }
+        }
+
+        pub fn received_request(&self) -> bool {
+            self.received_request.load(Ordering::SeqCst)
         }
     }
 
     #[async_trait::async_trait]
     impl UListener for RequestListener {
         async fn on_receive(&self, msg: UMessage) {
+            self.received_request.store(true, Ordering::SeqCst);
             println!("Received Request:\n{:?}", msg);
 
             let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
@@ -58,7 +67,6 @@ mod tests {
                     "Unable to create response_msg: {:?}",
                     response_msg.err().unwrap()
                 );
-                return;
             };
             let client = self.client.clone();
             let send_res = client.send(response_msg).await;
@@ -98,18 +106,18 @@ mod tests {
         let client_ue_version_major = 1;
         let client_resource_id = 0x0000;
 
-        let vsomeip_config_path = "vsomeip_configs/client.json";
-        let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
-        println!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
+        let client_config = "vsomeip_configs/client.json";
+        let client_config = canonicalize(client_config).ok();
+        println!("client_config: {client_config:?}");
 
         let client_res = UPClientVsomeip::new_with_config(
             &client_authority_name.to_string(),
             streamer_ue_id,
-            &abs_vsomeip_config_path.unwrap(),
+            &client_config.unwrap(),
         );
 
         let Ok(client) = client_res else {
-            panic!("Unable to establish subscriber");
+            panic!("Unable to establish client");
         };
 
         let client_uuri = UUri {
@@ -142,7 +150,15 @@ mod tests {
             panic!("Unable to register for returning Response: {:?}", err);
         }
 
-        let service_res = UPClientVsomeip::new(&service_authority_name.to_string(), streamer_ue_id);
+        let service_config = "vsomeip_configs/service.json";
+        let service_config = canonicalize(service_config).ok();
+        println!("service_config: {service_config:?}");
+
+        let service_res = UPClientVsomeip::new_with_config(
+            &service_authority_name.to_string(),
+            streamer_ue_id,
+            &service_config.unwrap(),
+        );
 
         let Ok(service) = service_res else {
             panic!("Unable to establish subscriber");
@@ -158,7 +174,8 @@ mod tests {
             ..Default::default()
         };
 
-        let request_listener: Arc<dyn UListener> = Arc::new(RequestListener::new(service.clone()));
+        let request_listener_check = Arc::new(RequestListener::new(service.clone()));
+        let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
         let reg_service_1 = service
             .register_listener(&any_uuri(), Some(&service_1_uuri), request_listener.clone())
@@ -185,8 +202,9 @@ mod tests {
             panic!("Unable to send Request UMessage: {:?}", err);
         }
 
-        tokio::time::sleep(Duration::from_millis(3000)).await;
+        tokio::time::sleep(Duration::from_millis(5000)).await;
 
+        assert!(request_listener_check.received_request());
         assert!(response_listener_check.received_response());
     }
 }
