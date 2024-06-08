@@ -3,10 +3,10 @@ use up_client_vsomeip_rust::UPClientVsomeip;
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use crate::test_lib::PrintingListener;
     use crate::{test_lib, UPClientVsomeip};
     use log::{error, trace};
+    use std::path::Path;
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
@@ -285,7 +285,12 @@ mod tests {
     async fn test_registering_all_point_to_point() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new_with_config(&"baz".to_string(), 10, Path::new("vsomeip_configs/example_ustreamer.json")).unwrap();
+        let client = UPClientVsomeip::new_with_config(
+            &"baz".to_string(),
+            10,
+            Path::new("vsomeip_configs/example_ustreamer.json"),
+        )
+        .unwrap();
 
         let source_filter = UUri {
             authority_name: "me_authority".to_string(),
@@ -322,7 +327,12 @@ mod tests {
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 
-        let client = UPClientVsomeip::new_with_config(&"foo".to_string(), 10, Path::new("vsomeip_configs/example_ustreamer_2.json")).unwrap();
+        let client = UPClientVsomeip::new_with_config(
+            &"foo".to_string(),
+            10,
+            Path::new("vsomeip_configs/example_ustreamer_2.json"),
+        )
+        .unwrap();
 
         let source_filter = UUri {
             authority_name: "me_authority".to_string(),

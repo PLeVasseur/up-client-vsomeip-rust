@@ -597,11 +597,13 @@ impl UTransport for UPClientVsomeip {
             let ptp_comp_listener = ComparableListener::new(point_to_point_listener.clone());
 
             if ptp_comp_listener != comp_listener {
-                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "listener provided doesn't match registered point_to_point_listener"));
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "listener provided doesn't match registered point_to_point_listener",
+                ));
             }
 
             for app_config in &application_configs {
-
                 // TODO: Now we need to unregister a listener for all uProtocol Request style messages
                 //  incoming on that application which match our client_id
 
@@ -638,11 +640,9 @@ impl UTransport for UPClientVsomeip {
                         trace!("src: {src:?} sink: {sink:?} listener: {listener_hash} listener_id: {listener_id}");
                     }
 
-                    if let Some(&id) = id_map.get(&(
-                        src.clone(),
-                        Some(sink.clone()),
-                        comp_listener.clone(),
-                    )) {
+                    if let Some(&id) =
+                        id_map.get(&(src.clone(), Some(sink.clone()), comp_listener.clone()))
+                    {
                         id_map.remove(&(src.clone(), Some(sink.clone()), comp_listener.clone()));
                         id
                     } else {
