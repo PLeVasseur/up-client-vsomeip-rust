@@ -1,4 +1,4 @@
-use log::{error, info, warn};
+use log::{error, info, trace, warn};
 use protobuf::Enum;
 use std::env::current_dir;
 use std::fs::canonicalize;
@@ -50,6 +50,7 @@ impl UListener for PointToPointListener {
                 panic!("uProtocol PUBLISH received. This shouldn't happen!");
             }
             UMessageType::UMESSAGE_TYPE_REQUEST => {
+                trace!("PointToPointListener got a request");
                 self.received_request.store(true, Ordering::SeqCst);
                 let response_build_res =
                     UMessageBuilder::response_for_request(msg.attributes.as_ref().unwrap())
@@ -61,13 +62,14 @@ impl UListener for PointToPointListener {
                         response_build_res.err().unwrap()
                     );
                 };
+                trace!("Sending Response from PointToPointListener: {response_msg:?}");
                 let _ = self.client.send(response_msg).await.inspect_err(|err| {
                     panic!("Unable to send response: {err:?}");
                 });
                 info!("Able to send RESPONSE");
             }
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                info!("Received RESPONSE");
+                trace!("PointToPointListener got a response");
                 self.received_response.store(true, Ordering::SeqCst);
                 return;
             }
@@ -99,7 +101,7 @@ impl ResponseListener {
 #[async_trait::async_trait]
 impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("Received Response:\n{:?}", msg);
+        println!("ResponseListener: Received Response:\n{:?}", msg);
         self.received_response.store(true, Ordering::SeqCst);
     }
 
@@ -186,7 +188,8 @@ async fn point_to_point() {
     let current_dir = current_dir();
     println!("{current_dir:?}");
 
-    let vsomeip_config_path = "vsomeip_configs/example_ustreamer.json";
+    // let vsomeip_config_path = "vsomeip_configs/example_ustreamer.json";
+    let vsomeip_config_path = "vsomeip_configs/point_to_point_integ.json";
     let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
     println!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
 
@@ -196,21 +199,20 @@ async fn point_to_point() {
         &abs_vsomeip_config_path.unwrap(),
     );
     let Ok(point_to_point_client) = point_to_point_client_res else {
-        error!("Unable to establish UTransport");
-        return;
+        panic!("Unable to establish UTransport");
     };
-    let client = Arc::new(point_to_point_client);
+    let point_to_point_client = Arc::new(point_to_point_client);
 
     let source = any_from_authority(service_authority_name);
     let sink = any_uuri();
 
-    let point_to_point_listener_check = Arc::new(PointToPointListener::new(client.clone()));
+    let point_to_point_listener_check = Arc::new(PointToPointListener::new(point_to_point_client.clone()));
     let point_to_point_listener: Arc<dyn UListener> = point_to_point_listener_check.clone();
-    let reg_res = client
+    let reg_res = point_to_point_client
         .register_listener(&source, Some(&sink), point_to_point_listener)
         .await;
     if let Err(err) = reg_res {
-        error!("Unable to register with UTransport: {err}");
+        panic!("Unable to register with UTransport: {err}");
     }
 
     // craft a Request that can be served
@@ -259,7 +261,8 @@ async fn point_to_point() {
         resource_id: service_1_resource_id_a,
         ..Default::default()
     };
-    let client_config = "vsomeip_configs/client.json";
+    // let client_config = "vsomeip_configs/client.json";
+    let client_config = "vsomeip_configs/point_to_point_integ.json";
     let client_config = canonicalize(client_config).ok();
     println!("client_config: {client_config:?}");
 
@@ -278,6 +281,7 @@ async fn point_to_point() {
     let response_listener_check = Arc::new(ResponseListener::new());
     let response_listener: Arc<dyn UListener> = response_listener_check.clone();
 
+    trace!("Registering a ResponseListener");
     let reg_res_1 = client
         .register_listener(
             &service_1_uuri_method_a,
@@ -291,7 +295,8 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let service_config = "vsomeip_configs/service.json";
+    // let service_config = "vsomeip_configs/service.json";
+    let service_config = "vsomeip_configs/point_to_point_integ.json";
     let service_config = canonicalize(service_config).ok();
     println!("service_config: {service_config:?}");
 
@@ -330,7 +335,7 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    for i in 1..=4 {
+    for i in 1..=10 {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -351,17 +356,23 @@ async fn point_to_point() {
         let request_msg_res = UMessageBuilder::request(req_sink.clone(), req_source.clone(), 10000)
             .build()
             .unwrap();
-        let send_res = client.send(request_msg_res.clone()).await;
+        trace!("Sending message from PointToPoint client: {request_msg_res}");
+        let send_res = point_to_point_client.send(request_msg_res.clone()).await;
 
         if let Err(err) = send_res {
-            warn!("Unable to send message: {err:?}");
-            continue;
+            panic!("Unable to send message: {err:?}");
         }
 
         tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 
+    trace!("request_listener_check.received_request(): {}", request_listener_check.received_request());
+    trace!("point_to_point_listener_check.received_request(): {}", point_to_point_listener_check.received_request());
+    trace!("point_to_point_listener_check.received_response(): {}", point_to_point_listener_check.received_response());
+    trace!("response_listener_check.received_response(): {}", response_listener_check.received_response());
+
     assert!(request_listener_check.received_request());
     assert!(point_to_point_listener_check.received_request());
+    assert!(point_to_point_listener_check.received_response());
     assert!(response_listener_check.received_response());
 }
