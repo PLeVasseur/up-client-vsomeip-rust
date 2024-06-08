@@ -72,27 +72,30 @@ async fn publisher_subscriber() {
 
     let Ok(publisher) = publisher_res else {
         panic!("Unable to establish publisher");
-        return;
     };
 
-    let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone()).build();
+    for i in 1..5 {
+        let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone()).build();
 
-    let Ok(publish_msg) = publish_msg_res else {
-        panic!(
-            "Unable to create Publish UMessage: {:?}",
-            publish_msg_res.err().unwrap()
-        );
-    };
+        let Ok(publish_msg) = publish_msg_res else {
+            panic!(
+                "Unable to create Publish UMessage: {:?}",
+                publish_msg_res.err().unwrap()
+            );
+        };
 
-    trace!("Publish message we're about to send:\n{publish_msg:?}");
+        trace!("Publish message we're about to send:\n{publish_msg:?}");
 
-    let send_res = publisher.send(publish_msg).await;
+        let send_res = publisher.send(publish_msg).await;
 
-    if let Err(err) = send_res {
-        panic!("Unable to send Publish UMessage: {:?}", err);
+        if let Err(err) = send_res {
+            panic!("Unable to send Publish UMessage: {:?}", err);
+        }
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
     }
 
-    tokio::time::sleep(Duration::from_millis(5000)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     assert!(subscriber_listener_check.received_publish());
 }

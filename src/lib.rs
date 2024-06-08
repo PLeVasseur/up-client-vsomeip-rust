@@ -1062,6 +1062,11 @@ impl UPClientVsomeip {
 //  and then remote the application
 // impl Drop for UPClientVsomeip {
 //     fn drop(&mut self) {
+//         // TODO: Should do this a bit more carefully, for now we will just stop all active vsomeip
+//         //  applications
+//         //  - downside of doing this drastic option is that _if_ you wanted to keep one client
+//         //    active and let another be dropped, this would put your client in a bad state
+//
 //         todo!()
 //     }
 // }
