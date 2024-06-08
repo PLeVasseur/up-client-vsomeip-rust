@@ -2,7 +2,7 @@ use log::{error, info, trace, warn};
 use protobuf::Enum;
 use std::env::current_dir;
 use std::fs::canonicalize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use up_client_vsomeip_rust::UPClientVsomeip;
@@ -13,22 +13,22 @@ use up_rust::{
 
 pub struct PointToPointListener {
     client: Arc<UPClientVsomeip>,
-    received_request: AtomicBool,
-    received_response: AtomicBool,
+    received_request: AtomicUsize,
+    received_response: AtomicUsize,
 }
 
 impl PointToPointListener {
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,
-            received_request: AtomicBool::new(false),
-            received_response: AtomicBool::new(false),
+            received_request: AtomicUsize::new(0),
+            received_response: AtomicUsize::new(0),
         }
     }
-    pub fn received_request(&self) -> bool {
+    pub fn received_request(&self) -> usize {
         self.received_request.load(Ordering::SeqCst)
     }
-    pub fn received_response(&self) -> bool {
+    pub fn received_response(&self) -> usize {
         self.received_response.load(Ordering::SeqCst)
     }
 }
@@ -51,7 +51,7 @@ impl UListener for PointToPointListener {
             }
             UMessageType::UMESSAGE_TYPE_REQUEST => {
                 trace!("PointToPointListener got a request");
-                self.received_request.store(true, Ordering::SeqCst);
+                self.received_request.fetch_add(1, Ordering::SeqCst);
                 let response_build_res =
                     UMessageBuilder::response_for_request(msg.attributes.as_ref().unwrap())
                         .with_comm_status(UCode::OK.value())
@@ -70,7 +70,7 @@ impl UListener for PointToPointListener {
             }
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
                 trace!("PointToPointListener got a response");
-                self.received_response.store(true, Ordering::SeqCst);
+                self.received_response.fetch_add(1, Ordering::SeqCst);
                 return;
             }
             UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
@@ -85,16 +85,16 @@ impl UListener for PointToPointListener {
 }
 
 pub struct ResponseListener {
-    received_response: AtomicBool,
+    received_response: AtomicUsize,
 }
 impl ResponseListener {
     pub fn new() -> Self {
         Self {
-            received_response: AtomicBool::new(false),
+            received_response: AtomicUsize::new(0),
         }
     }
 
-    pub fn received_response(&self) -> bool {
+    pub fn received_response(&self) -> usize {
         self.received_response.load(Ordering::SeqCst)
     }
 }
@@ -102,7 +102,7 @@ impl ResponseListener {
 impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("ResponseListener: Received Response:\n{:?}", msg);
-        self.received_response.store(true, Ordering::SeqCst);
+        self.received_response.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn on_error(&self, err: UStatus) {
@@ -112,18 +112,18 @@ impl UListener for ResponseListener {
 
 pub struct RequestListener {
     client: Arc<UPClientVsomeip>,
-    received_request: AtomicBool,
+    received_request: AtomicUsize,
 }
 
 impl RequestListener {
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,
-            received_request: AtomicBool::new(false),
+            received_request: AtomicUsize::new(0),
         }
     }
 
-    pub fn received_request(&self) -> bool {
+    pub fn received_request(&self) -> usize {
         self.received_request.load(Ordering::SeqCst)
     }
 }
@@ -131,7 +131,7 @@ impl RequestListener {
 #[async_trait::async_trait]
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
-        self.received_request.store(true, Ordering::SeqCst);
+        self.received_request.fetch_add(1, Ordering::SeqCst);
         println!("Received Request:\n{:?}", msg);
 
         let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
@@ -336,7 +336,8 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    for i in 1..=10 {
+    let iterations = 10;
+    for _ in 1..=iterations {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -384,8 +385,8 @@ async fn point_to_point() {
         response_listener_check.received_response()
     );
 
-    assert!(request_listener_check.received_request());
-    assert!(point_to_point_listener_check.received_request());
-    assert!(point_to_point_listener_check.received_response());
-    assert!(response_listener_check.received_response());
+    assert_eq!(request_listener_check.received_request(), iterations);
+    assert_eq!(point_to_point_listener_check.received_request(), iterations);
+    assert_eq!(point_to_point_listener_check.received_response(), iterations);
+    assert_eq!(response_listener_check.received_response(), iterations);
 }

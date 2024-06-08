@@ -11,26 +11,26 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use log::error;
+use log::{error, trace};
 use protobuf::Enum;
 use std::fs::canonicalize;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
 pub struct ResponseListener {
-    received_response: AtomicBool,
+    received_response: AtomicUsize,
 }
 impl ResponseListener {
     pub fn new() -> Self {
         Self {
-            received_response: AtomicBool::new(false),
+            received_response: AtomicUsize::new(0),
         }
     }
 
-    pub fn received_response(&self) -> bool {
+    pub fn received_response(&self) -> usize {
         self.received_response.load(Ordering::SeqCst)
     }
 }
@@ -38,7 +38,7 @@ impl ResponseListener {
 impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("Received Response:\n{:?}", msg);
-        self.received_response.store(true, Ordering::SeqCst);
+        self.received_response.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn on_error(&self, err: UStatus) {
@@ -47,18 +47,18 @@ impl UListener for ResponseListener {
 }
 pub struct RequestListener {
     client: Arc<UPClientVsomeip>,
-    received_request: AtomicBool,
+    received_request: AtomicUsize,
 }
 
 impl RequestListener {
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,
-            received_request: AtomicBool::new(false),
+            received_request: AtomicUsize::new(0),
         }
     }
 
-    pub fn received_request(&self) -> bool {
+    pub fn received_request(&self) -> usize {
         self.received_request.load(Ordering::SeqCst)
     }
 }
@@ -66,7 +66,7 @@ impl RequestListener {
 #[async_trait::async_trait]
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
-        self.received_request.store(true, Ordering::SeqCst);
+        self.received_request.fetch_add(1, Ordering::SeqCst);
         println!("Received Request:\n{:?}", msg);
 
         let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
@@ -203,7 +203,8 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    for i in 1..=4 {
+    let iterations = 4;
+    for _ in 1..=iterations {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -226,6 +227,9 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    assert!(request_listener_check.received_request());
-    assert!(response_listener_check.received_response());
+    trace!("request_listener_check.received_request(): {}", request_listener_check.received_request());
+    trace!("response_listener_check.received_response(): {}", response_listener_check.received_response());
+
+    assert_eq!(request_listener_check.received_request(), iterations);
+    assert_eq!(response_listener_check.received_response(), iterations);
 }
