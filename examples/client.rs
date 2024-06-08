@@ -34,6 +34,10 @@ async fn main() {
     let service_2_ue_version_major = 1;
     let service_2_resource_id = 0x0422;
 
+    let service_3_ue_id = 0x1236;
+    let service_3_ue_version_major = 1;
+    let service_3_resource_id = 0x0422;
+
     let client_authority_name = "bar";
     let client_ue_id = 0x0345;
     let client_ue_version_major = 1;
@@ -78,7 +82,16 @@ async fn main() {
         ..Default::default()
     };
 
+    let service_3_uuri = UUri {
+        authority_name: service_authority_name.to_string(),
+        ue_id: service_3_ue_id as u32,
+        ue_version_major: service_3_ue_version_major,
+        resource_id: service_3_resource_id,
+        ..Default::default()
+    };
+
     let printing_listener: Arc<dyn UListener> = Arc::new(PrintingListener);
+
     let reg_res_1 = client
         .register_listener(
             &service_1_uuri_method_a,
@@ -91,9 +104,24 @@ async fn main() {
     }
 
     let reg_res_1 = client
-        .register_listener(&service_2_uuri, Some(&client_uuri), printing_listener)
+        .register_listener(
+            &service_2_uuri,
+            Some(&client_uuri),
+            printing_listener.clone(),
+        )
         .await;
     if let Err(err) = reg_res_1 {
+        error!("Unable to register for returning Response: {:?}", err);
+    }
+
+    let reg_res_3 = client
+        .register_listener(
+            &service_3_uuri,
+            Some(&client_uuri),
+            printing_listener.clone(),
+        )
+        .await;
+    if let Err(err) = reg_res_3 {
         error!("Unable to register for returning Response: {:?}", err);
     }
 
@@ -150,6 +178,24 @@ async fn main() {
         let send_res_2 = client.send(request_msg_2).await;
 
         if let Err(err) = send_res_2 {
+            error!("Unable to send Request UMessage: {:?}", err);
+            continue;
+        }
+
+        let request_msg_res_3 =
+            UMessageBuilder::request(service_3_uuri.clone(), client_uuri.clone(), 10000).build();
+
+        let Ok(request_msg_3) = request_msg_res_3 else {
+            error!(
+                "Unable to create Request UMessage: {:?}",
+                request_msg_res_3.err().unwrap()
+            );
+            continue;
+        };
+
+        let send_res_3 = client.send(request_msg_3).await;
+
+        if let Err(err) = send_res_3 {
             error!("Unable to send Request UMessage: {:?}", err);
             continue;
         }
