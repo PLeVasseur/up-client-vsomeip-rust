@@ -448,7 +448,7 @@ impl UPClientVsomeip {
                                 client_id, app_name
                             );
                             let new_app_res = Self::initialize_new_app_internal(client_id, app_name.clone(), config_path.clone(), &runtime_wrapper).await;
-                            trace!("{}:{} - Created new app for client_id: {} app_name: {}",
+                            trace!("{}:{} - After attempt to create new app for client_id: {} app_name: {}",
                                 UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
                                 client_id, app_name
                             );

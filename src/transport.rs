@@ -16,6 +16,7 @@ use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -50,7 +51,7 @@ const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 
-generate_message_handler_extern_c_fns!(10000);
+generate_message_handler_extern_c_fns!(1000);
 
 async fn await_internal_function(
     function_id: &str,
@@ -319,13 +320,38 @@ impl UTransport for UPClientVsomeip {
                         ));
                     }
                 };
-                let comp_listener = ComparableListener::new(Arc::clone(&listener));
-                let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+                let comp_listener = ComparableListener::new(listener.clone());
+
+                // TODO: We need to set the source_filter and sink_filter appropriately here
+                let src = UUri {
+                    authority_name: "*".to_string(),
+                    ue_id: 0x0000_FFFF,     // any instance, any service
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                };
+
+                // TODO: How to explicitly handle instance_id?
+                //  I'm not sure it's possible to set within the vsomeip config file
+                let sink = UUri {
+                    authority_name: self.authority_name.clone(),
+                    ue_id: app_config.id as u32,
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                };
+
+                let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
                 {
                     let mut id_map = LISTENER_ID_MAP.lock().unwrap();
                     id_map.insert(key, listener_id);
                 }
-                trace!("Inserted into LISTENER_ID_MAP");
+
+                let mut hasher = DefaultHasher::new();
+                comp_listener.hash(&mut hasher);
+                let listener_hash = hasher.finish();
+
+                trace!("Inserted into src: {src:?} sink: {sink:?} listener_hash: {listener_hash} listener_id: {listener_id}");
 
                 // TODO: Need to do some verification on returned Option<>
                 LISTENER_REGISTRY
@@ -347,31 +373,13 @@ impl UTransport for UPClientVsomeip {
                 let extern_fn = get_extern_fn(listener_id);
                 let msg_handler = MessageHandlerFnPtr(extern_fn);
 
-                let src = UUri {
-                    authority_name: "*".to_string(),
-                    ue_id: 0x0000_FFFF,     // any instance, any service
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                };
-
-                // TODO: How to explicitly handle instance_id?
-                //  I'm not sure it's possible to set within the vsomeip config file
-                let sink = Some(UUri {
-                    authority_name: self.authority_name.clone(),
-                    ue_id: app_config.id as u32,
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                });
-
                 // consider using a worker pool for these, otherwise this will block
                 let (tx, rx) = oneshot::channel();
                 let _tx_res = self
                     .tx_to_event_loop
                     .send(TransportCommand::RegisterListener(
                         src,
-                        sink,
+                        Some(sink),
                         msg_handler,
                         app_config.name.clone(),
                         tx,
@@ -399,7 +407,7 @@ impl UTransport for UPClientVsomeip {
 
         trace!("Obtained listener_id: {}", listener_id);
 
-        let comp_listener = ComparableListener::new(Arc::clone(&listener));
+        let comp_listener = ComparableListener::new(listener.clone());
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
         {
@@ -564,6 +572,114 @@ impl UTransport for UPClientVsomeip {
             RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+            let Some(config_path) = &self.config_path else {
+                let err_msg = "No path to a vsomeip config file was provided";
+                error!("{err_msg}");
+                return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+            };
+
+            let application_configs = extract_applications(config_path)?;
+            trace!("Got vsomeip application_configs: {application_configs:?}");
+
+            let mut point_to_point_listener = self.point_to_point_listener.lock().await;
+            let Some(ref point_to_point_listener) = *point_to_point_listener else {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "No point-to-point listener found, we can't unregister it",
+                ));
+            };
+
+            // TODO: Perform check that the listener we were passed is the same as the point-to-point
+            //  listener we already have
+
+            let comp_listener = ComparableListener::new(listener.clone());
+            let ptp_comp_listener = ComparableListener::new(point_to_point_listener.clone());
+
+            if ptp_comp_listener != comp_listener {
+                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "listener provided doesn't match registered point_to_point_listener"));
+            }
+
+            for app_config in &application_configs {
+
+                // TODO: Now we need to unregister a listener for all uProtocol Request style messages
+                //  incoming on that application which match our client_id
+
+                // TODO: We need to set the source_filter and sink_filter appropriately here
+                let src = UUri {
+                    authority_name: "*".to_string(),
+                    ue_id: 0x0000_FFFF,     // any instance, any service
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                };
+
+                // TODO: How to explicitly handle instance_id?
+                //  I'm not sure it's possible to set within the vsomeip config file
+                let sink = UUri {
+                    authority_name: self.authority_name.clone(),
+                    ue_id: app_config.id as u32,
+                    ue_version_major: 0xFF, // any
+                    resource_id: 0xFFFF,    // any
+                    ..Default::default()
+                };
+
+                trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
+
+                let listener_id = {
+                    let mut id_map = LISTENER_ID_MAP.lock().unwrap();
+
+                    trace!("LISTENER_ID_MAP");
+                    for ((src, sink, comparable_listener), listener_id) in id_map.iter() {
+                        let mut hasher = DefaultHasher::new();
+                        comparable_listener.hash(&mut hasher);
+                        let listener_hash = hasher.finish();
+
+                        trace!("src: {src:?} sink: {sink:?} listener: {listener_hash} listener_id: {listener_id}");
+                    }
+
+                    if let Some(&id) = id_map.get(&(
+                        src.clone(),
+                        Some(sink.clone()),
+                        comp_listener.clone(),
+                    )) {
+                        id_map.remove(&(src.clone(), Some(sink.clone()), comp_listener.clone()));
+                        id
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::INTERNAL,
+                            "Listener not found",
+                        ));
+                    }
+                };
+
+                {
+                    let mut registry = LISTENER_REGISTRY.lock().unwrap();
+                    registry.remove(&listener_id);
+                }
+
+                {
+                    let mut free_ids = FREE_LISTENER_IDS.lock().unwrap();
+                    free_ids.insert(listener_id);
+                }
+
+                {
+                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
+                    client_id_app_mapping.remove(&client_id);
+                }
+
+                {
+                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
+                    listener_client_id_mapping.remove(&listener_id);
+                }
+            }
+
+            // TODO: Consider if we want to go and stop the vsomeip application
+            //  Probably a good idea
+
+            return Ok(());
+        }
+
         let app_name = {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().unwrap();
             if let Some(app_name) = client_id_app_mapping.get(&client_id) {
@@ -626,11 +742,6 @@ impl UTransport for UPClientVsomeip {
         {
             let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().unwrap();
             listener_client_id_mapping.remove(&listener_id);
-        }
-
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            let mut point_to_point_listeners = POINT_TO_POINT_LISTENERS.lock().unwrap();
-            point_to_point_listeners.remove(&listener_id);
         }
 
         Ok(())
