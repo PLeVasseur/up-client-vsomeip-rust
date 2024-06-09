@@ -270,7 +270,7 @@ impl UTransport for UPClientVsomeip {
                     }
                 };
                 if !listener_id_used {
-                    error!("listener_id was not used since we already have registered for this Request");
+                    info!("listener_id was not used since we already have registered for this Request");
                     let mut free_ids = FREE_LISTENER_IDS.write().await;
                     free_ids.insert(listener_id);
                 } else {
@@ -330,19 +330,11 @@ impl UTransport for UPClientVsomeip {
         }
 
         let (tx, rx) = oneshot::channel();
-        // consider using a worker pool for these, otherwise this will block
-
-        let before_sending_send_internal_transport_command = Instant::now();
         let _tx_res = self
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
-        let before_sending_send_internal_transport_command = Instant::now();
         let res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await;
-
-        let bottom_send = Instant::now();
-        let duration_send = bottom_send - top_send;
-        println!("duration_send: {duration_send:?}");
         res
     }
 
@@ -530,7 +522,7 @@ impl UTransport for UPClientVsomeip {
             }
         };
         if !listener_id_used {
-            error!("listener_id was not used since we already have registered for this Request");
+            info!("listener_id was not used since we already have registered for this Request");
             let mut free_ids = FREE_LISTENER_IDS.write().await;
             free_ids.insert(listener_id);
             Err(UStatus::fail_with_code(

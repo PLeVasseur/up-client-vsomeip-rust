@@ -111,9 +111,6 @@ fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::me
 
     // Use the runtime to run the async function within the LocalSet
     local_set.spawn_local(async move {
-        let top_of_local_set_spawn_local = Instant::now();
-        trace!("Calling call_shared_extern_fn with listener_id: {}", listener_id);
-
         let app_name = {
             let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.read().await;
             if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
@@ -147,10 +144,6 @@ fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::me
 
         let res = convert_vsomeip_msg_to_umsg(&mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper).await;
 
-        let after_converting_vsomeip_msg_to_umsg = Instant::now();
-        let following_converting_vsomeip_msg_to_umsg = after_converting_vsomeip_msg_to_umsg - top_of_local_set_spawn_local;
-        error!("following_converting_vsomeip_msg_to_umsg: {following_converting_vsomeip_msg_to_umsg:?}");
-
         trace!("Ran convert_vsomeip_msg_to_umsg");
 
         let Ok(umsg) = res else {
@@ -165,10 +158,6 @@ fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::me
         // TODO: Replace with the log crate
         trace!("Calling extern function {}", listener_id);
         let registry = LISTENER_REGISTRY.read().await;
-        let after_getting_registry = Instant::now();
-        let following_getting_registry = after_getting_registry - top_of_local_set_spawn_local;
-        error!("following_getting_registry: {following_getting_registry:?}");
-
         if let Some(listener) = registry.get(&listener_id) {
             trace!("Retrieved listener");
             let listener = Arc::clone(listener);
@@ -181,18 +170,8 @@ fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::me
         } else {
             error!("Listener not found for ID {}", listener_id);
         }
-
-        let bottom_of_local_set_spawn_local = Instant::now();
-        let duration_of_local_set_spawned_task = bottom_of_local_set_spawn_local - top_of_local_set_spawn_local;
-        error!("duration_of_local_set_spawned_task: {duration_of_local_set_spawned_task:?}");
     });
-
-    let before_runtime_block_on = Instant::now();
     runtime.block_on(local_set);
-    let after_runtime_block_on = Instant::now();
-
-    let duration_of_runtime_block = after_runtime_block_on - before_runtime_block_on;
-    error!("duration_of_runtime_block: {duration_of_runtime_block:?}");
 
     trace!("Reached bottom of call_shared_extern_fn");
 
@@ -207,30 +186,15 @@ fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::me
 
     // Spawn shared_async_fn on the multi-threaded executor
     CB_RUNTIME.spawn(async move {
-        let before_shared_async_fn = Instant::now();
         trace!("Within spawned thread -- calling shared_async_fn");
-
         shared_async_fn(listener, umsg).await;
-
-        let after_shared_async_fn = Instant::now();
-        let duration_of_shared_async_fn = after_shared_async_fn - before_shared_async_fn;
-        error!("duration_of_shared_async_fn: {duration_of_shared_async_fn:?}");
         trace!("Within spawned thread -- finished shared_async_fn");
     });
-
-    let after_spawning_onto_multithreaded_executor = Instant::now();
-
-    let following_spawning_onto_multithreaded_executor = after_spawning_onto_multithreaded_executor - before_runtime_block_on;
-    error!("following_spawning_onto_multithreaded_executor: {following_spawning_onto_multithreaded_executor:?}");
 }
 
         async fn shared_async_fn(listener: Arc<dyn UListener>, umsg: UMessage) {
-            let before_listener_on_receive = Instant::now();
             trace!("shared_async_fn with umsg: {:?}", umsg);
             listener.on_receive(umsg).await;
-            let after_listener_on_receive = Instant::now();
-            let duration_of_listener_on_receive = after_listener_on_receive - before_listener_on_receive;
-            error!("duration_of_listener_on_receive: {duration_of_listener_on_receive:?}");
         }
 
         fn get_extern_fn(listener_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {

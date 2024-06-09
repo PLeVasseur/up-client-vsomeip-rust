@@ -37,7 +37,6 @@ impl PointToPointListener {
 #[async_trait::async_trait]
 impl UListener for PointToPointListener {
     async fn on_receive(&self, msg: UMessage) {
-        let top_on_receive = Instant::now();
         info!("Received in point-to-point listener:\n{:?}", msg);
 
         match msg
@@ -68,9 +67,6 @@ impl UListener for PointToPointListener {
                 let _ = self.client.send(response_msg).await.inspect_err(|err| {
                     panic!("Unable to send response: {err:?}");
                 });
-                let after_send = Instant::now();
-                let following_send = after_send - top_on_receive;
-                println!("following_send: {following_send:?}");
                 info!("Able to send RESPONSE");
             }
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
@@ -82,9 +78,6 @@ impl UListener for PointToPointListener {
                 panic!("Not supported message type: NOTIFICATION");
             }
         }
-        let bottom_on_receive = Instant::now();
-        let duration_on_receive = bottom_on_receive - top_on_receive;
-        println!("duration_on_receive: {duration_on_receive:?}");
     }
 
     async fn on_error(&self, err: UStatus) {
