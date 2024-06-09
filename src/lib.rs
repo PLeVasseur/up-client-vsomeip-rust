@@ -226,7 +226,8 @@ impl UPClientVsomeip {
         );
 
         // TODO: Should be removed in favor of a signal-based strategy
-        thread::sleep(Duration::from_millis(500));
+        // thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(10));
     }
 
     fn app_event_loop(
@@ -583,6 +584,8 @@ impl UPClientVsomeip {
                     event_id,
                     _msg_handler,
                 );
+
+                tokio::time::sleep(Duration::from_millis(5)).await;
 
                 trace!(
                     "{}:{} - Registered vsomeip message handler.",
@@ -946,7 +949,8 @@ impl UPClientVsomeip {
                         let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
 
-                        // tokio::time::sleep(Duration::from_millis(100)).await;
+                        // TODO: Debug why unless this sleep is present we miss one Publish
+                        tokio::time::sleep(Duration::from_nanos(1)).await;
 
                         trace!("{}:{} Sending SOME/IP NOTIFICATION with service: {} instance: {} event: {}",
                             UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,

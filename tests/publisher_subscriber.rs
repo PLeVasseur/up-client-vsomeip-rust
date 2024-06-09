@@ -2,6 +2,7 @@ use log::{error, trace};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
@@ -22,12 +23,12 @@ impl SubscriberListener {
 #[async_trait::async_trait]
 impl UListener for SubscriberListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("{:?}", msg);
+        trace!("{:?}", msg);
         self.received_publish.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        trace!("{:?}", err);
     }
 }
 
@@ -80,8 +81,14 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let iterations = 4;
-    for _ in 1..=iterations {
+    // Track the start time and set the duration for the loop
+    let duration = Duration::from_millis(1000);
+    let start_time = Instant::now();
+
+    let mut iterations = 0;
+    while Instant::now().duration_since(start_time) < duration {
+        println!("A");
+
         let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone()).build();
 
         let Ok(publish_msg) = publish_msg_res else {
@@ -99,10 +106,16 @@ async fn publisher_subscriber() {
             panic!("Unable to send Publish UMessage: {:?}", err);
         }
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        iterations += 1;
     }
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
+
+    // TODO: Need to troubleshoot on why we miss one publish
+    println!(
+        "subscriber_listener_check.received_publish(): {}",
+        subscriber_listener_check.received_publish()
+    );
 
     assert_eq!(subscriber_listener_check.received_publish(), iterations);
 }
