@@ -259,59 +259,73 @@ impl UTransport for UPClientVsomeip {
                 let listener = point_to_point_listener.clone();
                 let comp_listener = ComparableListener::new(Arc::clone(&listener));
                 let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-                {
+                let listener_id_used = {
                     let mut id_map = LISTENER_ID_MAP.write().await;
-                    id_map.insert(key, listener_id);
-                }
-                trace!("Inserted into LISTENER_ID_MAP");
-
-                // TODO: Need to do some verification on returned Option<>
-                LISTENER_REGISTRY
-                    .write()
-                    .await
-                    .insert(listener_id, listener.clone());
-
-                let extern_fn = get_extern_fn(listener_id);
-                let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-                let Some(src) = message.attributes.sink.as_ref() else {
-                    let err_msg = "Request message doesn't have a sink";
-                    error!("{err_msg}");
-                    return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                    if id_map.insert(key, listener_id).is_some() {
+                        trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
+                        false
+                    } else {
+                        trace!("Inserted into LISTENER_ID_MAP");
+                        true
+                    }
                 };
-                let Some(sink) = message.attributes.source.as_ref() else {
-                    let err_msg = "Request message doesn't have a source";
-                    error!("{err_msg}");
-                    return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-                };
+                if !listener_id_used {
+                    error!("listener_id was not used since we already have registered for this Request");
+                    let mut free_ids = FREE_LISTENER_IDS.write().await;
+                    free_ids.insert(listener_id);
+                } else {
+                    // TODO: Need to do some verification on returned Option<>
+                    LISTENER_REGISTRY
+                        .write()
+                        .await
+                        .insert(listener_id, listener.clone());
 
-                trace!("source used when registering:\n{src:?}");
-                trace!("sink used when registering:\n{sink:?}");
+                    let extern_fn = get_extern_fn(listener_id);
+                    let msg_handler = MessageHandlerFnPtr(extern_fn);
 
-                {
-                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
-                    // TODO: Check that this succeeds
-                    listener_client_id_mapping.insert(listener_id, client_id);
-                }
+                    let Some(src) = message.attributes.sink.as_ref() else {
+                        let err_msg = "Request message doesn't have a sink";
+                        error!("{err_msg}");
+                        return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                    };
+                    let Some(sink) = message.attributes.source.as_ref() else {
+                        let err_msg = "Request message doesn't have a source";
+                        error!("{err_msg}");
+                        return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                    };
 
-                trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
+                    trace!("source used when registering:\n{src:?}");
+                    trace!("sink used when registering:\n{sink:?}");
 
-                // consider using a worker pool for these, otherwise this will block
-                let (tx, rx) = oneshot::channel();
-                TIMES_REGISTERED.fetch_add(1, Ordering::SeqCst);
-                let _tx_res = self
-                    .tx_to_event_loop
-                    .send(TransportCommand::RegisterListener(
-                        src.clone(),
-                        Some(sink.clone()),
-                        msg_handler,
-                        client_id,
-                        app_name.clone(),
-                        tx,
-                    ))
-                    .await;
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+                    {
+                        let mut listener_client_id_mapping =
+                            LISTENER_CLIENT_ID_MAPPING.write().await;
+                        // TODO: Check that this succeeds
+                        listener_client_id_mapping.insert(listener_id, client_id);
+                    }
+
+                    trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
+
+                    // consider using a worker pool for these, otherwise this will block
+                    let (tx, rx) = oneshot::channel();
+                    TIMES_REGISTERED.fetch_add(1, Ordering::SeqCst);
+                    let _tx_res = self
+                        .tx_to_event_loop
+                        .send(TransportCommand::RegisterListener(
+                            src.clone(),
+                            Some(sink.clone()),
+                            msg_handler,
+                            client_id,
+                            app_name.clone(),
+                            tx,
+                        ))
+                        .await;
+                    await_internal_function(
+                        UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                        rx,
+                    )
                     .await?;
+                }
             }
         }
 
@@ -505,110 +519,125 @@ impl UTransport for UPClientVsomeip {
         let comp_listener = ComparableListener::new(listener.clone());
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
-        {
+        let listener_id_used = {
             let mut id_map = LISTENER_ID_MAP.write().await;
-            id_map.insert(key, listener_id);
-        }
-
-        trace!("Inserted into LISTENER_ID_MAP");
-
-        // TODO: Need to do some verification on returned Option<>
-        LISTENER_REGISTRY
-            .write()
-            .await
-            .insert(listener_id, listener);
-
-        let client_id = match registration_type {
-            RegistrationType::Publish(_client_id) => {
-                // in the case that we are registering a listener for a Publish message, we will
-                // defer the usage of source_filter.ue_id for the actual Publisher
-                // we will instead use our configured ue_id
-                self.ue_id
-                // client_id
-            }
-            RegistrationType::Request(client_id) => client_id,
-            RegistrationType::Response(client_id) => client_id,
-            RegistrationType::AllPointToPoint(client_id) => client_id,
-        };
-
-        let app_name = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
-                Ok(app_name.clone())
+            if id_map.insert(key, listener_id).is_some() {
+                trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
+                false
             } else {
-                Err(UStatus::fail_with_code(
-                    UCode::NOT_FOUND,
-                    format!(
-                        "Within register_listener: There was no app_name found for client_id: {}",
-                        client_id
-                    ),
-                ))
+                trace!("Inserted into LISTENER_ID_MAP");
+                true
             }
         };
-
-        let extern_fn = get_extern_fn(listener_id);
-        let msg_handler = MessageHandlerFnPtr(extern_fn);
-        let src = source_filter.clone();
-        let sink = sink_filter.cloned();
-
-        trace!("Obtained extern_fn");
-
-        let app_name = {
-            if let Err(err) = app_name {
-                warn!("No app found for client_id: {client_id}, err: {err:?}");
-
-                let app_name = format!("{}", client_id);
-
-                // consider using a worker pool for these, otherwise this will block
-                let (tx, rx) = oneshot::channel();
-                trace!(
-                    "{}:{} - Sending TransportCommand for InitializeNewApp",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
-                );
-                let _tx_res = self
-                    .tx_to_event_loop
-                    .send(TransportCommand::InitializeNewApp(
-                        client_id,
-                        app_name.clone(),
-                        tx,
-                    ))
-                    .await;
-                let app_created_res = await_internal_function(
-                    UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-                    rx,
-                )
-                .await;
-
-                if let Err(err) = app_created_res {
-                    return Err(err);
-                } else {
-                    app_name
-                }
-            } else {
-                app_name.ok().unwrap()
-            }
-        };
-
-        {
-            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
-            listener_client_id_mapping.insert(listener_id, client_id);
-        }
-
-        // consider using a worker pool for these, otherwise this will block
-        let (tx, rx) = oneshot::channel();
-        let _tx_res = self
-            .tx_to_event_loop
-            .send(TransportCommand::RegisterListener(
-                src,
-                sink,
-                msg_handler,
-                client_id,
-                app_name,
-                tx,
+        if !listener_id_used {
+            error!("listener_id was not used since we already have registered for this Request");
+            let mut free_ids = FREE_LISTENER_IDS.write().await;
+            free_ids.insert(listener_id);
+            Err(UStatus::fail_with_code(
+                UCode::ALREADY_EXISTS,
+                "Already have registered with this source, sink and listener",
             ))
-            .await;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+        } else {
+            trace!("Inserted into LISTENER_ID_MAP");
+
+            // TODO: Need to do some verification on returned Option<>
+            LISTENER_REGISTRY
+                .write()
+                .await
+                .insert(listener_id, listener);
+
+            let client_id = match registration_type {
+                RegistrationType::Publish(_client_id) => {
+                    // in the case that we are registering a listener for a Publish message, we will
+                    // defer the usage of source_filter.ue_id for the actual Publisher
+                    // we will instead use our configured ue_id
+                    self.ue_id
+                    // client_id
+                }
+                RegistrationType::Request(client_id) => client_id,
+                RegistrationType::Response(client_id) => client_id,
+                RegistrationType::AllPointToPoint(client_id) => client_id,
+            };
+
+            let app_name = {
+                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
+                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                    Ok(app_name.clone())
+                } else {
+                    Err(UStatus::fail_with_code(
+                        UCode::NOT_FOUND,
+                        format!(
+                            "Within register_listener: There was no app_name found for client_id: {}",
+                            client_id
+                        ),
+                    ))
+                }
+            };
+
+            let extern_fn = get_extern_fn(listener_id);
+            let msg_handler = MessageHandlerFnPtr(extern_fn);
+            let src = source_filter.clone();
+            let sink = sink_filter.cloned();
+
+            trace!("Obtained extern_fn");
+
+            let app_name = {
+                if let Err(err) = app_name {
+                    warn!("No app found for client_id: {client_id}, err: {err:?}");
+
+                    let app_name = format!("{}", client_id);
+
+                    // consider using a worker pool for these, otherwise this will block
+                    let (tx, rx) = oneshot::channel();
+                    trace!(
+                        "{}:{} - Sending TransportCommand for InitializeNewApp",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+                    );
+                    let _tx_res = self
+                        .tx_to_event_loop
+                        .send(TransportCommand::InitializeNewApp(
+                            client_id,
+                            app_name.clone(),
+                            tx,
+                        ))
+                        .await;
+                    let app_created_res = await_internal_function(
+                        UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+                        rx,
+                    )
+                    .await;
+
+                    if let Err(err) = app_created_res {
+                        return Err(err);
+                    } else {
+                        app_name
+                    }
+                } else {
+                    app_name.ok().unwrap()
+                }
+            };
+
+            {
+                let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+                listener_client_id_mapping.insert(listener_id, client_id);
+            }
+
+            // consider using a worker pool for these, otherwise this will block
+            let (tx, rx) = oneshot::channel();
+            let _tx_res = self
+                .tx_to_event_loop
+                .send(TransportCommand::RegisterListener(
+                    src,
+                    sink,
+                    msg_handler,
+                    client_id,
+                    app_name,
+                    tx,
+                ))
+                .await;
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+        }
     }
 
     async fn unregister_listener(

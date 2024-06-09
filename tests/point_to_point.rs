@@ -345,7 +345,7 @@ async fn point_to_point() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Track the start time and set the duration for the loop
-    let duration = Duration::from_millis(500);
+    let duration = Duration::from_millis(1000);
     let start_time = Instant::now();
 
     let mut iterations = 0;

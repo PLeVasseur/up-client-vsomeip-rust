@@ -1095,6 +1095,12 @@ impl UPClientVsomeip {
             "TIMES_REGISTERED: {}",
             TIMES_REGISTERED.load(Ordering::SeqCst)
         );
+
+        let listener_registry = LISTENER_REGISTRY.read().await;
+        error!(
+            "number of elements inside of listener_registry: {}",
+            listener_registry.len()
+        );
     }
 }
 
