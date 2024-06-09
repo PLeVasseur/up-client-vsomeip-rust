@@ -150,7 +150,7 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
                 app_request_id, req_id.to_hyphenated_string(),
             );
-            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().await;
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.write().await;
             if ue_request_correlation.get(&app_request_id).is_none() {
                 ue_request_correlation.insert(app_request_id, req_id.clone());
                 trace!("{} - (app_request_id, req_id)  inserted for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
@@ -227,7 +227,7 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
                 req_id.to_hyphenated_string()
             );
-            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().await;
+            let mut me_request_correlation = ME_REQUEST_CORRELATION.write().await;
             let Some(request_id) = me_request_correlation.remove(req_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
@@ -367,7 +367,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 req_id.to_hyphenated_string(), request_id
             );
-            let mut me_request_correlation = ME_REQUEST_CORRELATION.lock().await;
+            let mut me_request_correlation = ME_REQUEST_CORRELATION.write().await;
             if me_request_correlation.get(req_id).is_none() {
                 trace!("{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
                     UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
@@ -432,7 +432,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().await;
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.write().await;
             let Some(req_id) = ue_request_correlation.remove(&request_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
@@ -480,7 +480,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let mut ue_request_correlation = UE_REQUEST_CORRELATION.lock().await;
+            let mut ue_request_correlation = UE_REQUEST_CORRELATION.write().await;
             let Some(req_id) = ue_request_correlation.remove(&request_id) else {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,

@@ -17,16 +17,18 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
 
-use tokio::sync::Mutex;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::task::LocalSet;
-use tokio::time::timeout;
+use tokio::time::{timeout, Instant};
 
 use log::{error, info, trace, warn};
 
@@ -56,12 +58,66 @@ const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 
-static RUNTIME: Lazy<Arc<Runtime>> = Lazy::new(|| {
-    Arc::new(Runtime::new().expect("Failed to create Tokio runtime"))
-});
+static RUNTIME: Lazy<Arc<Runtime>> =
+    Lazy::new(|| Arc::new(Runtime::new().expect("Failed to create Tokio runtime")));
 
 fn get_runtime() -> Arc<Runtime> {
     Arc::clone(&RUNTIME)
+}
+
+lazy_static! {
+    pub static ref TIMES_REGISTERED: AtomicUsize = AtomicUsize::new(0);
+}
+
+const THREAD_NUM: usize = 10;
+
+// Create a separate tokio Runtime for running the callback
+lazy_static::lazy_static! {
+    static ref CB_RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
+               .worker_threads(THREAD_NUM)
+               .enable_all()
+               .build()
+               .expect("Unable to create callback runtime");
+}
+
+pub struct InstrumentedRwLock<T> {
+    lock: RwLock<T>,
+    read_times: Arc<RwLock<Vec<Duration>>>,
+    write_times: Arc<RwLock<Vec<Duration>>>,
+}
+
+impl<T> InstrumentedRwLock<T> {
+    fn new(data: T) -> Self {
+        Self {
+            lock: RwLock::new(data),
+            read_times: Arc::new(RwLock::new(Vec::new())),
+            write_times: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
+        let start = Instant::now();
+        let guard = self.lock.read().await;
+        let duration = start.elapsed();
+
+        self.read_times.write().await.push(duration);
+        guard
+    }
+
+    pub async fn write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
+        let start = Instant::now();
+        let guard = self.lock.write().await;
+        let duration = start.elapsed();
+
+        self.write_times.write().await.push(duration);
+        guard
+    }
+
+    pub async fn get_metrics(&self) -> (Vec<Duration>, Vec<Duration>) {
+        let read_times = self.read_times.read().await.clone();
+        let write_times = self.write_times.read().await.clone();
+        (read_times, write_times)
+    }
 }
 
 generate_message_handler_extern_c_fns!(1000);
@@ -92,6 +148,7 @@ async fn await_internal_function(
 #[async_trait]
 impl UTransport for UPClientVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
+        let top_send = Instant::now();
         trace!("Sending message: {:?}", message);
 
         let Some(source_filter) = message.attributes.source.as_ref() else {
@@ -115,7 +172,7 @@ impl UTransport for UPClientVsomeip {
         trace!("inside send(), message_type: {message_type:?}");
 
         let app_name = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
             if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                 Ok(app_name.clone())
             } else {
@@ -188,7 +245,7 @@ impl UTransport for UPClientVsomeip {
                 // TODO: Now we need to register a listener for all uProtocol Request style messages
                 //  incoming on that application which match our client_id
                 let listener_id = {
-                    let mut free_ids = FREE_LISTENER_IDS.lock().await;
+                    let mut free_ids = FREE_LISTENER_IDS.write().await;
                     if let Some(&id) = free_ids.iter().next() {
                         free_ids.remove(&id);
                         id
@@ -203,14 +260,14 @@ impl UTransport for UPClientVsomeip {
                 let comp_listener = ComparableListener::new(Arc::clone(&listener));
                 let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
                 {
-                    let mut id_map = LISTENER_ID_MAP.lock().await;
+                    let mut id_map = LISTENER_ID_MAP.write().await;
                     id_map.insert(key, listener_id);
                 }
                 trace!("Inserted into LISTENER_ID_MAP");
 
                 // TODO: Need to do some verification on returned Option<>
                 LISTENER_REGISTRY
-                    .lock()
+                    .write()
                     .await
                     .insert(listener_id, listener.clone());
 
@@ -232,7 +289,7 @@ impl UTransport for UPClientVsomeip {
                 trace!("sink used when registering:\n{sink:?}");
 
                 {
-                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().await;
+                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
                     // TODO: Check that this succeeds
                     listener_client_id_mapping.insert(listener_id, client_id);
                 }
@@ -241,6 +298,7 @@ impl UTransport for UPClientVsomeip {
 
                 // consider using a worker pool for these, otherwise this will block
                 let (tx, rx) = oneshot::channel();
+                TIMES_REGISTERED.fetch_add(1, Ordering::SeqCst);
                 let _tx_res = self
                     .tx_to_event_loop
                     .send(TransportCommand::RegisterListener(
@@ -259,11 +317,18 @@ impl UTransport for UPClientVsomeip {
 
         let (tx, rx) = oneshot::channel();
         // consider using a worker pool for these, otherwise this will block
+
+        let before_sending_send_internal_transport_command = Instant::now();
         let _tx_res = self
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
+        let before_sending_send_internal_transport_command = Instant::now();
         let res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await;
+
+        let bottom_send = Instant::now();
+        let duration_send = bottom_send - top_send;
+        println!("duration_send: {duration_send:?}");
         res
     }
 
@@ -338,7 +403,7 @@ impl UTransport for UPClientVsomeip {
                 // TODO: Now we need to register a listener for all uProtocol Request style messages
                 //  incoming on that application which match our client_id
                 let listener_id = {
-                    let mut free_ids = FREE_LISTENER_IDS.lock().await;
+                    let mut free_ids = FREE_LISTENER_IDS.write().await;
                     if let Some(&id) = free_ids.iter().next() {
                         free_ids.remove(&id);
                         id
@@ -372,7 +437,7 @@ impl UTransport for UPClientVsomeip {
 
                 let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
                 {
-                    let mut id_map = LISTENER_ID_MAP.lock().await;
+                    let mut id_map = LISTENER_ID_MAP.write().await;
                     id_map.insert(key, listener_id);
                 }
 
@@ -384,13 +449,13 @@ impl UTransport for UPClientVsomeip {
 
                 // TODO: Need to do some verification on returned Option<>
                 LISTENER_REGISTRY
-                    .lock()
+                    .write()
                     .await
                     .insert(listener_id, listener.clone());
                 match app_created_res {
                     Ok(_) => {
                         let mut listener_client_id_mapping =
-                            LISTENER_CLIENT_ID_MAPPING.lock().await;
+                            LISTENER_CLIENT_ID_MAPPING.write().await;
                         trace!("Adding listener_id -> client_id: listener_id: {listener_id} app_config.id: {}", app_config.id);
                         listener_client_id_mapping.insert(listener_id, app_config.id);
                     }
@@ -423,7 +488,7 @@ impl UTransport for UPClientVsomeip {
         }
 
         let listener_id = {
-            let mut free_ids = FREE_LISTENER_IDS.lock().await;
+            let mut free_ids = FREE_LISTENER_IDS.write().await;
             if let Some(&id) = free_ids.iter().next() {
                 free_ids.remove(&id);
                 id
@@ -441,14 +506,17 @@ impl UTransport for UPClientVsomeip {
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
         {
-            let mut id_map = LISTENER_ID_MAP.lock().await;
+            let mut id_map = LISTENER_ID_MAP.write().await;
             id_map.insert(key, listener_id);
         }
 
         trace!("Inserted into LISTENER_ID_MAP");
 
         // TODO: Need to do some verification on returned Option<>
-        LISTENER_REGISTRY.lock().await.insert(listener_id, listener);
+        LISTENER_REGISTRY
+            .write()
+            .await
+            .insert(listener_id, listener);
 
         let client_id = match registration_type {
             RegistrationType::Publish(_client_id) => {
@@ -464,7 +532,7 @@ impl UTransport for UPClientVsomeip {
         };
 
         let app_name = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
             if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                 Ok(app_name.clone())
             } else {
@@ -523,7 +591,7 @@ impl UTransport for UPClientVsomeip {
         };
 
         {
-            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().await;
+            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
             listener_client_id_mapping.insert(listener_id, client_id);
         }
 
@@ -642,7 +710,7 @@ impl UTransport for UPClientVsomeip {
                 trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
 
                 let listener_id = {
-                    let mut id_map = LISTENER_ID_MAP.lock().await;
+                    let mut id_map = LISTENER_ID_MAP.write().await;
 
                     trace!("LISTENER_ID_MAP");
                     for ((src, sink, comparable_listener), listener_id) in id_map.iter() {
@@ -667,22 +735,22 @@ impl UTransport for UPClientVsomeip {
                 };
 
                 {
-                    let mut registry = LISTENER_REGISTRY.lock().await;
+                    let mut registry = LISTENER_REGISTRY.write().await;
                     registry.remove(&listener_id);
                 }
 
                 {
-                    let mut free_ids = FREE_LISTENER_IDS.lock().await;
+                    let mut free_ids = FREE_LISTENER_IDS.write().await;
                     free_ids.insert(listener_id);
                 }
 
                 {
-                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
                     client_id_app_mapping.remove(&client_id);
                 }
 
                 {
-                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().await;
+                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
                     listener_client_id_mapping.remove(&listener_id);
                 }
             }
@@ -694,7 +762,7 @@ impl UTransport for UPClientVsomeip {
         }
 
         let app_name = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
             if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                 Ok(app_name.clone())
             } else {
@@ -722,7 +790,7 @@ impl UTransport for UPClientVsomeip {
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let listener_id = {
-            let mut id_map = LISTENER_ID_MAP.lock().await;
+            let mut id_map = LISTENER_ID_MAP.write().await;
             if let Some(&id) = id_map.get(&(
                 source_filter.clone(),
                 sink_filter.cloned(),
@@ -739,22 +807,22 @@ impl UTransport for UPClientVsomeip {
         };
 
         {
-            let mut registry = LISTENER_REGISTRY.lock().await;
+            let mut registry = LISTENER_REGISTRY.write().await;
             registry.remove(&listener_id);
         }
 
         {
-            let mut free_ids = FREE_LISTENER_IDS.lock().await;
+            let mut free_ids = FREE_LISTENER_IDS.write().await;
             free_ids.insert(listener_id);
         }
 
         {
-            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
             client_id_app_mapping.remove(&client_id);
         }
 
         {
-            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.lock().await;
+            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
             listener_client_id_mapping.remove(&listener_id);
         }
 

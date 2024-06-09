@@ -35,7 +35,7 @@ pub fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
 }
 
 pub async fn retrieve_session_id(client_id: ClientId) -> SessionId {
-    let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.lock().await;
+    let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.write().await;
 
     trace!("retrieve_session_id: client_id: {}", client_id);
     let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(1);

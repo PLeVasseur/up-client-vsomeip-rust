@@ -13,10 +13,11 @@
 
 use cxx::{let_cxx_string, UniquePtr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, Mutex, RwLock};
 
@@ -36,7 +37,10 @@ use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
 
-use transport::{AUTHORITY_NAME, CLIENT_ID_APP_MAPPING};
+use transport::{
+    AUTHORITY_NAME, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING,
+    LISTENER_ID_MAP, LISTENER_REGISTRY,
+};
 
 mod message_conversions;
 
@@ -49,6 +53,9 @@ use determinations::{
 
 mod vsomeip_config;
 use crate::determinations::determine_message_type;
+use crate::transport::{
+    CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, TIMES_REGISTERED, UE_REQUEST_CORRELATION,
+};
 use vsomeip_config::extract_applications;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
@@ -271,7 +278,7 @@ impl UPClientVsomeip {
                             match registration_type {
                                 Ok(_) => {
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             Ok(app_name.clone())
                                         } else {
@@ -319,7 +326,7 @@ impl UPClientVsomeip {
                                 Ok(_) => {
 
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             Ok(app_name.clone())
                                         } else {
@@ -386,7 +393,7 @@ impl UPClientVsomeip {
                                     trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
 
                                     let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
                                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
                                             trace!("For client_id we found app_name: client_id: {client_id} app_name: {app_name}");
                                             Ok(app_name.clone())
@@ -443,7 +450,7 @@ impl UPClientVsomeip {
 
                             match new_app_res {
                                 Ok(_app) => {
-                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
                                     if !client_id_app_mapping.contains_key(&client_id) {
                                         if client_id_app_mapping.insert(client_id, app_name.clone()).is_some() {
                                             let err_msg = format!("Insertion showed key existsed. Somehow we already had an application running for client_id: {}", client_id);
@@ -939,7 +946,7 @@ impl UPClientVsomeip {
                         let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
 
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        // tokio::time::sleep(Duration::from_millis(100)).await;
 
                         trace!("{}:{} Sending SOME/IP NOTIFICATION with service: {} instance: {} event: {}",
                             UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
@@ -979,7 +986,7 @@ impl UPClientVsomeip {
                         let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
 
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        // tokio::time::sleep(Duration::from_millis(100)).await;
 
                         trace!("{}:{} Sending SOME/IP message with service: {} instance: {} method: {}",
                             UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
@@ -1026,7 +1033,7 @@ impl UPClientVsomeip {
             app_name
         );
         let existing_app = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.lock().await;
+            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
             client_id_app_mapping.contains_key(&client_id)
         };
 
@@ -1058,6 +1065,42 @@ impl UPClientVsomeip {
         );
         Ok(app_wrapper)
     }
+
+    pub async fn get_metrics() {
+        print_metrics(
+            "LISTENER_CLIENT_ID_MAPPING",
+            LISTENER_CLIENT_ID_MAPPING.get_metrics().await,
+        );
+        print_metrics(
+            "CLIENT_ID_APP_MAPPING",
+            CLIENT_ID_APP_MAPPING.get_metrics().await,
+        );
+        print_metrics(
+            "UE_REQUEST_CORRELATION",
+            UE_REQUEST_CORRELATION.get_metrics().await,
+        );
+        print_metrics(
+            "ME_REQUEST_CORRELATION",
+            ME_REQUEST_CORRELATION.get_metrics().await,
+        );
+        print_metrics(
+            "CLIENT_ID_SESSION_ID_TRACKING",
+            CLIENT_ID_SESSION_ID_TRACKING.get_metrics().await,
+        );
+        print_metrics("LISTENER_REGISTRY", LISTENER_REGISTRY.get_metrics().await);
+        print_metrics("FREE_LISTENER_IDS", FREE_LISTENER_IDS.get_metrics().await);
+        print_metrics("LISTENER_ID_MAP", LISTENER_ID_MAP.get_metrics().await);
+
+        error!(
+            "TIMES_REGISTERED: {}",
+            TIMES_REGISTERED.load(Ordering::SeqCst)
+        );
+    }
+}
+
+fn print_metrics(metric_name: &str, metrics: (Vec<Duration>, Vec<Duration>)) {
+    let (reads, writes) = metrics;
+    error!("{metric_name}:\nreads: {:?}\nwrites:{:?}", reads, writes);
 }
 
 // TODO: We need to ensure that we properly cleanup / unregister all message handlers
@@ -1069,6 +1112,5 @@ impl UPClientVsomeip {
 //         //  - downside of doing this drastic option is that _if_ you wanted to keep one client
 //         //    active and let another be dropped, this would put your client in a bad state
 //
-//         todo!()
 //     }
 // }
