@@ -191,7 +191,6 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
 
                 });
-
             rt.block_on(local_set);
 
             trace!("Reached bottom of call_shared_extern_fn");

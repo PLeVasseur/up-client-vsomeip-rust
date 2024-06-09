@@ -5,6 +5,7 @@ use std::fs::canonicalize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 use up_rust::{
@@ -36,7 +37,7 @@ impl PointToPointListener {
 #[async_trait::async_trait]
 impl UListener for PointToPointListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("Received in point-to-point listener:\n{:?}", msg);
+        info!("Received in point-to-point listener:\n{:?}", msg);
 
         match msg
             .attributes
@@ -80,7 +81,7 @@ impl UListener for PointToPointListener {
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        info!("{:?}", err);
     }
 }
 
@@ -101,12 +102,12 @@ impl ResponseListener {
 #[async_trait::async_trait]
 impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("ResponseListener: Received Response:\n{:?}", msg);
+        info!("ResponseListener: Received Response:\n{:?}", msg);
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        info!("{:?}", err);
     }
 }
 
@@ -132,7 +133,7 @@ impl RequestListener {
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
         self.received_request.fetch_add(1, Ordering::SeqCst);
-        println!("Received Request:\n{:?}", msg);
+        info!("Received Request:\n{:?}", msg);
 
         let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
             .with_comm_status(UCode::OK.value())
@@ -151,7 +152,7 @@ impl UListener for RequestListener {
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        info!("{:?}", err);
     }
 }
 fn any_uuri() -> UUri {
@@ -186,12 +187,12 @@ async fn point_to_point() {
     let service_1_resource_id = 0x0421;
 
     let current_dir = current_dir();
-    println!("{current_dir:?}");
+    info!("{current_dir:?}");
 
     // let vsomeip_config_path = "vsomeip_configs/example_ustreamer.json";
     let vsomeip_config_path = "vsomeip_configs/point_to_point_integ.json";
     let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
-    println!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
+    info!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
 
     let point_to_point_client_res = UPClientVsomeip::new_with_config(
         &service_authority_name.to_string(),
@@ -265,7 +266,7 @@ async fn point_to_point() {
     // let client_config = "vsomeip_configs/client.json";
     let client_config = "vsomeip_configs/point_to_point_integ.json";
     let client_config = canonicalize(client_config).ok();
-    println!("client_config: {client_config:?}");
+    info!("client_config: {client_config:?}");
 
     let client_res = UPClientVsomeip::new_with_config(
         &client_authority_name.to_string(),
@@ -299,7 +300,7 @@ async fn point_to_point() {
     // let service_config = "vsomeip_configs/service.json";
     let service_config = "vsomeip_configs/point_to_point_integ.json";
     let service_config = canonicalize(service_config).ok();
-    println!("service_config: {service_config:?}");
+    info!("service_config: {service_config:?}");
 
     let service_res = UPClientVsomeip::new_with_config(
         &service_authority_name.to_string(),
@@ -336,8 +337,12 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let iterations = 10;
-    for _ in 1..=iterations {
+    // Track the start time and set the duration for the loop
+    let duration = Duration::from_secs(5);
+    let start_time = Instant::now();
+
+    let mut iterations = 0;
+    while Instant::now().duration_since(start_time) < duration {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -365,8 +370,10 @@ async fn point_to_point() {
             panic!("Unable to send message: {err:?}");
         }
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        iterations += 1;
     }
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     trace!(
         "request_listener_check.received_request(): {}",
@@ -385,8 +392,28 @@ async fn point_to_point() {
         response_listener_check.received_response()
     );
 
+    println!(
+        "request_listener_check.received_request(): {}",
+        request_listener_check.received_request()
+    );
+    println!(
+        "point_to_point_listener_check.received_request(): {}",
+        point_to_point_listener_check.received_request()
+    );
+    println!(
+        "point_to_point_listener_check.received_response(): {}",
+        point_to_point_listener_check.received_response()
+    );
+    println!(
+        "response_listener_check.received_response(): {}",
+        response_listener_check.received_response()
+    );
+
     assert_eq!(request_listener_check.received_request(), iterations);
     assert_eq!(point_to_point_listener_check.received_request(), iterations);
-    assert_eq!(point_to_point_listener_check.received_response(), iterations);
+    assert_eq!(
+        point_to_point_listener_check.received_response(),
+        iterations
+    );
     assert_eq!(response_listener_check.received_response(), iterations);
 }

@@ -25,6 +25,7 @@ use crate::vsomeip::{application, eventgroup_t, message, payload, runtime};
 use cxx::UniquePtr;
 use std::pin::Pin;
 use std::slice;
+use log::trace;
 
 /// Gets a `Pin<&mut runtime>` from a [RuntimeWrapper]
 ///
@@ -250,15 +251,13 @@ pub fn get_message_payload(
             return UniquePtr::null();
         }
 
-        println!("get_message_payload: payload_ptr = {:?}", payload_ptr);
-
         // Use the intermediate function to create a UniquePtr<PayloadWrapper>
         let payload_wrapper = create_payload_wrapper(payload_ptr);
 
         if payload_wrapper.is_null() {
             eprintln!("Failed to create UniquePtr<PayloadWrapper>");
         } else {
-            println!("Successfully created UniquePtr<PayloadWrapper>");
+            trace!("Successfully created UniquePtr<PayloadWrapper>");
         }
 
         payload_wrapper

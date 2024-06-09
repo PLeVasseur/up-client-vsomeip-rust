@@ -18,7 +18,7 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, RwLock};
 
 use log::{error, info, trace};
 
@@ -119,7 +119,7 @@ pub struct UPClientVsomeip {
     #[allow(dead_code)]
     config_path: Option<PathBuf>,
     // if this is not None, indicates that we are in a dedicated point-to-point mode
-    point_to_point_listener: Mutex<Option<Arc<dyn UListener>>>,
+    point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
     tx_to_event_loop: Sender<TransportCommand>,
 }
 

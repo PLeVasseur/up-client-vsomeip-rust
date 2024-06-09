@@ -21,10 +21,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-use tokio::sync::oneshot;
-use tokio::time::timeout;
 use tokio::runtime::Builder;
+use tokio::sync::oneshot;
 use tokio::task::LocalSet;
+use tokio::time::timeout;
 
 use log::{error, info, trace, warn};
 
@@ -82,7 +82,7 @@ async fn await_internal_function(
 #[async_trait]
 impl UTransport for UPClientVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        println!("Sending message: {:?}", message);
+        trace!("Sending message: {:?}", message);
 
         let Some(source_filter) = message.attributes.source.as_ref() else {
             return Err(UStatus::fail_with_code(
@@ -160,8 +160,18 @@ impl UTransport for UPClientVsomeip {
         let app_name = format!("{client_id}");
         trace!("app_name: {app_name}");
 
-        let point_to_point_listener = self.point_to_point_listener.lock().await;
-        if let Some(ref point_to_point_listener) = *point_to_point_listener {
+        let maybe_point_to_point_listener = {
+            let point_to_point_listener = self.point_to_point_listener.read().await;
+            if let Some(ref point_to_point_listener) = *point_to_point_listener {
+                Some(point_to_point_listener.clone())
+            } else {
+                None
+            }
+        };
+
+        trace!("7");
+
+        if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
             if message_type == RegistrationType::Request(client_id) {
                 trace!("Sending a Request and we have a point-to-point listener");
 
@@ -245,7 +255,8 @@ impl UTransport for UPClientVsomeip {
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
+        let res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await;
+        res
     }
 
     async fn register_listener(
@@ -285,15 +296,18 @@ impl UTransport for UPClientVsomeip {
             let application_configs = extract_applications(config_path)?;
             trace!("Got vsomeip application_configs: {application_configs:?}");
 
-            let mut point_to_point_listener = self.point_to_point_listener.lock().await;
-            if point_to_point_listener.is_some() {
-                return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
-                    "We already have a point-to-point UListener registered",
-                ));
+            // reduce the length lock is held
+            {
+                let mut point_to_point_listener = self.point_to_point_listener.write().await;
+                if point_to_point_listener.is_some() {
+                    return Err(UStatus::fail_with_code(
+                        UCode::ALREADY_EXISTS,
+                        "We already have a point-to-point UListener registered",
+                    ));
+                }
+                *point_to_point_listener = Some(listener.clone());
+                trace!("We found a point-to-point listener and set it");
             }
-            *point_to_point_listener = Some(listener.clone());
-            trace!("We found a point-to-point listener and set it");
 
             for app_config in &application_configs {
                 let (tx, rx) = oneshot::channel();
@@ -571,19 +585,21 @@ impl UTransport for UPClientVsomeip {
             let application_configs = extract_applications(config_path)?;
             trace!("Got vsomeip application_configs: {application_configs:?}");
 
-            let mut point_to_point_listener = self.point_to_point_listener.lock().await;
-            let Some(ref point_to_point_listener) = *point_to_point_listener else {
-                return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
-                    "No point-to-point listener found, we can't unregister it",
-                ));
+            // reduce scope that lock is held
+            let ptp_comp_listener = {
+                let mut point_to_point_listener = self.point_to_point_listener.read().await;
+                let Some(ref point_to_point_listener) = *point_to_point_listener else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::ALREADY_EXISTS,
+                        "No point-to-point listener found, we can't unregister it",
+                    ));
+                };
+                ComparableListener::new(point_to_point_listener.clone())
             };
 
             // TODO: Perform check that the listener we were passed is the same as the point-to-point
             //  listener we already have
-
             let comp_listener = ComparableListener::new(listener.clone());
-            let ptp_comp_listener = ComparableListener::new(point_to_point_listener.clone());
 
             if ptp_comp_listener != comp_listener {
                 return Err(UStatus::fail_with_code(

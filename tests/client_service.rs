@@ -227,8 +227,14 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    trace!("request_listener_check.received_request(): {}", request_listener_check.received_request());
-    trace!("response_listener_check.received_response(): {}", response_listener_check.received_response());
+    trace!(
+        "request_listener_check.received_request(): {}",
+        request_listener_check.received_request()
+    );
+    trace!(
+        "response_listener_check.received_response(): {}",
+        response_listener_check.received_response()
+    );
 
     assert_eq!(request_listener_check.received_request(), iterations);
     assert_eq!(response_listener_check.received_response(), iterations);
