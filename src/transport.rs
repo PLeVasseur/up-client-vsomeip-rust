@@ -19,9 +19,11 @@ use std::collections::HashSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
-use tokio::runtime::Builder;
+use once_cell::sync::Lazy;
+
+use tokio::sync::Mutex;
+use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
 use tokio::task::LocalSet;
 use tokio::time::timeout;
@@ -53,6 +55,14 @@ use crate::{
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
+
+static RUNTIME: Lazy<Arc<Runtime>> = Lazy::new(|| {
+    Arc::new(Runtime::new().expect("Failed to create Tokio runtime"))
+});
+
+fn get_runtime() -> Arc<Runtime> {
+    Arc::clone(&RUNTIME)
+}
 
 generate_message_handler_extern_c_fns!(1000);
 
@@ -168,8 +178,6 @@ impl UTransport for UPClientVsomeip {
                 None
             }
         };
-
-        trace!("7");
 
         if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
             if message_type == RegistrationType::Request(client_id) {

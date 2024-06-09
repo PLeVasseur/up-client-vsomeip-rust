@@ -95,19 +95,16 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         #generated_fns
 
         fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
-                            // Create a new single-threaded runtime
-            let rt = Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create Tokio runtime");
+            // Ensure the runtime is initialized and get a handle to it
+            let runtime = get_runtime();
 
-                // Create a LocalSet for running !Send futures
-    let local_set = LocalSet::new();
+            // Create a LocalSet for running !Send futures
+            let local_set = LocalSet::new();
 
-       let vsomeip_msg = make_message_wrapper(vsomeip_msg.clone()).get_shared_ptr();
+            let vsomeip_msg = make_message_wrapper(vsomeip_msg.clone()).get_shared_ptr();
 
-    // Use the runtime to run the async function within the LocalSet
-    local_set.spawn_local(async move {
+        // Use the runtime to run the async function within the LocalSet
+        local_set.spawn_local(async move {
             trace!("Calling call_shared_extern_fn with listener_id: {}", listener_id);
 
             let app_name = {
@@ -191,7 +188,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
 
                 });
-            rt.block_on(local_set);
+            runtime.block_on(local_set);
 
             trace!("Reached bottom of call_shared_extern_fn");
         }
