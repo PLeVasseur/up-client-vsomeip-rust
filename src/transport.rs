@@ -39,9 +39,7 @@ use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_run
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 
-use crate::determinations::{
-    determine_message_type, determine_registration_type,
-};
+use crate::determinations::{determine_message_type, determine_registration_type};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{

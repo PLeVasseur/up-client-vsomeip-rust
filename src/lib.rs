@@ -30,15 +30,18 @@ use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime, offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe};
+use vsomeip_sys::safe_glue::{
+    get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime,
+    offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe,
+};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
 
 use transport::{
-    CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING,
-    LISTENER_ID_MAP, LISTENER_REGISTRY,
+    CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING, LISTENER_ID_MAP,
+    LISTENER_REGISTRY,
 };
 
 mod message_conversions;
