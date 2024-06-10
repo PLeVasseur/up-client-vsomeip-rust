@@ -15,13 +15,13 @@ use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{oneshot, RwLock};
 
 use log::{error, info, trace};
 
@@ -30,17 +30,14 @@ use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
 };
-use vsomeip_sys::safe_glue::{
-    get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime,
-    offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe,
-};
+use vsomeip_sys::safe_glue::{get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime, offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
 
 use transport::{
-    AUTHORITY_NAME, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING,
+    CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING,
     LISTENER_ID_MAP, LISTENER_REGISTRY,
 };
 
@@ -74,6 +71,10 @@ const ME_AUTHORITY: &str = "me_authority";
 
 lazy_static! {
     static ref OFFERED_SERVICES: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        InstrumentedRwLock::new(HashSet::new());
+    static ref REQUESTED_SERVICES: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        InstrumentedRwLock::new(HashSet::new());
+    static ref REQUESTED_EVENTS: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
         InstrumentedRwLock::new(HashSet::new());
 }
 
@@ -569,26 +570,32 @@ impl UPClientVsomeip {
                     event_id
                 );
 
-                get_pinned_application(_application_wrapper).request_service(
-                    service_id,
-                    instance_id,
-                    ANY_MAJOR,
-                    vsomeip::ANY_MINOR,
-                );
-                request_single_event_safe(
-                    _application_wrapper,
-                    service_id,
-                    instance_id,
-                    event_id,
-                    event_id,
-                );
-                get_pinned_application(_application_wrapper).subscribe(
-                    service_id,
-                    instance_id,
-                    event_id,
-                    ANY_MAJOR,
-                    event_id,
-                );
+                {
+                    let mut requested_events = REQUESTED_EVENTS.write().await;
+                    if !requested_events.contains(&(service_id, instance_id, event_id)) {
+                        // TODO: Need only do these things once per register
+                        get_pinned_application(_application_wrapper).request_service(
+                            service_id,
+                            instance_id,
+                            ANY_MAJOR,
+                            vsomeip::ANY_MINOR,
+                        );
+                        request_single_event_safe(
+                            _application_wrapper,
+                            service_id,
+                            instance_id,
+                            event_id,
+                            event_id,
+                        );
+                        get_pinned_application(_application_wrapper).subscribe(
+                            service_id,
+                            instance_id,
+                            event_id,
+                            ANY_MAJOR,
+                            event_id,
+                        );
+                    }
+                }
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
                     service_id,
@@ -676,12 +683,18 @@ impl UPClientVsomeip {
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
 
                 // TODO: Fix this, should not be ANY_MAJOR and ANY_MINOR
-                get_pinned_application(_application_wrapper).request_service(
-                    service_id,
-                    instance_id,
-                    ANY_MAJOR,
-                    ANY_MINOR,
-                );
+                // TODO: Need only do these things once
+                {
+                    let mut requested_services = REQUESTED_SERVICES.write().await;
+                    if !requested_services.contains(&(service_id, instance_id, method_id)) {
+                        get_pinned_application(_application_wrapper).request_service(
+                            service_id,
+                            instance_id,
+                            ANY_MAJOR,
+                            ANY_MINOR,
+                        );
+                    }
+                }
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",

@@ -129,11 +129,3 @@ pub fn determine_message_type(
         Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
     }
 }
-
-pub fn is_point_to_point_message(_vsomeip_message: &mut UniquePtr<MessageWrapper>) -> bool {
-    let msg_type = get_pinned_message_base(_vsomeip_message).get_message_type();
-    matches!(
-        msg_type,
-        message_type_e::MT_REQUEST | message_type_e::MT_RESPONSE | message_type_e::MT_ERROR
-    )
-}

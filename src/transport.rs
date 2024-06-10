@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use once_cell::sync::Lazy;
 
-use tokio::runtime::{Builder, Runtime};
+use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
@@ -38,10 +38,9 @@ use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
-use vsomeip_sys::vsomeip::message;
 
 use crate::determinations::{
-    determine_message_type, determine_registration_type, is_point_to_point_message,
+    determine_message_type, determine_registration_type,
 };
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;

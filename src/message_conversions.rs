@@ -23,7 +23,6 @@ use lazy_static::lazy_static;
 use log::trace;
 use protobuf::Enum;
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{
