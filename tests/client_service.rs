@@ -11,10 +11,10 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use log::{error, info, trace};
+use log::{error, info};
 use protobuf::Enum;
 use std::fs::canonicalize;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -25,6 +25,7 @@ pub struct ResponseListener {
     received_response: AtomicUsize,
 }
 impl ResponseListener {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             received_response: AtomicUsize::new(0),
@@ -52,6 +53,7 @@ pub struct RequestListener {
 }
 
 impl RequestListener {
+    #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,

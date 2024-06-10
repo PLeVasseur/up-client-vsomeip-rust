@@ -1,3 +1,16 @@
+/********************************************************************************
+ * Copyright (c) 2023 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License Version 2.0 which is available at
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
 pub mod test_lib;
 use up_client_vsomeip_rust::UPClientVsomeip;
 
@@ -10,7 +23,6 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
-    use tokio::task;
     use up_rust::{UListener, UTransport, UUri};
 
     #[test]
@@ -53,7 +65,7 @@ mod tests {
 
         trace!(
             "Took {} milliseconds to register_listener.",
-            Duration::from(after - before).as_millis()
+            (after - before).as_millis()
         );
 
         tokio::time::sleep(Duration::from_millis(500)).await;

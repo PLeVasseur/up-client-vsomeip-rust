@@ -1,8 +1,21 @@
-use log::{error, info, trace, warn};
+/********************************************************************************
+ * Copyright (c) 2023 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License Version 2.0 which is available at
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
+use log::{error, info, trace};
 use protobuf::Enum;
 use std::env::current_dir;
 use std::fs::canonicalize;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -19,6 +32,7 @@ pub struct PointToPointListener {
 }
 
 impl PointToPointListener {
+    #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,
@@ -89,6 +103,7 @@ pub struct ResponseListener {
     received_response: AtomicUsize,
 }
 impl ResponseListener {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             received_response: AtomicUsize::new(0),
@@ -117,6 +132,7 @@ pub struct RequestListener {
 }
 
 impl RequestListener {
+    #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPClientVsomeip>) -> Self {
         Self {
             client,
@@ -184,7 +200,6 @@ async fn point_to_point() {
 
     let service_1_ue_id = 0x1236;
     let service_1_ue_version_major = 1;
-    let service_1_resource_id = 0x0421;
 
     let current_dir = current_dir();
     info!("{current_dir:?}");

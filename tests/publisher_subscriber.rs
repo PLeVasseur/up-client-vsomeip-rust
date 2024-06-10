@@ -1,5 +1,18 @@
-use log::{error, trace};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+/********************************************************************************
+ * Copyright (c) 2023 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License Version 2.0 which is available at
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
+use log::trace;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -10,6 +23,7 @@ pub struct SubscriberListener {
     received_publish: AtomicUsize,
 }
 impl SubscriberListener {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             received_publish: AtomicUsize::new(0),
@@ -36,7 +50,6 @@ impl UListener for SubscriberListener {
 async fn publisher_subscriber() {
     env_logger::init();
 
-    let app_name = "publisher";
     let authority_name = "foo";
 
     let ue_id = 10;
