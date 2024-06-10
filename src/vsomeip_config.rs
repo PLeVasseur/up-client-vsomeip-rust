@@ -1,3 +1,16 @@
+/********************************************************************************
+ * Copyright (c) 2023 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License Version 2.0 which is available at
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::File;
@@ -12,7 +25,6 @@ pub struct ApplicationConfig {
     pub(crate) id: u16,
 }
 
-// Custom deserialization function for the hex string to u16
 fn deserialize_hex_u16<'de, D>(deserializer: D) -> Result<u16, D::Error>
 where
     D: serde::Deserializer<'de>,

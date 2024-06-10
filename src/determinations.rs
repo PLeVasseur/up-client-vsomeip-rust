@@ -15,8 +15,18 @@ use crate::transport::{
     CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING, FREE_LISTENER_IDS, LISTENER_ID_MAP,
 };
 use crate::{ApplicationName, ClientId, RegistrationType, RequestId, SessionId, UeId};
-use log::trace;
+use log::{info, trace};
 use up_rust::{ComparableListener, UCode, UStatus, UUri};
+
+pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
+    info!("listener_id was not used since we already have registered for this Request");
+    let mut free_ids = FREE_LISTENER_IDS.write().await;
+    free_ids.insert(listener_id);
+    UStatus::fail_with_code(
+        UCode::ALREADY_EXISTS,
+        "Already have registered with this source, sink and listener",
+    )
+}
 
 pub(crate) async fn insert_into_listener_id_map(
     key: (UUri, Option<UUri>, ComparableListener),

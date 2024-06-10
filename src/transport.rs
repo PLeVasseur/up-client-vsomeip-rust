@@ -13,7 +13,7 @@
 
 use crate::determinations::{
     determine_message_type, determine_registration_type, find_app_name, find_available_listener_id,
-    insert_into_listener_id_map,
+    free_listener_id, insert_into_listener_id_map,
 };
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
@@ -390,75 +390,68 @@ impl UTransport for UPClientVsomeip {
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
         if !insert_into_listener_id_map(key, listener_id).await {
-            info!("listener_id was not used since we already have registered for this Request");
-            let mut free_ids = FREE_LISTENER_IDS.write().await;
-            free_ids.insert(listener_id);
-            Err(UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
-                "Already have registered with this source, sink and listener",
-            ))
-        } else {
-            trace!("Inserted into LISTENER_ID_MAP");
+            return Err(free_listener_id(listener_id).await);
+        }
 
-            // TODO: Need to do some verification on returned Option<>
-            LISTENER_REGISTRY
-                .write()
-                .await
-                .insert(listener_id, listener);
+        trace!("Inserted into LISTENER_ID_MAP");
 
-            let app_name = find_app_name(registration_type.client_id()).await;
+        // TODO: Need to do some verification on returned Option<>
+        LISTENER_REGISTRY
+            .write()
+            .await
+            .insert(listener_id, listener);
 
-            let extern_fn = get_extern_fn(listener_id);
-            let msg_handler = MessageHandlerFnPtr(extern_fn);
-            let src = source_filter.clone();
-            let sink = sink_filter.cloned();
+        let app_name = find_app_name(registration_type.client_id()).await;
+        let extern_fn = get_extern_fn(listener_id);
+        let msg_handler = MessageHandlerFnPtr(extern_fn);
+        let src = source_filter.clone();
+        let sink = sink_filter.cloned();
 
-            trace!("Obtained extern_fn");
+        trace!("Obtained extern_fn");
 
-            if let Err(err) = app_name {
-                warn!(
-                    "No app found for client_id: {}, err: {err:?}",
-                    registration_type.client_id()
-                );
+        if let Err(err) = app_name {
+            warn!(
+                "No app found for client_id: {}, err: {err:?}",
+                registration_type.client_id()
+            );
 
-                let app_name = format!("{}", registration_type.client_id());
-
-                let (tx, rx) = oneshot::channel();
-                trace!(
-                    "{}:{} - Sending TransportCommand for InitializeNewApp",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
-                );
-                let _tx_res = self
-                    .tx_to_event_loop
-                    .send(TransportCommand::InitializeNewApp(
-                        registration_type.client_id(),
-                        app_name.clone(),
-                        tx,
-                    ))
-                    .await;
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
-                    .await?;
-            }
-
-            {
-                let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
-                listener_client_id_mapping.insert(listener_id, registration_type.client_id());
-            }
+            let app_name = format!("{}", registration_type.client_id());
 
             let (tx, rx) = oneshot::channel();
+            trace!(
+                "{}:{} - Sending TransportCommand for InitializeNewApp",
+                UP_CLIENT_VSOMEIP_TAG,
+                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+            );
             let _tx_res = self
                 .tx_to_event_loop
-                .send(TransportCommand::RegisterListener(
-                    src,
-                    sink,
-                    registration_type,
-                    msg_handler,
+                .send(TransportCommand::InitializeNewApp(
+                    registration_type.client_id(),
+                    app_name.clone(),
                     tx,
                 ))
                 .await;
-            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                .await?;
         }
+
+        {
+            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+            listener_client_id_mapping.insert(listener_id, registration_type.client_id());
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let _tx_res = self
+            .tx_to_event_loop
+            .send(TransportCommand::RegisterListener(
+                src,
+                sink,
+                registration_type,
+                msg_handler,
+                tx,
+            ))
+            .await;
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
     }
 
     async fn unregister_listener(

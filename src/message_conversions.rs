@@ -61,7 +61,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
         .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
     {
         UMessageType::UMESSAGE_TYPE_PUBLISH => {
-            // Implementation goes here
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_notification(true));
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
@@ -93,10 +92,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 instance_id
             );
 
-            // I think this sleep is needed here to allow vsomeip to settle after having the event
-            // offered
-            // TODO: We need to handle this in a subtler way which keeps track on whether for a given
-            //  service_id, instance_id, and event_id we have offered the event before
             // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
             //  the UPClientVsomeip?
             {
@@ -215,20 +210,12 @@ pub async fn convert_umsg_to_vsomeip_msg(
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
-            // TODO: Because these must be source to allow the response to be seen, we need to give
-            //  this a tune-up, since now no longer does the service_id match what's expected on
-            //  the other end.
-            //
-            // TODO: Will need to consider what changes to make
-            // let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id); // Should this be source?
             let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
             get_pinned_message_base(&vsomeip_msg).set_service(service_id);
             let instance_id = 1; // TODO: Setting to 1 manually for now
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
-            // let (_, method_id) = split_u32_to_u16(sink.resource_id); // Should this be source?
             let (_, method_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(method_id);
-            // let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major); // Should this be source?
             let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
 

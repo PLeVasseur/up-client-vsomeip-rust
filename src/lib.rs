@@ -13,6 +13,7 @@
 
 use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
+use log::{error, info, trace};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,9 +22,6 @@ use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
-
-use log::{error, info, trace};
-
 use up_rust::{UCode, UListener, UMessage, UMessageType, UStatus, UUri, UUID};
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
@@ -37,17 +35,18 @@ use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
-
 use transport::CLIENT_ID_APP_MAPPING;
 
 mod message_conversions;
-
 use message_conversions::convert_umsg_to_vsomeip_msg;
+
 mod determinations;
-use determinations::{create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8};
+use determinations::{
+    create_request_id, determine_message_type, find_app_name, retrieve_session_id,
+    split_u32_to_u16, split_u32_to_u8,
+};
 
 mod vsomeip_config;
-use crate::determinations::{determine_message_type, find_app_name};
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
