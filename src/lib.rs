@@ -44,13 +44,10 @@ mod message_conversions;
 
 use message_conversions::convert_umsg_to_vsomeip_msg;
 mod determinations;
-use determinations::{
-    create_request_id, retrieve_session_id, split_u32_to_u16,
-    split_u32_to_u8,
-};
+use determinations::{create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8};
 
 mod vsomeip_config;
-use crate::determinations::determine_message_type;
+use crate::determinations::{determine_message_type, find_app_name};
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -87,11 +84,7 @@ enum TransportCommand {
         RegistrationType,
         oneshot::Sender<Result<(), UStatus>>,
     ),
-    Send(
-        UMessage,
-        ApplicationName,
-        oneshot::Sender<Result<(), UStatus>>,
-    ),
+    Send(UMessage, oneshot::Sender<Result<(), UStatus>>),
     // Additional helpful commands
     InitializeNewApp(
         ClientId,
@@ -284,17 +277,7 @@ impl UPClientVsomeip {
 
                             trace!("registration_type: {registration_type:?}");
 
-                            let app_name = {
-                                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
-                                    Ok(app_name.clone())
-                                } else {
-                                    Err(UStatus::fail_with_code(
-                                        UCode::NOT_FOUND,
-                                        format!("There was no app_name found for client_id: {}", registration_type.client_id()),
-                                    ))
-                                }
-                            };
+                            let app_name = find_app_name(registration_type.client_id()).await;
 
                             let Ok(app_name) = app_name else {
                                 Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
@@ -321,17 +304,7 @@ impl UPClientVsomeip {
                         }
                         TransportCommand::UnregisterListener(src, sink, registration_type, return_channel) => {
 
-                            let app_name = {
-                                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
-                                    Ok(app_name.clone())
-                                } else {
-                                    Err(UStatus::fail_with_code(
-                                        UCode::NOT_FOUND,
-                                        format!("There was no app_name found for client_id: {}", registration_type.client_id()),
-                                    ))
-                                }
-                            };
+                            let app_name = find_app_name(registration_type.client_id()).await;
 
                             let Ok(app_name) = app_name else {
                                 Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
@@ -352,7 +325,7 @@ impl UPClientVsomeip {
                             )
                                 .await
                         }
-                        TransportCommand::Send(umsg, application_name, return_channel) => {
+                        TransportCommand::Send(umsg, return_channel) => {
                             trace!(
                                 "{}:{} - Attempting to send UMessage: {:?}",
                                 UP_CLIENT_VSOMEIP_TAG,
@@ -381,18 +354,7 @@ impl UPClientVsomeip {
 
                                     trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
 
-                                    let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                        if let Some(app_name) = client_id_app_mapping.get(client_id) {
-                                            trace!("For client_id we found app_name: client_id: {client_id} app_name: {app_name}");
-                                            Ok(app_name.clone())
-                                        } else {
-                                            Err(UStatus::fail_with_code(
-                                                UCode::NOT_FOUND,
-                                                format!("There was no app_name found for client_id: {}", client_id),
-                                            ))
-                                        }
-                                    };
+                                    let app_name = find_app_name(registration_type.client_id()).await;
 
                                     let Ok(app_name) = app_name else {
                                         Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
@@ -412,7 +374,6 @@ impl UPClientVsomeip {
                                     trace!("Application existed for {app_name}, listed under client_id: {client_id}, with app_client_id: {app_client_id}");
 
                                     Self::send_internal(
-                                        &application_name,
                                         umsg,
                                         return_channel,
                                         &mut application_wrapper,
@@ -855,7 +816,6 @@ impl UPClientVsomeip {
     }
 
     async fn send_internal(
-        _app_name: &str,
         umsg: UMessage,
         _return_channel: oneshot::Sender<Result<(), UStatus>>,
         _application_wrapper: &mut UniquePtr<ApplicationWrapper>,

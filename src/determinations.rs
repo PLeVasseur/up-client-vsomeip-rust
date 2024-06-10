@@ -11,17 +11,29 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::CLIENT_ID_SESSION_ID_TRACKING;
-use crate::{ClientId, RegistrationType, RequestId, SessionId};
-use up_rust::{UStatus, UUri};
+use crate::transport::{CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING};
+use crate::{ApplicationName, ClientId, RegistrationType, RequestId, SessionId, UeId};
+use up_rust::{UCode, UStatus, UUri};
 
-pub fn split_u32_to_u16(value: u32) -> (u16, u16) {
+pub(crate) async fn find_app_name(client_id: ClientId) -> Result<ApplicationName, UStatus> {
+    let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
+    if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+        Ok(app_name.clone())
+    } else {
+        Err(UStatus::fail_with_code(
+            UCode::NOT_FOUND,
+            format!("There was no app_name found for client_id: {}", client_id),
+        ))
+    }
+}
+
+pub(crate) fn split_u32_to_u16(value: u32) -> (u16, u16) {
     let most_significant_bits = (value >> 16) as u16;
     let least_significant_bits = (value & 0xFFFF) as u16;
     (most_significant_bits, least_significant_bits)
 }
 
-pub fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
+pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     let byte1 = (value >> 24) as u8;
     let byte2 = (value >> 16 & 0xFF) as u8;
     let byte3 = (value >> 8 & 0xFF) as u8;
@@ -29,7 +41,7 @@ pub fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     (byte1, byte2, byte3, byte4)
 }
 
-pub async fn retrieve_session_id(client_id: ClientId) -> SessionId {
+pub(crate) async fn retrieve_session_id(client_id: ClientId) -> SessionId {
     let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.write().await;
 
     let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(1);
@@ -38,23 +50,29 @@ pub async fn retrieve_session_id(client_id: ClientId) -> SessionId {
     returned_session_id
 }
 
-pub fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
+pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
     ((client_id as u32) << 16) | (session_id as u32)
 }
 
 // infer the type of message desired based on the filters provided
-pub fn determine_registration_type(
+pub(crate) fn determine_registration_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,
+    my_ue_id: UeId,
 ) -> Result<RegistrationType, UStatus> {
-    determine_type(source_filter, sink_filter, DeterminationType::Register)
+    determine_type(
+        source_filter,
+        sink_filter,
+        Some(my_ue_id),
+        DeterminationType::Register,
+    )
 }
 
-pub fn determine_message_type(
+pub(crate) fn determine_message_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,
 ) -> Result<RegistrationType, UStatus> {
-    determine_type(source_filter, sink_filter, DeterminationType::Message)
+    determine_type(source_filter, sink_filter, None, DeterminationType::Message)
 }
 
 enum DeterminationType {
@@ -65,6 +83,7 @@ enum DeterminationType {
 fn determine_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,
+    my_ue_id: Option<UeId>,
     determination_type: DeterminationType,
 ) -> Result<RegistrationType, UStatus> {
     if let Some(sink_filter) = &sink_filter {
@@ -97,7 +116,14 @@ fn determine_type(
             Ok(RegistrationType::Request(client_id))
         }
     } else {
-        // TODO: This is overridden when used today, so it makes sense to rethink this a bit
-        Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
+        let client_id = {
+            match determination_type {
+                DeterminationType::Register => {
+                    my_ue_id.expect("Should have been a own ue_id available in this path")
+                }
+                DeterminationType::Message => source_filter.ue_id as ClientId,
+            }
+        };
+        Ok(RegistrationType::Publish(client_id))
     }
 }

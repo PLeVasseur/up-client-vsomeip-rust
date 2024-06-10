@@ -128,25 +128,21 @@ impl UTransport for UPClientVsomeip {
 
         let sink_filter = message.attributes.sink.as_ref();
 
-        // let message_type = determine_registration_type(source_filter, &sink_filter.cloned())?;
         let message_type = determine_message_type(source_filter, &sink_filter.cloned())?;
-        let client_id = match message_type {
-            RegistrationType::Publish(client_id) => client_id,
-            RegistrationType::Request(client_id) => client_id,
-            RegistrationType::Response(client_id) => client_id,
-            RegistrationType::AllPointToPoint(client_id) => client_id,
-        };
 
         trace!("inside send(), message_type: {message_type:?}");
 
         let app_name = {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+            if let Some(app_name) = client_id_app_mapping.get(&message_type.client_id()) {
                 Ok(app_name.clone())
             } else {
                 Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
-                    format!("There was no app_name found for client_id: {}", client_id),
+                    format!(
+                        "There was no app_name found for client_id: {}",
+                        message_type.client_id()
+                    ),
                 ))
             }
         };
@@ -156,15 +152,8 @@ impl UTransport for UPClientVsomeip {
         if let Err(err) = app_name {
             warn!("{err:?}");
 
-            let client_id = match message_type {
-                RegistrationType::Publish(client_id) => client_id,
-                RegistrationType::Request(client_id) => client_id,
-                RegistrationType::Response(client_id) => client_id,
-                RegistrationType::AllPointToPoint(client_id) => client_id,
-            };
-
             // let app_name = format!("{}_{}", self.authority_name, client_id);
-            let app_name = format!("{client_id}");
+            let app_name = format!("{}", message_type.client_id());
 
             // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
@@ -172,26 +161,22 @@ impl UTransport for UPClientVsomeip {
                 "{}:{} - Sending TransportCommand for InitializeNewApp. client_id: {} app_name: {}",
                 UP_CLIENT_VSOMEIP_TAG,
                 UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER,
-                client_id,
+                message_type.client_id(),
                 app_name
             );
             let _tx_res = self
                 .tx_to_event_loop
-                .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
+                .send(TransportCommand::InitializeNewApp(
+                    message_type.client_id(),
+                    app_name,
+                    tx,
+                ))
                 .await;
             await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
                 .await?;
         }
 
-        let client_id = match message_type {
-            RegistrationType::Publish(client_id) => client_id,
-            RegistrationType::Request(client_id) => client_id,
-            RegistrationType::Response(client_id) => client_id,
-            RegistrationType::AllPointToPoint(client_id) => client_id,
-        };
-
-        // let app_name = format!("{}_{}", self.authority_name, client_id);
-        let app_name = format!("{client_id}");
+        let app_name = format!("{}", message_type.client_id());
         trace!("app_name: {app_name}");
 
         let maybe_point_to_point_listener = {
@@ -200,88 +185,95 @@ impl UTransport for UPClientVsomeip {
         };
 
         if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
-            if message_type == RegistrationType::Request(client_id) {
-                trace!("Sending a Request and we have a point-to-point listener");
+            match message_type {
+                RegistrationType::Request(client_id) => {
+                    trace!("Sending a Request and we have a point-to-point listener");
 
-                let listener_id = {
-                    let mut free_ids = FREE_LISTENER_IDS.write().await;
-                    if let Some(&id) = free_ids.iter().next() {
-                        free_ids.remove(&id);
-                        id
-                    } else {
-                        return Err(UStatus::fail_with_code(
-                            UCode::RESOURCE_EXHAUSTED,
-                            "No more extern C fns available",
-                        ));
-                    }
-                };
-                let listener = point_to_point_listener.clone();
-                let comp_listener = ComparableListener::new(Arc::clone(&listener));
-                let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-                let listener_id_used = {
-                    let mut id_map = LISTENER_ID_MAP.write().await;
-                    if id_map.insert(key, listener_id).is_some() {
-                        trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
-                        false
-                    } else {
-                        trace!("Inserted into LISTENER_ID_MAP");
-                        true
-                    }
-                };
-                if !listener_id_used {
-                    info!("listener_id was not used since we already have registered for this Request");
-                    let mut free_ids = FREE_LISTENER_IDS.write().await;
-                    free_ids.insert(listener_id);
-                } else {
-                    // TODO: Need to do some verification on returned Option<>
-                    LISTENER_REGISTRY
-                        .write()
-                        .await
-                        .insert(listener_id, listener.clone());
-
-                    let extern_fn = get_extern_fn(listener_id);
-                    let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-                    let Some(src) = message.attributes.sink.as_ref() else {
-                        let err_msg = "Request message doesn't have a sink";
-                        error!("{err_msg}");
-                        return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                    let listener_id = {
+                        let mut free_ids = FREE_LISTENER_IDS.write().await;
+                        if let Some(&id) = free_ids.iter().next() {
+                            free_ids.remove(&id);
+                            id
+                        } else {
+                            return Err(UStatus::fail_with_code(
+                                UCode::RESOURCE_EXHAUSTED,
+                                "No more extern C fns available",
+                            ));
+                        }
                     };
-                    let Some(sink) = message.attributes.source.as_ref() else {
-                        let err_msg = "Request message doesn't have a source";
-                        error!("{err_msg}");
-                        return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                    let listener = point_to_point_listener.clone();
+                    let comp_listener = ComparableListener::new(Arc::clone(&listener));
+                    let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+                    let listener_id_used = {
+                        let mut id_map = LISTENER_ID_MAP.write().await;
+                        if id_map.insert(key, listener_id).is_some() {
+                            trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
+                            false
+                        } else {
+                            trace!("Inserted into LISTENER_ID_MAP");
+                            true
+                        }
                     };
+                    if !listener_id_used {
+                        info!("listener_id was not used since we already have registered for this Request");
+                        let mut free_ids = FREE_LISTENER_IDS.write().await;
+                        free_ids.insert(listener_id);
+                    } else {
+                        // TODO: Need to do some verification on returned Option<>
+                        LISTENER_REGISTRY
+                            .write()
+                            .await
+                            .insert(listener_id, listener.clone());
 
-                    trace!("source used when registering:\n{src:?}");
-                    trace!("sink used when registering:\n{sink:?}");
+                        let extern_fn = get_extern_fn(listener_id);
+                        let msg_handler = MessageHandlerFnPtr(extern_fn);
 
-                    {
-                        let mut listener_client_id_mapping =
-                            LISTENER_CLIENT_ID_MAPPING.write().await;
-                        // TODO: Check that this succeeds
-                        listener_client_id_mapping.insert(listener_id, client_id);
+                        let Some(src) = message.attributes.sink.as_ref() else {
+                            let err_msg = "Request message doesn't have a sink";
+                            error!("{err_msg}");
+                            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                        };
+                        let Some(sink) = message.attributes.source.as_ref() else {
+                            let err_msg = "Request message doesn't have a source";
+                            error!("{err_msg}");
+                            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+                        };
+
+                        trace!("source used when registering:\n{src:?}");
+                        trace!("sink used when registering:\n{sink:?}");
+
+                        {
+                            let mut listener_client_id_mapping =
+                                LISTENER_CLIENT_ID_MAPPING.write().await;
+                            // TODO: Check that this succeeds
+                            listener_client_id_mapping.insert(listener_id, client_id);
+                        }
+
+                        trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
+
+                        let message_type = RegistrationType::Response(client_id);
+                        let (tx, rx) = oneshot::channel();
+                        let _tx_res = self
+                            .tx_to_event_loop
+                            .send(TransportCommand::RegisterListener(
+                                src.clone(),
+                                Some(sink.clone()),
+                                message_type,
+                                msg_handler,
+                                tx,
+                            ))
+                            .await;
+                        await_internal_function(
+                            UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                            rx,
+                        )
+                        .await?;
                     }
-
-                    trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
-
-                    let message_type = RegistrationType::Response(client_id);
-                    let (tx, rx) = oneshot::channel();
-                    let _tx_res = self
-                        .tx_to_event_loop
-                        .send(TransportCommand::RegisterListener(
-                            src.clone(),
-                            Some(sink.clone()),
-                            message_type,
-                            msg_handler,
-                            tx,
-                        ))
-                        .await;
-                    await_internal_function(
-                        UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                        rx,
-                    )
-                    .await?;
+                }
+                _ => {
+                    trace!(
+                        "Sending non-Request when we have a point-to-point listener established"
+                    );
                 }
             }
         }
@@ -289,7 +281,7 @@ impl UTransport for UPClientVsomeip {
         let (tx, rx) = oneshot::channel();
         let _tx_res = self
             .tx_to_event_loop
-            .send(TransportCommand::Send(message, app_name.to_string(), tx))
+            .send(TransportCommand::Send(message, tx))
             .await;
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
@@ -303,20 +295,9 @@ impl UTransport for UPClientVsomeip {
         // TODO: Must add additional validation up here on the UUri filters
 
         let registration_type_res =
-            determine_registration_type(source_filter, &sink_filter.cloned());
+            determine_registration_type(source_filter, &sink_filter.cloned(), self.ue_id);
         let Ok(registration_type) = registration_type_res else {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
-        };
-
-        let registration_type = {
-            match registration_type {
-                RegistrationType::Publish(_) => RegistrationType::Publish(self.ue_id),
-                RegistrationType::Request(client_id) => RegistrationType::Request(client_id),
-                RegistrationType::Response(client_id) => RegistrationType::Response(client_id),
-                RegistrationType::AllPointToPoint(client_id) => {
-                    RegistrationType::AllPointToPoint(client_id)
-                }
-            }
         };
 
         trace!("registration_type: {registration_type:?}");
@@ -496,19 +477,6 @@ impl UTransport for UPClientVsomeip {
                 .await
                 .insert(listener_id, listener);
 
-            // let client_id = match registration_type {
-            //     RegistrationType::Publish(_client_id) => {
-            //         // in the case that we are registering a listener for a Publish message, we will
-            //         // defer the usage of source_filter.ue_id for the actual Publisher
-            //         // we will instead use our configured ue_id
-            //         self.ue_id
-            //         // client_id
-            //     }
-            //     RegistrationType::Request(client_id) => client_id,
-            //     RegistrationType::Response(client_id) => client_id,
-            //     RegistrationType::AllPointToPoint(client_id) => client_id,
-            // };
-
             let app_name = {
                 let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
                 if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
@@ -599,20 +567,9 @@ impl UTransport for UPClientVsomeip {
         let sink = sink_filter.cloned();
 
         let registration_type_res =
-            determine_registration_type(source_filter, &sink_filter.cloned());
+            determine_registration_type(source_filter, &sink_filter.cloned(), self.ue_id);
         let Ok(registration_type) = registration_type_res else {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
-        };
-
-        let registration_type = {
-            match registration_type {
-                RegistrationType::Publish(_) => RegistrationType::Publish(self.ue_id),
-                RegistrationType::Request(client_id) => RegistrationType::Request(client_id),
-                RegistrationType::Response(client_id) => RegistrationType::Response(client_id),
-                RegistrationType::AllPointToPoint(client_id) => {
-                    RegistrationType::AllPointToPoint(client_id)
-                }
-            }
         };
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
@@ -720,7 +677,7 @@ impl UTransport for UPClientVsomeip {
             }
 
             // TODO: Consider if we want to go and stop the vsomeip application
-            //  Probably a good idea
+            //  Probably a good idea to do this in the drop impl
 
             return Ok(());
         }
