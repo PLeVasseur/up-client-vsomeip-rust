@@ -121,13 +121,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
                     offered_events.insert((service_id, instance_id, event_id));
                 }
             }
-            // let first_publish = FIRST_PUBLISH.load(Ordering::SeqCst);
-            // if first_publish {
-            //     tokio::time::sleep(Duration::from_nanos(1)).await;
-            //     FIRST_PUBLISH.store(false, Ordering::SeqCst);
-            // }
-
-            // TODO: These things need only be done once -- consider how to know we already did this
 
             trace!("Immediately after request_service");
 
@@ -141,7 +134,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 ));
             };
 
-            // Implementation goes here
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_request(true));
             let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
@@ -186,7 +178,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 // TODO: What do we do if we have a duplicate, already-existing pair?
                 //  Eject the previous one? Fail on this one?
             }
-            // get_pinned_message_base(&vsomeip_msg).set_session(session_id); // doesn't matter at all, rewritten by send()
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
@@ -208,9 +199,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
             let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
             let interface_version = get_pinned_message_base(&vsomeip_msg).get_interface_version();
 
-            // let payload = get_message_payload(&vsomeip_msg);
-            // let payload_bytes = get_data_safe(&payload);
-
             trace!("{} - : request_id: {} client_id: {} session_id: {} service_id: {} instance_id: {} method_id: {} interface_version: {} app_client_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
                 request_id, client_id, session_id, service_id, instance_id, method_id, interface_version, app_client_id
@@ -224,7 +212,6 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
             );
 
-            // Implementation goes here
             let mut vsomeip_msg =
                 make_message_wrapper(get_pinned_runtime(runtime_wrapper).create_message(true));
 
@@ -499,7 +486,6 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 ..Default::default()
             };
 
-            // TODO: Need to update to use RequestId instead of ClientId
             trace!(
                 "{} - request_id to look up to correlate to req_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,

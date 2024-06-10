@@ -141,10 +141,8 @@ impl UTransport for UPClientVsomeip {
         if let Err(err) = app_name {
             warn!("{err:?}");
 
-            // let app_name = format!("{}_{}", self.authority_name, client_id);
             let app_name = format!("{}", message_type.client_id());
 
-            // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
             trace!(
                 "{}:{} - Sending TransportCommand for InitializeNewApp. client_id: {} app_name: {}",
@@ -280,7 +278,6 @@ impl UTransport for UPClientVsomeip {
             let application_configs = extract_applications(config_path)?;
             trace!("Got vsomeip application_configs: {application_configs:?}");
 
-            // reduce the length lock is held
             {
                 let mut point_to_point_listener = self.point_to_point_listener.write().await;
                 if point_to_point_listener.is_some() {
@@ -367,7 +364,6 @@ impl UTransport for UPClientVsomeip {
 
                 let registration_type = RegistrationType::Request(app_config.id);
 
-                // consider using a worker pool for these, otherwise this will block
                 let (tx, rx) = oneshot::channel();
                 let _tx_res = self
                     .tx_to_event_loop
@@ -471,18 +467,6 @@ impl UTransport for UPClientVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        // implementation goes here
-        let sink_filter_str = {
-            if let Some(sink_filter) = sink_filter {
-                format!("{sink_filter:?}")
-            } else {
-                "".parse().unwrap()
-            }
-        };
-        println!(
-            "Unregistering listener for source filter: {:?}{}",
-            source_filter, sink_filter_str
-        );
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
 
@@ -502,7 +486,6 @@ impl UTransport for UPClientVsomeip {
             let application_configs = extract_applications(config_path)?;
             trace!("Got vsomeip application_configs: {application_configs:?}");
 
-            // reduce scope that lock is held
             let ptp_comp_listener = {
                 let point_to_point_listener = self.point_to_point_listener.read().await;
                 let Some(ref point_to_point_listener) = *point_to_point_listener else {
@@ -513,11 +496,7 @@ impl UTransport for UPClientVsomeip {
                 };
                 ComparableListener::new(point_to_point_listener.clone())
             };
-
-            // TODO: Perform check that the listener we were passed is the same as the point-to-point
-            //  listener we already have
             let comp_listener = ComparableListener::new(listener.clone());
-
             if ptp_comp_listener != comp_listener {
                 return Err(UStatus::fail_with_code(
                     UCode::INVALID_ARGUMENT,
