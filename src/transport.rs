@@ -11,7 +11,10 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determinations::{determine_message_type, determine_registration_type};
+use crate::determinations::{
+    determine_message_type, determine_registration_type, find_app_name, find_available_listener_id,
+    insert_into_listener_id_map,
+};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
@@ -132,20 +135,7 @@ impl UTransport for UPClientVsomeip {
 
         trace!("inside send(), message_type: {message_type:?}");
 
-        let app_name = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if let Some(app_name) = client_id_app_mapping.get(&message_type.client_id()) {
-                Ok(app_name.clone())
-            } else {
-                Err(UStatus::fail_with_code(
-                    UCode::NOT_FOUND,
-                    format!(
-                        "There was no app_name found for client_id: {}",
-                        message_type.client_id()
-                    ),
-                ))
-            }
-        };
+        let app_name = find_app_name(message_type.client_id()).await;
 
         trace!("app_name: {app_name:?}");
 
@@ -189,32 +179,11 @@ impl UTransport for UPClientVsomeip {
                 RegistrationType::Request(client_id) => {
                     trace!("Sending a Request and we have a point-to-point listener");
 
-                    let listener_id = {
-                        let mut free_ids = FREE_LISTENER_IDS.write().await;
-                        if let Some(&id) = free_ids.iter().next() {
-                            free_ids.remove(&id);
-                            id
-                        } else {
-                            return Err(UStatus::fail_with_code(
-                                UCode::RESOURCE_EXHAUSTED,
-                                "No more extern C fns available",
-                            ));
-                        }
-                    };
+                    let listener_id = find_available_listener_id().await?;
                     let listener = point_to_point_listener.clone();
                     let comp_listener = ComparableListener::new(Arc::clone(&listener));
                     let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-                    let listener_id_used = {
-                        let mut id_map = LISTENER_ID_MAP.write().await;
-                        if id_map.insert(key, listener_id).is_some() {
-                            trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
-                            false
-                        } else {
-                            trace!("Inserted into LISTENER_ID_MAP");
-                            true
-                        }
-                    };
-                    if !listener_id_used {
+                    if !insert_into_listener_id_map(key, listener_id).await {
                         info!("listener_id was not used since we already have registered for this Request");
                         let mut free_ids = FREE_LISTENER_IDS.write().await;
                         free_ids.insert(listener_id);
@@ -344,23 +313,9 @@ impl UTransport for UPClientVsomeip {
                 )
                 .await;
 
-                // TODO: Now we need to register a listener for all uProtocol Request style messages
-                //  incoming on that application which match our client_id
-                let listener_id = {
-                    let mut free_ids = FREE_LISTENER_IDS.write().await;
-                    if let Some(&id) = free_ids.iter().next() {
-                        free_ids.remove(&id);
-                        id
-                    } else {
-                        return Err(UStatus::fail_with_code(
-                            UCode::RESOURCE_EXHAUSTED,
-                            "No more extern C fns available",
-                        ));
-                    }
-                };
+                let listener_id = find_available_listener_id().await?;
                 let comp_listener = ComparableListener::new(listener.clone());
 
-                // TODO: We need to set the source_filter and sink_filter appropriately here
                 let src = UUri {
                     authority_name: "*".to_string(),
                     ue_id: 0x0000_FFFF,     // any instance, any service
@@ -432,35 +387,14 @@ impl UTransport for UPClientVsomeip {
             return Ok(());
         }
 
-        let listener_id = {
-            let mut free_ids = FREE_LISTENER_IDS.write().await;
-            if let Some(&id) = free_ids.iter().next() {
-                free_ids.remove(&id);
-                id
-            } else {
-                return Err(UStatus::fail_with_code(
-                    UCode::RESOURCE_EXHAUSTED,
-                    "No more extern C fns available",
-                ));
-            }
-        };
+        let listener_id = find_available_listener_id().await?;
 
         trace!("Obtained listener_id: {}", listener_id);
 
         let comp_listener = ComparableListener::new(listener.clone());
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
-        let listener_id_used = {
-            let mut id_map = LISTENER_ID_MAP.write().await;
-            if id_map.insert(key, listener_id).is_some() {
-                trace!("Not inserted into LISTENER_ID_MAP since wa already have registered for this Request");
-                false
-            } else {
-                trace!("Inserted into LISTENER_ID_MAP");
-                true
-            }
-        };
-        if !listener_id_used {
+        if !insert_into_listener_id_map(key, listener_id).await {
             info!("listener_id was not used since we already have registered for this Request");
             let mut free_ids = FREE_LISTENER_IDS.write().await;
             free_ids.insert(listener_id);
@@ -477,20 +411,7 @@ impl UTransport for UPClientVsomeip {
                 .await
                 .insert(listener_id, listener);
 
-            let app_name = {
-                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
-                    Ok(app_name.clone())
-                } else {
-                    Err(UStatus::fail_with_code(
-                        UCode::NOT_FOUND,
-                        format!(
-                            "Within register_listener: There was no app_name found for client_id: {}",
-                            registration_type.client_id()
-                        ),
-                    ))
-                }
-            };
+            let app_name = find_app_name(registration_type.client_id()).await;
 
             let extern_fn = get_extern_fn(listener_id);
             let msg_handler = MessageHandlerFnPtr(extern_fn);
@@ -606,10 +527,6 @@ impl UTransport for UPClientVsomeip {
             }
 
             for app_config in &application_configs {
-                // TODO: Now we need to unregister a listener for all uProtocol Request style messages
-                //  incoming on that application which match our client_id
-
-                // TODO: We need to set the source_filter and sink_filter appropriately here
                 let src = UUri {
                     authority_name: "*".to_string(),
                     ue_id: 0x0000_FFFF,     // any instance, any service
@@ -617,9 +534,6 @@ impl UTransport for UPClientVsomeip {
                     resource_id: 0xFFFF,    // any
                     ..Default::default()
                 };
-
-                // TODO: How to explicitly handle instance_id?
-                //  I'm not sure it's possible to set within the vsomeip config file
                 let sink = UUri {
                     authority_name: self.authority_name.clone(),
                     ue_id: app_config.id as u32,
@@ -725,7 +639,7 @@ impl UTransport for UPClientVsomeip {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
                     "Listener not found",
-                )); // Custom error indicating listener not found
+                ));
             }
         };
 

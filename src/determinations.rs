@@ -11,9 +11,41 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::{CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING};
+use crate::transport::{
+    CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING, FREE_LISTENER_IDS, LISTENER_ID_MAP,
+};
 use crate::{ApplicationName, ClientId, RegistrationType, RequestId, SessionId, UeId};
-use up_rust::{UCode, UStatus, UUri};
+use log::trace;
+use up_rust::{ComparableListener, UCode, UStatus, UUri};
+
+pub(crate) async fn insert_into_listener_id_map(
+    key: (UUri, Option<UUri>, ComparableListener),
+    listener_id: usize,
+) -> bool {
+    let mut id_map = LISTENER_ID_MAP.write().await;
+    if id_map.insert(key, listener_id).is_some() {
+        trace!(
+            "Not inserted into LISTENER_ID_MAP since wa already have registered for this Request"
+        );
+        false
+    } else {
+        trace!("Inserted into LISTENER_ID_MAP");
+        true
+    }
+}
+
+pub(crate) async fn find_available_listener_id() -> Result<usize, UStatus> {
+    let mut free_ids = FREE_LISTENER_IDS.write().await;
+    if let Some(&id) = free_ids.iter().next() {
+        free_ids.remove(&id);
+        Ok(id)
+    } else {
+        Err(UStatus::fail_with_code(
+            UCode::RESOURCE_EXHAUSTED,
+            "No more extern C fns available",
+        ))
+    }
+}
 
 pub(crate) async fn find_app_name(client_id: ClientId) -> Result<ApplicationName, UStatus> {
     let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;

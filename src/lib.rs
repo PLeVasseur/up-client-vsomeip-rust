@@ -345,12 +345,6 @@ impl UPClientVsomeip {
 
                             match message_type {
                                 Ok(ref registration_type) => {
-                                    let client_id = match registration_type {
-                                        RegistrationType::Publish(client_id) => { client_id }
-                                        RegistrationType::Request(client_id) => { client_id }
-                                        RegistrationType::Response(client_id) => { client_id }
-                                        RegistrationType::AllPointToPoint(client_id) => { client_id }
-                                    };
 
                                     trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
 
@@ -365,13 +359,13 @@ impl UPClientVsomeip {
 
                                     let application = get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
                                     if application.is_null() {
-                                        let err = format!("No application exists for {app_name} under client_id: {client_id}");
+                                        let err = format!("No application exists for {app_name} under client_id: {}", registration_type.client_id());
                                         Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INTERNAL, err)), return_channel).await;
                                         continue;
                                     }
                                     let mut application_wrapper = make_application_wrapper(application);
                                     let app_client_id = get_pinned_application(&application_wrapper).get_client();
-                                    trace!("Application existed for {app_name}, listed under client_id: {client_id}, with app_client_id: {app_client_id}");
+                                    trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", registration_type.client_id());
 
                                     Self::send_internal(
                                         umsg,
