@@ -224,11 +224,7 @@ impl UTransport for UPClientVsomeip {
 
         let maybe_point_to_point_listener = {
             let point_to_point_listener = self.point_to_point_listener.read().await;
-            if let Some(ref point_to_point_listener) = *point_to_point_listener {
-                Some(point_to_point_listener.clone())
-            } else {
-                None
-            }
+            (*point_to_point_listener).as_ref().cloned()
         };
 
         if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
@@ -329,8 +325,7 @@ impl UTransport for UPClientVsomeip {
             .tx_to_event_loop
             .send(TransportCommand::Send(message, app_name.to_string(), tx))
             .await;
-        let res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await;
-        res
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
     async fn register_listener(

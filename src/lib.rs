@@ -410,7 +410,7 @@ impl UPClientVsomeip {
 
                                     let app_name = {
                                         let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                        if let Some(app_name) = client_id_app_mapping.get(client_id) {
                                             trace!("For client_id we found app_name: client_id: {client_id} app_name: {app_name}");
                                             Ok(app_name.clone())
                                         } else {
