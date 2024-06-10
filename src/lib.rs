@@ -32,7 +32,7 @@ use vsomeip_sys::glue::{
 };
 use vsomeip_sys::safe_glue::{
     get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime,
-    offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe,
+    register_message_handler_fn_ptr_safe, request_single_event_safe,
 };
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
@@ -59,7 +59,6 @@ use crate::transport::{
     InstrumentedRwLock, CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, TIMES_REGISTERED,
     UE_REQUEST_CORRELATION,
 };
-use vsomeip_config::extract_applications;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -574,7 +573,7 @@ impl UPClientVsomeip {
                 );
 
                 {
-                    let mut requested_events = REQUESTED_EVENTS.write().await;
+                    let requested_events = REQUESTED_EVENTS.write().await;
                     if !requested_events.contains(&(service_id, instance_id, event_id)) {
                         // TODO: Need only do these things once per register
                         get_pinned_application(_application_wrapper).request_service(
@@ -679,16 +678,13 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                // TODO: According to the vsomeip in 10 minutes example, don't we need to actually
-                //  set this to the source?
                 let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
 
                 // TODO: Fix this, should not be ANY_MAJOR and ANY_MINOR
-                // TODO: Need only do these things once
                 {
-                    let mut requested_services = REQUESTED_SERVICES.write().await;
+                    let requested_services = REQUESTED_SERVICES.write().await;
                     if !requested_services.contains(&(service_id, instance_id, method_id)) {
                         get_pinned_application(_application_wrapper).request_service(
                             service_id,

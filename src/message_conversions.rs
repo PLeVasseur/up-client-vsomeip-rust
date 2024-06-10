@@ -30,8 +30,8 @@ use vsomeip_sys::glue::{
 };
 use vsomeip_sys::safe_glue::{
     get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-    get_pinned_payload, get_pinned_runtime, offer_single_event_safe, request_single_event_safe,
-    set_data_safe, set_message_payload,
+    get_pinned_payload, get_pinned_runtime, offer_single_event_safe, set_data_safe,
+    set_message_payload,
 };
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};

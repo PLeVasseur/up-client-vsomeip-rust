@@ -12,13 +12,9 @@
  ********************************************************************************/
 
 use crate::transport::CLIENT_ID_SESSION_ID_TRACKING;
-use crate::{ClientId, RegistrationType, RequestId, SessionId, ME_AUTHORITY};
-use cxx::UniquePtr;
+use crate::{ClientId, RegistrationType, RequestId, SessionId};
 use log::trace;
 use up_rust::{UStatus, UUri};
-use vsomeip_sys::glue::MessageWrapper;
-use vsomeip_sys::safe_glue::get_pinned_message_base;
-use vsomeip_sys::vsomeip::message_type_e;
 
 pub fn split_u32_to_u16(value: u32) -> (u16, u16) {
     let most_significant_bits = (value >> 16) as u16;

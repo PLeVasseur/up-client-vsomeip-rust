@@ -145,7 +145,6 @@ async fn await_internal_function(
 #[async_trait]
 impl UTransport for UPClientVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        let top_send = Instant::now();
         trace!("Sending message: {:?}", message);
 
         let Some(source_filter) = message.attributes.source.as_ref() else {
@@ -208,9 +207,8 @@ impl UTransport for UPClientVsomeip {
                 .tx_to_event_loop
                 .send(TransportCommand::InitializeNewApp(client_id, app_name, tx))
                 .await;
-            let app_created_res =
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
-                    .await?;
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                .await?;
         }
 
         let client_id = match message_type {
@@ -387,8 +385,7 @@ impl UTransport for UPClientVsomeip {
 
             for app_config in &application_configs {
                 let (tx, rx) = oneshot::channel();
-                // let app_name = format!("{}_{}", self.authority_name, app_config.name);
-                let tx_res = self
+                self
                     .tx_to_event_loop
                     .send(TransportCommand::InitializeNewApp(
                         app_config.id,
@@ -396,7 +393,10 @@ impl UTransport for UPClientVsomeip {
                         // app_name.clone(),
                         tx,
                     ))
-                    .await;
+                    .await
+                    .map_err(|e| {
+                        UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to initialize new app, due to an issue requesting to inner handler: {:?}", e))
+                    })?;
                 let app_created_res = await_internal_function(
                     "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
                     rx,
@@ -657,12 +657,11 @@ impl UTransport for UPClientVsomeip {
         };
 
         let client_id = match registration_type {
-            RegistrationType::Publish(client_id) => {
+            RegistrationType::Publish(_) => {
                 // in the case that we are registering a listener for a Publish message, we will
                 // defer the usage of source_filter.ue_id for the actual Publisher
                 // we will instead use our configured ue_id
                 self.ue_id
-                // client_id
             }
             RegistrationType::Request(client_id) => client_id,
             RegistrationType::Response(client_id) => client_id,
@@ -681,7 +680,7 @@ impl UTransport for UPClientVsomeip {
 
             // reduce scope that lock is held
             let ptp_comp_listener = {
-                let mut point_to_point_listener = self.point_to_point_listener.read().await;
+                let point_to_point_listener = self.point_to_point_listener.read().await;
                 let Some(ref point_to_point_listener) = *point_to_point_listener else {
                     return Err(UStatus::fail_with_code(
                         UCode::ALREADY_EXISTS,
