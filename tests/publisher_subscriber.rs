@@ -87,8 +87,6 @@ async fn publisher_subscriber() {
 
     let mut iterations = 0;
     while Instant::now().duration_since(start_time) < duration {
-        println!("A");
-
         let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone()).build();
 
         let Ok(publish_msg) = publish_msg_res else {

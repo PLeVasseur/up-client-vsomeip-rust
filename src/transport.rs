@@ -87,7 +87,7 @@ pub struct InstrumentedRwLock<T> {
 }
 
 impl<T> InstrumentedRwLock<T> {
-    fn new(data: T) -> Self {
+    pub fn new(data: T) -> Self {
         Self {
             lock: RwLock::new(data),
             read_times: Arc::new(RwLock::new(Vec::new())),

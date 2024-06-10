@@ -11,13 +11,20 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::{AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
+use crate::transport::{
+    InstrumentedRwLock, AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION,
+};
 use crate::{
-    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, ME_AUTHORITY,
+    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, EventId, InstanceId,
+    ServiceId, ME_AUTHORITY,
 };
 use cxx::UniquePtr;
+use lazy_static::lazy_static;
 use log::trace;
 use protobuf::Enum;
+use std::collections::HashSet;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{
     make_message_wrapper, make_payload_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper,
@@ -32,6 +39,11 @@ use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
+
+lazy_static! {
+    static ref OFFERED_EVENTS: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, EventId)>> =
+        InstrumentedRwLock::new(HashSet::new());
+}
 
 pub async fn convert_umsg_to_vsomeip_msg(
     umsg: &UMessage,
@@ -86,21 +98,39 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 instance_id
             );
 
-            // TODO: These things need only be done once -- consider how to know we already did this
-            get_pinned_application(application_wrapper).offer_service(
-                service_id,
-                instance_id,
-                ANY_MAJOR,
-                // interface_version,
-                vsomeip::ANY_MINOR,
-            );
-            offer_single_event_safe(
-                application_wrapper,
-                service_id,
-                instance_id,
-                event_id,
-                event_id,
-            );
+            // I think this sleep is needed here to allow vsomeip to settle after having the event
+            // offered
+            // TODO: We need to handle this in a subtler way which keeps track on whether for a given
+            //  service_id, instance_id, and event_id we have offered the event before
+            // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
+            //  the UPClientVsomeip?
+            {
+                let mut offered_events = OFFERED_EVENTS.write().await;
+                if !offered_events.contains(&(service_id, instance_id, event_id)) {
+                    // TODO: These things need only be done once -- consider how to know we already did this
+                    get_pinned_application(application_wrapper).offer_service(
+                        service_id,
+                        instance_id,
+                        ANY_MAJOR,
+                        // interface_version,
+                        vsomeip::ANY_MINOR,
+                    );
+                    offer_single_event_safe(
+                        application_wrapper,
+                        service_id,
+                        instance_id,
+                        event_id,
+                        event_id,
+                    );
+                    tokio::time::sleep(Duration::from_nanos(1)).await;
+                    offered_events.insert((service_id, instance_id, event_id));
+                }
+            }
+            // let first_publish = FIRST_PUBLISH.load(Ordering::SeqCst);
+            // if first_publish {
+            //     tokio::time::sleep(Duration::from_nanos(1)).await;
+            //     FIRST_PUBLISH.store(false, Ordering::SeqCst);
+            // }
 
             // TODO: These things need only be done once -- consider how to know we already did this
 

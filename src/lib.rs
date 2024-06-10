@@ -12,8 +12,10 @@
  ********************************************************************************/
 
 use cxx::{let_cxx_string, UniquePtr};
+use lazy_static::lazy_static;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -30,7 +32,7 @@ use vsomeip_sys::glue::{
 };
 use vsomeip_sys::safe_glue::{
     get_message_payload, get_pinned_application, get_pinned_message_base, get_pinned_runtime,
-    register_message_handler_fn_ptr_safe, request_single_event_safe,
+    offer_single_event_safe, register_message_handler_fn_ptr_safe, request_single_event_safe,
 };
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
@@ -54,7 +56,8 @@ use determinations::{
 mod vsomeip_config;
 use crate::determinations::determine_message_type;
 use crate::transport::{
-    CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, TIMES_REGISTERED, UE_REQUEST_CORRELATION,
+    InstrumentedRwLock, CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, TIMES_REGISTERED,
+    UE_REQUEST_CORRELATION,
 };
 use vsomeip_config::extract_applications;
 
@@ -68,6 +71,11 @@ const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str = "initialize_n
 const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 
 const ME_AUTHORITY: &str = "me_authority";
+
+lazy_static! {
+    static ref OFFERED_SERVICES: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        InstrumentedRwLock::new(HashSet::new());
+}
 
 enum TransportCommand {
     // Primary purpose of a UTransport
@@ -106,6 +114,10 @@ type ClientId = u16;
 type ReqId = UUID;
 type SessionId = u16;
 type RequestId = u32;
+type EventId = u16;
+type ServiceId = u16;
+type InstanceId = u16;
+type MethodId = u16;
 
 #[derive(Debug, PartialEq)]
 enum RegistrationType {
@@ -621,12 +633,18 @@ impl UPClientVsomeip {
                     method_id
                 );
 
-                get_pinned_application(_application_wrapper).offer_service(
-                    service_id,
-                    instance_id,
-                    vsomeip::ANY_MAJOR,
-                    vsomeip::ANY_MINOR,
-                );
+                {
+                    let mut offered_services = OFFERED_SERVICES.write().await;
+                    if !offered_services.contains(&(service_id, instance_id, method_id)) {
+                        get_pinned_application(_application_wrapper).offer_service(
+                            service_id,
+                            instance_id,
+                            vsomeip::ANY_MAJOR,
+                            vsomeip::ANY_MINOR,
+                        );
+                        offered_services.insert((service_id, instance_id, method_id));
+                    }
+                }
 
                 register_message_handler_fn_ptr_safe(
                     _application_wrapper,
@@ -948,9 +966,6 @@ impl UPClientVsomeip {
                         let event_id = get_pinned_message_base(&vsomeip_msg).get_method();
                         let _interface_version =
                             get_pinned_message_base(&vsomeip_msg).get_interface_version();
-
-                        // TODO: Debug why unless this sleep is present we miss one Publish
-                        tokio::time::sleep(Duration::from_nanos(1)).await;
 
                         trace!("{}:{} Sending SOME/IP NOTIFICATION with service: {} instance: {} event: {}",
                             UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
