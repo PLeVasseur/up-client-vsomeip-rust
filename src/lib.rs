@@ -15,7 +15,6 @@ use cxx::{let_cxx_string, UniquePtr};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -39,10 +38,7 @@ use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
 
-use transport::{
-    CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_CLIENT_ID_MAPPING, LISTENER_ID_MAP,
-    LISTENER_REGISTRY,
-};
+use transport::CLIENT_ID_APP_MAPPING;
 
 mod message_conversions;
 
@@ -55,10 +51,6 @@ use determinations::{
 
 mod vsomeip_config;
 use crate::determinations::determine_message_type;
-use crate::transport::{
-    InstrumentedRwLock, CLIENT_ID_SESSION_ID_TRACKING, ME_REQUEST_CORRELATION, TIMES_REGISTERED,
-    UE_REQUEST_CORRELATION,
-};
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -72,12 +64,12 @@ const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 const ME_AUTHORITY: &str = "me_authority";
 
 lazy_static! {
-    static ref OFFERED_SERVICES: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
-        InstrumentedRwLock::new(HashSet::new());
-    static ref REQUESTED_SERVICES: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
-        InstrumentedRwLock::new(HashSet::new());
-    static ref REQUESTED_EVENTS: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
-        InstrumentedRwLock::new(HashSet::new());
+    static ref OFFERED_SERVICES: RwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        RwLock::new(HashSet::new());
+    static ref REQUESTED_SERVICES: RwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        RwLock::new(HashSet::new());
+    static ref REQUESTED_EVENTS: RwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =
+        RwLock::new(HashSet::new());
 }
 
 enum TransportCommand {
@@ -85,16 +77,16 @@ enum TransportCommand {
     RegisterListener(
         UUri,
         Option<UUri>,
+        RegistrationType,
         MessageHandlerFnPtr,
         ClientId,
-        ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     UnregisterListener(
         UUri,
         Option<UUri>,
+        RegistrationType,
         ClientId,
-        ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
@@ -122,7 +114,7 @@ type ServiceId = u16;
 type InstanceId = u16;
 type MethodId = u16;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum RegistrationType {
     Publish(ClientId),
     Request(ClientId),
@@ -171,9 +163,6 @@ impl UPClientVsomeip {
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
-
-        // let mut authority_name_static = AUTHORITY_NAME.lock().await;
-        // *authority_name_static = authority_name.to_string();
 
         Self::app_event_loop(rx, config_path);
 
@@ -241,8 +230,7 @@ impl UPClientVsomeip {
         );
 
         // TODO: Should be removed in favor of a signal-based strategy
-        // thread::sleep(Duration::from_millis(500));
-        thread::sleep(Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(50));
     }
 
     fn app_event_loop(
@@ -275,9 +263,9 @@ impl UPClientVsomeip {
                         TransportCommand::RegisterListener(
                             src,
                             sink,
+                            registration_type,
                             msg_handler,
                             client_id,
-                            application_name,
                             return_channel,
                         ) => {
                             trace!(
@@ -286,97 +274,75 @@ impl UPClientVsomeip {
                                 UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
                             );
 
-                            // let registration_type = determine_message_type(&src, &sink);
-                            let registration_type = determine_registration_type(&src, &sink);
-
                             trace!("registration_type: {registration_type:?}");
 
-                            match registration_type {
-                                Ok(_) => {
-                                    let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
-                                            Ok(app_name.clone())
-                                        } else {
-                                            Err(UStatus::fail_with_code(
-                                                UCode::NOT_FOUND,
-                                                format!("There was no app_name found for client_id: {}", client_id),
-                                            ))
-                                        }
-                                    };
-
-                                    let Ok(app_name) = app_name else {
-                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                        continue;
-                                    };
-
-                                    let_cxx_string!(app_name_cxx = app_name);
-
-                                    let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
-
-                                    let res = Self::register_listener_internal(
-                                        &application_name,
-                                        src,
-                                        sink,
-                                        msg_handler,
-                                        &mut application_wrapper,
-                                        &runtime_wrapper,
-                                    )
-                                    .await;
-                                    trace!("Sending back results of registration");
-                                    Self::return_oneshot_result(res, return_channel).await;
-                                    trace!("Sent back results of registration");
-                                    continue;
+                            let app_name = {
+                                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
+                                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                    Ok(app_name.clone())
+                                } else {
+                                    Err(UStatus::fail_with_code(
+                                        UCode::NOT_FOUND,
+                                        format!("There was no app_name found for client_id: {}", client_id),
+                                    ))
                                 }
-                                Err(e) => {
-                                    Self::return_oneshot_result(Err(e), return_channel).await;
-                                    continue;
-                                }
-                            }
+                            };
+
+                            let Ok(app_name) = app_name else {
+                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
+                                continue;
+                            };
+
+                            let_cxx_string!(app_name_cxx = app_name);
+
+                            let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
+
+                            let res = Self::register_listener_internal(
+                                src,
+                                sink,
+                                registration_type,
+                                msg_handler,
+                                &mut application_wrapper,
+                                &runtime_wrapper,
+                            )
+                                .await;
+                            trace!("Sending back results of registration");
+                            Self::return_oneshot_result(res, return_channel).await;
+                            trace!("Sent back results of registration");
+                            continue;
                         }
-                        TransportCommand::UnregisterListener(src, sink, client_id, application_name, return_channel) => {
+                        TransportCommand::UnregisterListener(src, sink, registration_type, client_id, return_channel) => {
 
-                            let registration_type = determine_registration_type(&src, &sink);
-
-                            match registration_type {
-                                Ok(_) => {
-
-                                    let app_name = {
-                                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
-                                            Ok(app_name.clone())
-                                        } else {
-                                            Err(UStatus::fail_with_code(
-                                                UCode::NOT_FOUND,
-                                                format!("There was no app_name found for client_id: {}", client_id),
-                                            ))
-                                        }
-                                    };
-
-                                    let Ok(app_name) = app_name else {
-                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                        continue;
-                                    };
-
-                                    let_cxx_string!(app_name_cxx = app_name);
-
-                                    let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
-
-                                    Self::unregister_listener_internal(
-                                        &application_name,
-                                        src,
-                                        sink,
-                                        return_channel,
-                                        &application_wrapper,
-                                        &runtime_wrapper,
-                                    )
-                                    .await
+                            let app_name = {
+                                let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
+                                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                    Ok(app_name.clone())
+                                } else {
+                                    Err(UStatus::fail_with_code(
+                                        UCode::NOT_FOUND,
+                                        format!("There was no app_name found for client_id: {}", client_id),
+                                    ))
                                 }
-                                Err(e) => {
-                                    Self::return_oneshot_result(Err(e), return_channel).await;
-                                    continue;
-                                }
-                            }
+                            };
+
+                            let Ok(app_name) = app_name else {
+                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
+                                continue;
+                            };
+
+                            let_cxx_string!(app_name_cxx = app_name);
+
+                            let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
+
+                            Self::unregister_listener_internal(
+                                src,
+                                sink,
+                                registration_type,
+                                return_channel,
+                                &application_wrapper,
+                                &runtime_wrapper,
+                            )
+                                .await
                         }
                         TransportCommand::Send(umsg, application_name, return_channel) => {
                             trace!(
@@ -398,12 +364,11 @@ impl UPClientVsomeip {
 
                             match message_type {
                                 Ok(ref registration_type) => {
-
                                     let client_id = match registration_type {
-                                        RegistrationType::Publish(client_id) => {client_id}
-                                        RegistrationType::Request(client_id) => {client_id}
-                                        RegistrationType::Response(client_id) => {client_id}
-                                        RegistrationType::AllPointToPoint(client_id) => {client_id}
+                                        RegistrationType::Publish(client_id) => { client_id }
+                                        RegistrationType::Request(client_id) => { client_id }
+                                        RegistrationType::Response(client_id) => { client_id }
+                                        RegistrationType::AllPointToPoint(client_id) => { client_id }
                                     };
 
                                     trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
@@ -445,7 +410,7 @@ impl UPClientVsomeip {
                                         &mut application_wrapper,
                                         &runtime_wrapper,
                                     )
-                                    .await
+                                        .await
                                 }
                                 Err(e) => {
                                     Self::return_oneshot_result(Err(e), return_channel).await;
@@ -477,28 +442,6 @@ impl UPClientVsomeip {
                                         Self::return_oneshot_result(Err(err), return_channel).await;
                                         continue;
                                     }
-
-
-
-                                    // if !client_application_mapping.contains_key(&client_id) {
-                                    //     if client_application_mapping.insert(client_id, app).is_some() {
-                                    //         let err_msg = format!("Somehow we already had an application running for client_id: {}", client_id);
-                                    //         let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                                    //         Self::return_oneshot_result(Err(err), return_channel).await;
-                                    //         continue;
-                                    //     } else {
-                                    //         trace!("Inserted client_id: {} and application into event loop hashmap", client_id);
-                                    //         Self::return_oneshot_result(Ok(()), return_channel).await;
-                                    //         continue;
-                                    //     }
-                                    // } else {
-                                    //     let err_msg = format!("There already exists an application for client_id: {}", client_id);
-                                    //     let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                                    //     Self::return_oneshot_result(Err(err), return_channel).await;
-                                    //     continue;
-                                    //     // TODO: Need to decide on behavior when there was already
-                                    //     //  an application running with that client ID
-                                    // }
                                 }
                                 Err(err) => {
                                     error!("Unable to create new app: {:?}", err);
@@ -520,31 +463,21 @@ impl UPClientVsomeip {
     }
 
     async fn register_listener_internal(
-        _app_name: &str,
-        _source_filter: UUri,
-        _sink_filter: Option<UUri>,
-        _msg_handler: MessageHandlerFnPtr,
-        _application_wrapper: &mut UniquePtr<ApplicationWrapper>,
+        source_filter: UUri,
+        sink_filter: Option<UUri>,
+        registration_type: RegistrationType,
+        msg_handler: MessageHandlerFnPtr,
+        application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
-        // TODO: May want to add additional validation up here on the UUri filters
-
         trace!(
             "{}:{} - Attempting to register: source_filter: {:?} & sink_filter: {:?}",
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-            _source_filter,
-            _sink_filter
+            source_filter,
+            sink_filter
         );
 
-        // TODO: We call determine_registration_type one level up from this as well... maybe only do this once?
-        let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
-        let Ok(registration_type) = registration_type_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Unable to map source and sink filters to uProtocol message type",
-            ));
-        };
         match registration_type {
             RegistrationType::Publish(_) => {
                 trace!(
@@ -552,10 +485,10 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
                 // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let instance_id = 1;
-                let (_, event_id) = split_u32_to_u16(_source_filter.resource_id);
+                let (_, event_id) = split_u32_to_u16(source_filter.resource_id);
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -570,20 +503,20 @@ impl UPClientVsomeip {
                     let requested_events = REQUESTED_EVENTS.write().await;
                     if !requested_events.contains(&(service_id, instance_id, event_id)) {
                         // TODO: Need only do these things once per register
-                        get_pinned_application(_application_wrapper).request_service(
+                        get_pinned_application(application_wrapper).request_service(
                             service_id,
                             instance_id,
                             ANY_MAJOR,
                             vsomeip::ANY_MINOR,
                         );
                         request_single_event_safe(
-                            _application_wrapper,
+                            application_wrapper,
                             service_id,
                             instance_id,
                             event_id,
                             event_id,
                         );
-                        get_pinned_application(_application_wrapper).subscribe(
+                        get_pinned_application(application_wrapper).subscribe(
                             service_id,
                             instance_id,
                             event_id,
@@ -593,11 +526,11 @@ impl UPClientVsomeip {
                     }
                 }
                 register_message_handler_fn_ptr_safe(
-                    _application_wrapper,
+                    application_wrapper,
                     service_id,
                     instance_id,
                     event_id,
-                    _msg_handler,
+                    msg_handler,
                 );
 
                 tokio::time::sleep(Duration::from_millis(5)).await;
@@ -616,7 +549,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let Some(sink_filter) = _sink_filter else {
+                let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
                         UCode::INVALID_ARGUMENT,
                         "Unable to map source and sink filters to uProtocol message type",
@@ -639,7 +572,7 @@ impl UPClientVsomeip {
                 {
                     let mut offered_services = OFFERED_SERVICES.write().await;
                     if !offered_services.contains(&(service_id, instance_id, method_id)) {
-                        get_pinned_application(_application_wrapper).offer_service(
+                        get_pinned_application(application_wrapper).offer_service(
                             service_id,
                             instance_id,
                             vsomeip::ANY_MAJOR,
@@ -650,11 +583,11 @@ impl UPClientVsomeip {
                 }
 
                 register_message_handler_fn_ptr_safe(
-                    _application_wrapper,
+                    application_wrapper,
                     service_id,
                     vsomeip::ANY_INSTANCE,
                     method_id,
-                    _msg_handler,
+                    msg_handler,
                 );
 
                 trace!(
@@ -672,15 +605,15 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
                 // TODO: Fix this, should not be ANY_MAJOR and ANY_MINOR
                 {
                     let requested_services = REQUESTED_SERVICES.write().await;
                     if !requested_services.contains(&(service_id, instance_id, method_id)) {
-                        get_pinned_application(_application_wrapper).request_service(
+                        get_pinned_application(application_wrapper).request_service(
                             service_id,
                             instance_id,
                             ANY_MAJOR,
@@ -699,11 +632,11 @@ impl UPClientVsomeip {
                 );
 
                 register_message_handler_fn_ptr_safe(
-                    _application_wrapper,
+                    application_wrapper,
                     service_id,
                     instance_id,
                     method_id,
-                    _msg_handler,
+                    msg_handler,
                 );
 
                 trace!(
@@ -744,11 +677,11 @@ impl UPClientVsomeip {
                 );
 
                 register_message_handler_fn_ptr_safe(
-                    _application_wrapper,
+                    application_wrapper,
                     service_id,
                     instance_id,
                     method_id,
-                    _msg_handler,
+                    msg_handler,
                 );
 
                 trace!(
@@ -763,11 +696,11 @@ impl UPClientVsomeip {
     }
 
     async fn unregister_listener_internal(
-        _app_name: &str,
-        _source_filter: UUri,
-        _sink_filter: Option<UUri>,
-        _return_channel: oneshot::Sender<Result<(), UStatus>>,
-        _application_wrapper: &UniquePtr<ApplicationWrapper>,
+        source_filter: UUri,
+        sink_filter: Option<UUri>,
+        registration_type: RegistrationType,
+        return_channel: oneshot::Sender<Result<(), UStatus>>,
+        application_wrapper: &UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) {
         // Implementation goes here
@@ -775,22 +708,9 @@ impl UPClientVsomeip {
             "{}:{} - Attempting to unregister: source_filter: {:?} & sink_filter: {:?}",
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-            _source_filter,
-            _sink_filter
+            source_filter,
+            sink_filter
         );
-
-        let registration_type_res = determine_registration_type(&_source_filter, &_sink_filter);
-        let Ok(registration_type) = registration_type_res else {
-            Self::return_oneshot_result(
-                Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "Unable to map source and sink filters to uProtocol message type",
-                )),
-                _return_channel,
-            )
-            .await;
-            return;
-        };
 
         match registration_type {
             RegistrationType::Publish(_) => {
@@ -799,11 +719,11 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(_source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(_source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                get_pinned_application(_application_wrapper).unregister_message_handler(
+                get_pinned_application(application_wrapper).unregister_message_handler(
                     service_id,
                     instance_id,
                     method_id,
@@ -815,7 +735,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Self::return_oneshot_result(Ok(()), return_channel).await;
             }
             RegistrationType::Request(_) => {
                 trace!(
@@ -823,13 +743,13 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let Some(sink_filter) = _sink_filter else {
+                let Some(sink_filter) = sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
                             UCode::INVALID_ARGUMENT,
                             "Request doesn't contain sink",
                         )),
-                        _return_channel,
+                        return_channel,
                     )
                     .await;
                     return;
@@ -839,7 +759,7 @@ impl UPClientVsomeip {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
-                get_pinned_application(_application_wrapper).unregister_message_handler(
+                get_pinned_application(application_wrapper).unregister_message_handler(
                     service_id,
                     instance_id,
                     method_id,
@@ -851,7 +771,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Self::return_oneshot_result(Ok(()), return_channel).await;
             }
             RegistrationType::Response(_) => {
                 trace!(
@@ -859,13 +779,13 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let Some(sink_filter) = _sink_filter else {
+                let Some(sink_filter) = sink_filter else {
                     Self::return_oneshot_result(
                         Err(UStatus::fail_with_code(
                             UCode::INVALID_ARGUMENT,
                             "Request doesn't contain sink",
                         )),
-                        _return_channel,
+                        return_channel,
                     )
                     .await;
                     return;
@@ -875,7 +795,7 @@ impl UPClientVsomeip {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
-                get_pinned_application(_application_wrapper).unregister_message_handler(
+                get_pinned_application(application_wrapper).unregister_message_handler(
                     service_id,
                     instance_id,
                     method_id,
@@ -887,7 +807,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Self::return_oneshot_result(Ok(()), return_channel).await;
             }
             RegistrationType::AllPointToPoint(_) => {
                 // Note that there's another layer of indirection needed here, as when we register for
@@ -909,7 +829,7 @@ impl UPClientVsomeip {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let method_id = vsomeip::ANY_METHOD;
 
-                get_pinned_application(_application_wrapper).unregister_message_handler(
+                get_pinned_application(application_wrapper).unregister_message_handler(
                     service_id,
                     instance_id,
                     method_id,
@@ -921,7 +841,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), _return_channel).await;
+                Self::return_oneshot_result(Ok(()), return_channel).await;
             }
         }
     }
@@ -1090,48 +1010,6 @@ impl UPClientVsomeip {
         );
         Ok(app_wrapper)
     }
-
-    pub async fn get_metrics() {
-        print_metrics(
-            "LISTENER_CLIENT_ID_MAPPING",
-            LISTENER_CLIENT_ID_MAPPING.get_metrics().await,
-        );
-        print_metrics(
-            "CLIENT_ID_APP_MAPPING",
-            CLIENT_ID_APP_MAPPING.get_metrics().await,
-        );
-        print_metrics(
-            "UE_REQUEST_CORRELATION",
-            UE_REQUEST_CORRELATION.get_metrics().await,
-        );
-        print_metrics(
-            "ME_REQUEST_CORRELATION",
-            ME_REQUEST_CORRELATION.get_metrics().await,
-        );
-        print_metrics(
-            "CLIENT_ID_SESSION_ID_TRACKING",
-            CLIENT_ID_SESSION_ID_TRACKING.get_metrics().await,
-        );
-        print_metrics("LISTENER_REGISTRY", LISTENER_REGISTRY.get_metrics().await);
-        print_metrics("FREE_LISTENER_IDS", FREE_LISTENER_IDS.get_metrics().await);
-        print_metrics("LISTENER_ID_MAP", LISTENER_ID_MAP.get_metrics().await);
-
-        error!(
-            "TIMES_REGISTERED: {}",
-            TIMES_REGISTERED.load(Ordering::SeqCst)
-        );
-
-        let listener_registry = LISTENER_REGISTRY.read().await;
-        error!(
-            "number of elements inside of listener_registry: {}",
-            listener_registry.len()
-        );
-    }
-}
-
-fn print_metrics(metric_name: &str, metrics: (Vec<Duration>, Vec<Duration>)) {
-    let (reads, writes) = metrics;
-    error!("{metric_name}:\nreads: {:?}\nwrites:{:?}", reads, writes);
 }
 
 // TODO: We need to ensure that we properly cleanup / unregister all message handlers

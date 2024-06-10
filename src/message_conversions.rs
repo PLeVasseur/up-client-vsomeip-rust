@@ -11,9 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::{
-    InstrumentedRwLock, AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION,
-};
+use crate::transport::{AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
 use crate::{
     create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, EventId, InstanceId,
     ServiceId, ME_AUTHORITY,
@@ -24,6 +22,7 @@ use log::trace;
 use protobuf::Enum;
 use std::collections::HashSet;
 use std::time::Duration;
+use tokio::sync::RwLock;
 use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{
     make_message_wrapper, make_payload_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper,
@@ -40,8 +39,8 @@ const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
 
 lazy_static! {
-    static ref OFFERED_EVENTS: InstrumentedRwLock<HashSet<(ServiceId, InstanceId, EventId)>> =
-        InstrumentedRwLock::new(HashSet::new());
+    static ref OFFERED_EVENTS: RwLock<HashSet<(ServiceId, InstanceId, EventId)>> =
+        RwLock::new(HashSet::new());
 }
 
 pub async fn convert_umsg_to_vsomeip_msg(
@@ -71,14 +70,11 @@ pub async fn convert_umsg_to_vsomeip_msg(
             get_pinned_message_base(&vsomeip_msg).set_instance(instance_id);
             let (_, event_id) = split_u32_to_u16(source.resource_id);
             get_pinned_message_base(&vsomeip_msg).set_method(event_id);
-            // let client_id = 0; // manually setting this to 0 as according to spec
-            // get_pinned_message_base(&vsomeip_msg).set_client(client_id);
+            let client_id = 0; // already set in underlying vsomeip code, but we ensure it's set
+            get_pinned_message_base(&vsomeip_msg).set_client(client_id);
             let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
             trace!("uProtocol Publish message's interface_version: {interface_version}");
             get_pinned_message_base(&vsomeip_msg).set_interface_version(interface_version);
-            // let session_id = retrieve_session_id(client_id);
-            // get_pinned_message_base(&vsomeip_msg).set_session(session_id);
-            // get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
                 if let Some(bytes) = umsg.payload.clone() {
                     bytes.to_vec()

@@ -122,7 +122,6 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    // TODO: Need to troubleshoot on why we miss one publish
     println!(
         "subscriber_listener_check.received_publish(): {}",
         subscriber_listener_check.received_publish()

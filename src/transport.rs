@@ -11,34 +11,6 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use async_trait::async_trait;
-use cxx::{let_cxx_string, SharedPtr};
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
-use std::time::Duration;
-
-use once_cell::sync::Lazy;
-
-use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
-use tokio::sync::Mutex;
-use tokio::sync::RwLock;
-use tokio::task::LocalSet;
-use tokio::time::{timeout, Instant};
-
-use log::{error, info, trace, warn};
-
-use up_rust::{ComparableListener, UCode, UListener, UMessage, UStatus, UTransport, UUri};
-use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
-use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
-use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::get_pinned_runtime;
-use vsomeip_sys::vsomeip;
-
 use crate::determinations::{determine_message_type, determine_registration_type};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
@@ -50,6 +22,28 @@ use crate::{RegistrationType, UPClientVsomeip};
 use crate::{
     TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
 };
+use async_trait::async_trait;
+use cxx::{let_cxx_string, SharedPtr};
+use lazy_static::lazy_static;
+use log::{error, info, trace, warn};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
+use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
+use tokio::sync::Mutex;
+use tokio::sync::RwLock;
+use tokio::task::LocalSet;
+use tokio::time::{timeout, Instant};
+use up_rust::{ComparableListener, UCode, UListener, UMessage, UStatus, UTransport, UUri};
+use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
+use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
+use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
+use vsomeip_sys::safe_glue::get_pinned_runtime;
+use vsomeip_sys::vsomeip;
 
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
@@ -62,62 +56,40 @@ fn get_runtime() -> Arc<Runtime> {
     Arc::clone(&RUNTIME)
 }
 
-lazy_static! {
-    pub static ref TIMES_REGISTERED: AtomicUsize = AtomicUsize::new(0);
-}
-
 const THREAD_NUM: usize = 10;
 
 // Create a separate tokio Runtime for running the callback
-lazy_static::lazy_static! {
+lazy_static! {
     static ref CB_RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
-               .worker_threads(THREAD_NUM)
-               .enable_all()
-               .build()
-               .expect("Unable to create callback runtime");
+        .worker_threads(THREAD_NUM)
+        .enable_all()
+        .build()
+        .expect("Unable to create callback runtime");
 }
 
-pub struct InstrumentedRwLock<T> {
-    lock: RwLock<T>,
-    read_times: Arc<RwLock<Vec<Duration>>>,
-    write_times: Arc<RwLock<Vec<Duration>>>,
+lazy_static! {
+    pub(crate) static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
+    pub(crate) static ref LISTENER_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref UE_REQUEST_CORRELATION: RwLock<HashMap<RequestId, ReqId>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref ME_REQUEST_CORRELATION: RwLock<HashMap<ReqId, RequestId>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref CLIENT_ID_SESSION_ID_TRACKING: RwLock<HashMap<ClientId, SessionId>> =
+        RwLock::new(HashMap::new());
 }
 
-impl<T> InstrumentedRwLock<T> {
-    pub fn new(data: T) -> Self {
-        Self {
-            lock: RwLock::new(data),
-            read_times: Arc::new(RwLock::new(Vec::new())),
-            write_times: Arc::new(RwLock::new(Vec::new())),
-        }
-    }
+type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
 
-    pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
-        let start = Instant::now();
-        let guard = self.lock.read().await;
-        let duration = start.elapsed();
-
-        self.read_times.write().await.push(duration);
-        guard
-    }
-
-    pub async fn write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
-        let start = Instant::now();
-        let guard = self.lock.write().await;
-        let duration = start.elapsed();
-
-        self.write_times.write().await.push(duration);
-        guard
-    }
-
-    pub async fn get_metrics(&self) -> (Vec<Duration>, Vec<Duration>) {
-        let read_times = self.read_times.read().await.clone();
-        let write_times = self.write_times.read().await.clone();
-        (read_times, write_times)
-    }
+lazy_static! {
+    pub(crate) static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
 }
 
-generate_message_handler_extern_c_fns!(1000);
+generate_message_handler_extern_c_fns!(10000);
 
 async fn await_internal_function(
     function_id: &str,
@@ -231,10 +203,6 @@ impl UTransport for UPClientVsomeip {
             if message_type == RegistrationType::Request(client_id) {
                 trace!("Sending a Request and we have a point-to-point listener");
 
-                // TODO: Register a RESPONSE listener to listen for the response coming back
-
-                // TODO: Now we need to register a listener for all uProtocol Request style messages
-                //  incoming on that application which match our client_id
                 let listener_id = {
                     let mut free_ids = FREE_LISTENER_IDS.write().await;
                     if let Some(&id) = free_ids.iter().next() {
@@ -297,17 +265,15 @@ impl UTransport for UPClientVsomeip {
 
                     trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
 
-                    // consider using a worker pool for these, otherwise this will block
                     let (tx, rx) = oneshot::channel();
-                    TIMES_REGISTERED.fetch_add(1, Ordering::SeqCst);
                     let _tx_res = self
                         .tx_to_event_loop
                         .send(TransportCommand::RegisterListener(
                             src.clone(),
                             Some(sink.clone()),
+                            message_type,
                             msg_handler,
                             client_id,
-                            app_name.clone(),
                             tx,
                         ))
                         .await;
@@ -334,18 +300,7 @@ impl UTransport for UPClientVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        // implementation goes here
-        let sink_filter_str = {
-            if let Some(sink_filter) = sink_filter {
-                format!("{sink_filter:?}")
-            } else {
-                "".parse().unwrap()
-            }
-        };
-        info!(
-            "Registering listener for source filter: {:?} sink_filter: {}",
-            source_filter, sink_filter_str
-        );
+        // TODO: Must add additional validation up here on the UUri filters
 
         let registration_type_res =
             determine_registration_type(source_filter, &sink_filter.cloned());
@@ -472,9 +427,9 @@ impl UTransport for UPClientVsomeip {
                     .send(TransportCommand::RegisterListener(
                         src,
                         Some(sink),
+                        registration_type.clone(),
                         msg_handler,
                         app_config.id,
-                        app_config.name.clone(),
                         tx,
                     ))
                     .await;
@@ -565,58 +520,43 @@ impl UTransport for UPClientVsomeip {
 
             trace!("Obtained extern_fn");
 
-            let app_name = {
-                if let Err(err) = app_name {
-                    warn!("No app found for client_id: {client_id}, err: {err:?}");
+            if let Err(err) = app_name {
+                warn!("No app found for client_id: {client_id}, err: {err:?}");
 
-                    let app_name = format!("{}", client_id);
+                let app_name = format!("{}", client_id);
 
-                    // consider using a worker pool for these, otherwise this will block
-                    let (tx, rx) = oneshot::channel();
-                    trace!(
-                        "{}:{} - Sending TransportCommand for InitializeNewApp",
-                        UP_CLIENT_VSOMEIP_TAG,
-                        UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
-                    );
-                    let _tx_res = self
-                        .tx_to_event_loop
-                        .send(TransportCommand::InitializeNewApp(
-                            client_id,
-                            app_name.clone(),
-                            tx,
-                        ))
-                        .await;
-                    let app_created_res = await_internal_function(
-                        UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-                        rx,
-                    )
+                let (tx, rx) = oneshot::channel();
+                trace!(
+                    "{}:{} - Sending TransportCommand for InitializeNewApp",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
+                );
+                let _tx_res = self
+                    .tx_to_event_loop
+                    .send(TransportCommand::InitializeNewApp(
+                        client_id,
+                        app_name.clone(),
+                        tx,
+                    ))
                     .await;
-
-                    if let Err(err) = app_created_res {
-                        return Err(err);
-                    } else {
-                        app_name
-                    }
-                } else {
-                    app_name.ok().unwrap()
-                }
-            };
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                    .await?;
+            }
 
             {
                 let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
                 listener_client_id_mapping.insert(listener_id, client_id);
             }
 
-            // consider using a worker pool for these, otherwise this will block
             let (tx, rx) = oneshot::channel();
             let _tx_res = self
                 .tx_to_event_loop
                 .send(TransportCommand::RegisterListener(
                     src,
                     sink,
+                    registration_type,
                     msg_handler,
                     client_id,
-                    app_name,
                     tx,
                 ))
                 .await;
@@ -773,29 +713,26 @@ impl UTransport for UPClientVsomeip {
             return Ok(());
         }
 
-        let app_name = {
+        {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if let Some(app_name) = client_id_app_mapping.get(&client_id) {
-                Ok(app_name.clone())
-            } else {
-                Err(UStatus::fail_with_code(
+            if client_id_app_mapping.get(&client_id).is_none() {
+                return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
                     format!("There was no app_name found for client_id: {}", client_id),
-                ))
+                ));
             }
-        }?;
+        }
 
         let comp_listener = ComparableListener::new(listener);
 
-        // consider using a worker pool for these, otherwise this will block
         let (tx, rx) = oneshot::channel();
         let _tx_res = self
             .tx_to_event_loop
             .send(TransportCommand::UnregisterListener(
                 src,
                 sink,
+                registration_type,
                 client_id,
-                app_name.to_string(),
                 tx,
             ))
             .await;
@@ -852,6 +789,3 @@ impl UTransport for UPClientVsomeip {
         ))
     }
 }
-
-#[cfg(test)]
-mod tests {}

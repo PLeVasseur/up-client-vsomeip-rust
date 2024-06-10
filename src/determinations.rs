@@ -13,7 +13,6 @@
 
 use crate::transport::CLIENT_ID_SESSION_ID_TRACKING;
 use crate::{ClientId, RegistrationType, RequestId, SessionId};
-use log::trace;
 use up_rust::{UStatus, UUri};
 
 pub fn split_u32_to_u16(value: u32) -> (u16, u16) {
@@ -33,22 +32,9 @@ pub fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
 pub async fn retrieve_session_id(client_id: ClientId) -> SessionId {
     let mut client_id_session_id_tracking = CLIENT_ID_SESSION_ID_TRACKING.write().await;
 
-    trace!("retrieve_session_id: client_id: {}", client_id);
     let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(1);
-    trace!(
-        "retrieve_session_id: current_session_id: {}",
-        current_sesion_id
-    );
     let returned_session_id = *current_sesion_id;
-    trace!(
-        "retrieve_session_id: returned_session_id: {}",
-        returned_session_id
-    );
     *current_sesion_id += 1;
-    trace!(
-        "retrieve_session_id: newly updated current_session_id: {}",
-        current_sesion_id
-    );
     returned_session_id
 }
 
@@ -61,40 +47,25 @@ pub fn determine_registration_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,
 ) -> Result<RegistrationType, UStatus> {
-    if let Some(sink_filter) = &sink_filter {
-        // determine if we're in the uStreamer use-case of capturing all point-to-point messages
-        let streamer_use_case = {
-            source_filter.authority_name != "*" // TODO: Is this good enough? Maybe have configurable in UPClientVsomeip?
-                && source_filter.ue_id == 0x0000_FFFF
-                && source_filter.ue_version_major == 0xFF
-                && source_filter.resource_id == 0xFFFF
-                && sink_filter.authority_name == "*"
-                && sink_filter.ue_id == 0x0000_FFFF
-                && sink_filter.ue_version_major == 0xFF
-                && sink_filter.resource_id == 0xFFFF
-        };
-
-        if streamer_use_case {
-            return Ok(RegistrationType::AllPointToPoint(0xFFFF));
-        }
-
-        if sink_filter.resource_id == 0 {
-            Ok(RegistrationType::Response(sink_filter.ue_id as ClientId))
-            // Ok(RegistrationType::Response(source_filter.ue_id as ClientId))
-        } else {
-            Ok(RegistrationType::Request(sink_filter.ue_id as ClientId))
-        }
-    } else {
-        // TODO: Have to consider how to handle the publish case, I suppose this is not ClientId,
-        //  but instead ServiceId
-        //  In any case, it should probably have its own application spun up
-        Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
-    }
+    determine_type(source_filter, sink_filter, DeterminationType::Register)
 }
 
 pub fn determine_message_type(
     source_filter: &UUri,
     sink_filter: &Option<UUri>,
+) -> Result<RegistrationType, UStatus> {
+    determine_type(source_filter, sink_filter, DeterminationType::Message)
+}
+
+enum DeterminationType {
+    Register,
+    Message,
+}
+
+fn determine_type(
+    source_filter: &UUri,
+    sink_filter: &Option<UUri>,
+    determination_type: DeterminationType,
 ) -> Result<RegistrationType, UStatus> {
     if let Some(sink_filter) = &sink_filter {
         // determine if we're in the uStreamer use-case of capturing all point-to-point messages
@@ -113,15 +84,20 @@ pub fn determine_message_type(
             return Ok(RegistrationType::AllPointToPoint(0xFFFF));
         }
 
+        let client_id = {
+            match determination_type {
+                DeterminationType::Register => sink_filter.ue_id as ClientId,
+                DeterminationType::Message => source_filter.ue_id as ClientId,
+            }
+        };
+
         if sink_filter.resource_id == 0 {
-            Ok(RegistrationType::Response(source_filter.ue_id as ClientId))
+            Ok(RegistrationType::Response(client_id))
         } else {
-            Ok(RegistrationType::Request(source_filter.ue_id as ClientId))
+            Ok(RegistrationType::Request(client_id))
         }
     } else {
-        // TODO: Have to consider how to handle the publish case, I suppose this is not ClientId,
-        //  but instead ServiceId
-        //  In any case, it should probably have its own application spun up
+        // TODO: This is overridden when used today, so it makes sense to rethink this a bit
         Ok(RegistrationType::Publish(source_filter.ue_id as ClientId))
     }
 }
