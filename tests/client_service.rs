@@ -11,12 +11,13 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use log::{error, trace};
+use log::{error, info, trace};
 use protobuf::Enum;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 use up_client_vsomeip_rust::UPClientVsomeip;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 
@@ -37,12 +38,12 @@ impl ResponseListener {
 #[async_trait::async_trait]
 impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
-        println!("Received Response:\n{:?}", msg);
+        info!("Received Response:\n{:?}", msg);
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        info!("{:?}", err);
     }
 }
 pub struct RequestListener {
@@ -67,7 +68,7 @@ impl RequestListener {
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
         self.received_request.fetch_add(1, Ordering::SeqCst);
-        println!("Received Request:\n{:?}", msg);
+        info!("Received Request:\n{:?}", msg);
 
         let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
             .with_comm_status(UCode::OK.value())
@@ -86,7 +87,7 @@ impl UListener for RequestListener {
     }
 
     async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
+        info!("{:?}", err);
     }
 }
 
@@ -203,8 +204,12 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let iterations = 4;
-    for _ in 1..=iterations {
+    // Track the start time and set the duration for the loop
+    let duration = Duration::from_millis(1000);
+    let start_time = Instant::now();
+
+    let mut iterations = 0;
+    while Instant::now().duration_since(start_time) < duration {
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
                 .build();
@@ -222,16 +227,16 @@ async fn client_service() {
             panic!("Unable to send Request UMessage: {:?}", err);
         }
 
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        iterations += 1;
     }
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
-    trace!(
+    println!(
         "request_listener_check.received_request(): {}",
         request_listener_check.received_request()
     );
-    trace!(
+    println!(
         "response_listener_check.received_response(): {}",
         response_listener_check.received_response()
     );
