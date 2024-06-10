@@ -340,44 +340,40 @@ impl UPClientVsomeip {
                             let sink_filter = umsg.attributes.sink.as_ref();
 
                             let message_type = determine_message_type(source_filter, &sink_filter.cloned());
+                            let Ok(message_type) = message_type else {
+                                let err = message_type.err().unwrap();
+                                Self::return_oneshot_result(Err(err), return_channel).await;
+                                continue;
+                            };
 
-                            match message_type {
-                                Ok(ref registration_type) => {
+                            trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
 
-                                    trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
+                            let app_name = find_app_name(message_type.client_id()).await;
 
-                                    let app_name = find_app_name(registration_type.client_id()).await;
+                            let Ok(app_name) = app_name else {
+                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
+                                continue;
+                            };
 
-                                    let Ok(app_name) = app_name else {
-                                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                        continue;
-                                    };
+                            let_cxx_string!(app_name_cxx = app_name.clone());
 
-                                    let_cxx_string!(app_name_cxx = app_name.clone());
-
-                                    let application = get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
-                                    if application.is_null() {
-                                        let err = format!("No application exists for {app_name} under client_id: {}", registration_type.client_id());
-                                        Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INTERNAL, err)), return_channel).await;
-                                        continue;
-                                    }
-                                    let mut application_wrapper = make_application_wrapper(application);
-                                    let app_client_id = get_pinned_application(&application_wrapper).get_client();
-                                    trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", registration_type.client_id());
-
-                                    Self::send_internal(
-                                        umsg,
-                                        return_channel,
-                                        &mut application_wrapper,
-                                        &runtime_wrapper,
-                                    )
-                                        .await
-                                }
-                                Err(e) => {
-                                    Self::return_oneshot_result(Err(e), return_channel).await;
-                                    continue;
-                                }
+                            let application = get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
+                            if application.is_null() {
+                                let err = format!("No application exists for {app_name} under client_id: {}", message_type.client_id());
+                                Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INTERNAL, err)), return_channel).await;
+                                continue;
                             }
+                            let mut application_wrapper = make_application_wrapper(application);
+                            let app_client_id = get_pinned_application(&application_wrapper).get_client();
+                            trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
+
+                            Self::send_internal(
+                                umsg,
+                                return_channel,
+                                &mut application_wrapper,
+                                &runtime_wrapper,
+                            )
+                                .await
                         }
                         TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
                             trace!("{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
@@ -390,25 +386,22 @@ impl UPClientVsomeip {
                                 client_id, app_name
                             );
 
-                            match new_app_res {
-                                Ok(_app) => {
-                                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                                    if let std::collections::hash_map::Entry::Vacant(e) = client_id_app_mapping.entry(client_id) {
-                                        e.insert(app_name.clone());
-                                        trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
-                                        Self::return_oneshot_result(Ok(()), return_channel).await;
-                                    } else {
-                                        let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
-                                        let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                                        Self::return_oneshot_result(Err(err), return_channel).await;
-                                        continue;
-                                    }
-                                }
-                                Err(err) => {
-                                    error!("Unable to create new app: {:?}", err);
-                                    Self::return_oneshot_result(Err(err), return_channel).await;
-                                    continue;
-                                }
+                            if let Err(err) = new_app_res {
+                                error!("Unable to create new app: {:?}", err);
+                                Self::return_oneshot_result(Err(err), return_channel).await;
+                                continue;
+                            }
+
+                            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
+                            if let std::collections::hash_map::Entry::Vacant(e) = client_id_app_mapping.entry(client_id) {
+                                e.insert(app_name.clone());
+                                trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
+                                Self::return_oneshot_result(Ok(()), return_channel).await;
+                            } else {
+                                let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
+                                let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                                Self::return_oneshot_result(Err(err), return_channel).await;
+                                continue;
                             }
                         }
                     }
