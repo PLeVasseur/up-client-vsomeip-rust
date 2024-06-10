@@ -21,11 +21,11 @@ use crate::glue::upcast;
 use crate::glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use crate::unsafe_fns::create_payload_wrapper;
 use crate::vsomeip::message_base;
-use crate::vsomeip::{application, eventgroup_t, message, payload, runtime};
+use crate::vsomeip::{application, message, payload, runtime};
 use cxx::UniquePtr;
+use log::trace;
 use std::pin::Pin;
 use std::slice;
-use log::trace;
 
 /// Gets a `Pin<&mut runtime>` from a [RuntimeWrapper]
 ///
@@ -264,7 +264,7 @@ pub fn get_message_payload(
     }
 }
 
-/// Requests a single [eventgroup_t] for the application
+/// Requests a single [eventgroup_t][crate::vsomeip::eventgroup_t] for the application
 ///
 /// # Rationale
 ///
@@ -275,8 +275,8 @@ pub fn get_message_payload(
 /// so this functio will be fine for now
 ///
 /// If this changes in the future, we can instead create a wrapper called an EventGroup which will
-/// have a single method on it to add a single [eventgroup_t] so that we're able to have more than
-/// one [eventgroup_t]
+/// have a single method on it to add a single [eventgroup_t][crate::vsomeip::eventgroup_t] so that we're able to have more than
+/// one [eventgroup_t][crate::vsomeip::eventgroup_t]
 pub fn request_single_event_safe(
     application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     _service: u16,
@@ -296,7 +296,7 @@ pub fn request_single_event_safe(
     }
 }
 
-/// Offers a single [eventgroup_t] from the application
+/// Offers a single [eventgroup_t][crate::vsomeip::eventgroup_t] from the application
 ///
 /// # Rationale
 ///
@@ -307,8 +307,8 @@ pub fn request_single_event_safe(
 /// so this function will be fine for now
 ///
 /// If this changes in the future, we can instead create a wrapper called an EventGroup which will
-/// have a single method on it to add a single [eventgroup_t] so that we're able to have more than
-/// one [eventgroup_t]
+/// have a single method on it to add a single [eventgroup_t][crate::vsomeip::eventgroup_t] so that we're able to have more than
+/// one [eventgroup_t][crate::vsomeip::eventgroup_t]
 pub fn offer_single_event_safe(
     application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     _service: u16,
