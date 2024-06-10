@@ -45,7 +45,7 @@ mod message_conversions;
 use message_conversions::convert_umsg_to_vsomeip_msg;
 mod determinations;
 use determinations::{
-    create_request_id, determine_registration_type, retrieve_session_id, split_u32_to_u16,
+    create_request_id, retrieve_session_id, split_u32_to_u16,
     split_u32_to_u8,
 };
 
