@@ -79,14 +79,12 @@ enum TransportCommand {
         Option<UUri>,
         RegistrationType,
         MessageHandlerFnPtr,
-        ClientId,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     UnregisterListener(
         UUri,
         Option<UUri>,
         RegistrationType,
-        ClientId,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
@@ -120,6 +118,17 @@ enum RegistrationType {
     Request(ClientId),
     Response(ClientId),
     AllPointToPoint(ClientId),
+}
+
+impl RegistrationType {
+    pub fn client_id(&self) -> ClientId {
+        match self {
+            RegistrationType::Publish(client_id) => *client_id,
+            RegistrationType::Request(client_id) => *client_id,
+            RegistrationType::Response(client_id) => *client_id,
+            RegistrationType::AllPointToPoint(client_id) => *client_id,
+        }
+    }
 }
 
 pub struct UPClientVsomeip {
@@ -265,7 +274,6 @@ impl UPClientVsomeip {
                             sink,
                             registration_type,
                             msg_handler,
-                            client_id,
                             return_channel,
                         ) => {
                             trace!(
@@ -278,12 +286,12 @@ impl UPClientVsomeip {
 
                             let app_name = {
                                 let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
                                     Ok(app_name.clone())
                                 } else {
                                     Err(UStatus::fail_with_code(
                                         UCode::NOT_FOUND,
-                                        format!("There was no app_name found for client_id: {}", client_id),
+                                        format!("There was no app_name found for client_id: {}", registration_type.client_id()),
                                     ))
                                 }
                             };
@@ -311,16 +319,16 @@ impl UPClientVsomeip {
                             trace!("Sent back results of registration");
                             continue;
                         }
-                        TransportCommand::UnregisterListener(src, sink, registration_type, client_id, return_channel) => {
+                        TransportCommand::UnregisterListener(src, sink, registration_type, return_channel) => {
 
                             let app_name = {
                                 let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
                                     Ok(app_name.clone())
                                 } else {
                                     Err(UStatus::fail_with_code(
                                         UCode::NOT_FOUND,
-                                        format!("There was no app_name found for client_id: {}", client_id),
+                                        format!("There was no app_name found for client_id: {}", registration_type.client_id()),
                                     ))
                                 }
                             };

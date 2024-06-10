@@ -265,6 +265,7 @@ impl UTransport for UPClientVsomeip {
 
                     trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
 
+                    let message_type = RegistrationType::Response(client_id);
                     let (tx, rx) = oneshot::channel();
                     let _tx_res = self
                         .tx_to_event_loop
@@ -273,7 +274,6 @@ impl UTransport for UPClientVsomeip {
                             Some(sink.clone()),
                             message_type,
                             msg_handler,
-                            client_id,
                             tx,
                         ))
                         .await;
@@ -308,6 +308,17 @@ impl UTransport for UPClientVsomeip {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
+        let registration_type = {
+            match registration_type {
+                RegistrationType::Publish(_) => RegistrationType::Publish(self.ue_id),
+                RegistrationType::Request(client_id) => RegistrationType::Request(client_id),
+                RegistrationType::Response(client_id) => RegistrationType::Response(client_id),
+                RegistrationType::AllPointToPoint(client_id) => {
+                    RegistrationType::AllPointToPoint(client_id)
+                }
+            }
+        };
+
         trace!("registration_type: {registration_type:?}");
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
@@ -340,7 +351,6 @@ impl UTransport for UPClientVsomeip {
                     .send(TransportCommand::InitializeNewApp(
                         app_config.id,
                         app_config.name.clone(),
-                        // app_name.clone(),
                         tx,
                     ))
                     .await
@@ -420,6 +430,8 @@ impl UTransport for UPClientVsomeip {
                 let extern_fn = get_extern_fn(listener_id);
                 let msg_handler = MessageHandlerFnPtr(extern_fn);
 
+                let registration_type = RegistrationType::Request(app_config.id);
+
                 // consider using a worker pool for these, otherwise this will block
                 let (tx, rx) = oneshot::channel();
                 let _tx_res = self
@@ -427,9 +439,8 @@ impl UTransport for UPClientVsomeip {
                     .send(TransportCommand::RegisterListener(
                         src,
                         Some(sink),
-                        registration_type.clone(),
+                        registration_type,
                         msg_handler,
-                        app_config.id,
                         tx,
                     ))
                     .await;
@@ -485,29 +496,29 @@ impl UTransport for UPClientVsomeip {
                 .await
                 .insert(listener_id, listener);
 
-            let client_id = match registration_type {
-                RegistrationType::Publish(_client_id) => {
-                    // in the case that we are registering a listener for a Publish message, we will
-                    // defer the usage of source_filter.ue_id for the actual Publisher
-                    // we will instead use our configured ue_id
-                    self.ue_id
-                    // client_id
-                }
-                RegistrationType::Request(client_id) => client_id,
-                RegistrationType::Response(client_id) => client_id,
-                RegistrationType::AllPointToPoint(client_id) => client_id,
-            };
+            // let client_id = match registration_type {
+            //     RegistrationType::Publish(_client_id) => {
+            //         // in the case that we are registering a listener for a Publish message, we will
+            //         // defer the usage of source_filter.ue_id for the actual Publisher
+            //         // we will instead use our configured ue_id
+            //         self.ue_id
+            //         // client_id
+            //     }
+            //     RegistrationType::Request(client_id) => client_id,
+            //     RegistrationType::Response(client_id) => client_id,
+            //     RegistrationType::AllPointToPoint(client_id) => client_id,
+            // };
 
             let app_name = {
                 let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+                if let Some(app_name) = client_id_app_mapping.get(&registration_type.client_id()) {
                     Ok(app_name.clone())
                 } else {
                     Err(UStatus::fail_with_code(
                         UCode::NOT_FOUND,
                         format!(
                             "Within register_listener: There was no app_name found for client_id: {}",
-                            client_id
+                            registration_type.client_id()
                         ),
                     ))
                 }
@@ -521,9 +532,12 @@ impl UTransport for UPClientVsomeip {
             trace!("Obtained extern_fn");
 
             if let Err(err) = app_name {
-                warn!("No app found for client_id: {client_id}, err: {err:?}");
+                warn!(
+                    "No app found for client_id: {}, err: {err:?}",
+                    registration_type.client_id()
+                );
 
-                let app_name = format!("{}", client_id);
+                let app_name = format!("{}", registration_type.client_id());
 
                 let (tx, rx) = oneshot::channel();
                 trace!(
@@ -534,7 +548,7 @@ impl UTransport for UPClientVsomeip {
                 let _tx_res = self
                     .tx_to_event_loop
                     .send(TransportCommand::InitializeNewApp(
-                        client_id,
+                        registration_type.client_id(),
                         app_name.clone(),
                         tx,
                     ))
@@ -545,7 +559,7 @@ impl UTransport for UPClientVsomeip {
 
             {
                 let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
-                listener_client_id_mapping.insert(listener_id, client_id);
+                listener_client_id_mapping.insert(listener_id, registration_type.client_id());
             }
 
             let (tx, rx) = oneshot::channel();
@@ -556,7 +570,6 @@ impl UTransport for UPClientVsomeip {
                     sink,
                     registration_type,
                     msg_handler,
-                    client_id,
                     tx,
                 ))
                 .await;
@@ -591,16 +604,15 @@ impl UTransport for UPClientVsomeip {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
-        let client_id = match registration_type {
-            RegistrationType::Publish(_) => {
-                // in the case that we are registering a listener for a Publish message, we will
-                // defer the usage of source_filter.ue_id for the actual Publisher
-                // we will instead use our configured ue_id
-                self.ue_id
+        let registration_type = {
+            match registration_type {
+                RegistrationType::Publish(_) => RegistrationType::Publish(self.ue_id),
+                RegistrationType::Request(client_id) => RegistrationType::Request(client_id),
+                RegistrationType::Response(client_id) => RegistrationType::Response(client_id),
+                RegistrationType::AllPointToPoint(client_id) => {
+                    RegistrationType::AllPointToPoint(client_id)
+                }
             }
-            RegistrationType::Request(client_id) => client_id,
-            RegistrationType::Response(client_id) => client_id,
-            RegistrationType::AllPointToPoint(client_id) => client_id,
         };
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
@@ -698,7 +710,7 @@ impl UTransport for UPClientVsomeip {
 
                 {
                     let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                    client_id_app_mapping.remove(&client_id);
+                    client_id_app_mapping.remove(&registration_type.client_id());
                 }
 
                 {
@@ -715,10 +727,16 @@ impl UTransport for UPClientVsomeip {
 
         {
             let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if client_id_app_mapping.get(&client_id).is_none() {
+            if client_id_app_mapping
+                .get(&registration_type.client_id())
+                .is_none()
+            {
                 return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
-                    format!("There was no app_name found for client_id: {}", client_id),
+                    format!(
+                        "There was no app_name found for client_id: {}",
+                        registration_type.client_id()
+                    ),
                 ));
             }
         }
@@ -731,8 +749,7 @@ impl UTransport for UPClientVsomeip {
             .send(TransportCommand::UnregisterListener(
                 src,
                 sink,
-                registration_type,
-                client_id,
+                registration_type.clone(),
                 tx,
             ))
             .await;
@@ -767,7 +784,7 @@ impl UTransport for UPClientVsomeip {
 
         {
             let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-            client_id_app_mapping.remove(&client_id);
+            client_id_app_mapping.remove(&registration_type.client_id());
         }
 
         {
