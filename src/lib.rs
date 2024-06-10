@@ -467,23 +467,17 @@ impl UPClientVsomeip {
                             match new_app_res {
                                 Ok(_app) => {
                                     let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                                    if !client_id_app_mapping.contains_key(&client_id) {
-                                        if client_id_app_mapping.insert(client_id, app_name.clone()).is_some() {
-                                            let err_msg = format!("Insertion showed key existsed. Somehow we already had an application running for client_id: {}", client_id);
-                                            let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                                            Self::return_oneshot_result(Err(err), return_channel).await;
-                                            continue;
-                                        } else {
-                                            trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
-                                            Self::return_oneshot_result(Ok(()), return_channel).await;
-                                            continue;
-                                        }
+                                    if let std::collections::hash_map::Entry::Vacant(e) = client_id_app_mapping.entry(client_id) {
+                                        e.insert(app_name.clone());
+                                        trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
+                                        Self::return_oneshot_result(Ok(()), return_channel).await;
                                     } else {
                                         let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
                                         let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
                                         Self::return_oneshot_result(Err(err), return_channel).await;
                                         continue;
                                     }
+
 
 
                                     // if !client_application_mapping.contains_key(&client_id) {
