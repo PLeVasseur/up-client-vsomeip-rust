@@ -168,7 +168,7 @@ impl UPClientVsomeip {
     ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
 
-        Self::start_app_event_loop(rx, config_path);
+        Self::start_event_loop(rx, config_path);
 
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
@@ -189,7 +189,7 @@ impl UPClientVsomeip {
         })
     }
 
-    fn start_app(app_name: &ApplicationName, config_path: Option<&Path>) {
+    fn create_app(app_name: &ApplicationName, config_path: Option<&Path>) {
         let app_name = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
 
@@ -237,10 +237,7 @@ impl UPClientVsomeip {
         thread::sleep(Duration::from_millis(50));
     }
 
-    fn start_app_event_loop(
-        rx_to_event_loop: Receiver<TransportCommand>,
-        config_path: Option<&Path>,
-    ) {
+    fn start_event_loop(rx_to_event_loop: Receiver<TransportCommand>, config_path: Option<&Path>) {
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
         thread::spawn(move || {
@@ -254,7 +251,7 @@ impl UPClientVsomeip {
 
             runtime.block_on(async move {
                 trace!("Within blocked runtime");
-                Self::app_event_loop(rx_to_event_loop, config_path).await;
+                Self::event_loop(rx_to_event_loop, config_path).await;
                 info!("Broke out of loop! You probably dropped the UPClientVsomeip");
             });
             trace!("Parking dedicated thread");
@@ -264,7 +261,7 @@ impl UPClientVsomeip {
         trace!("Past thread spawn");
     }
 
-    async fn app_event_loop(
+    async fn event_loop(
         mut rx_to_event_loop: Receiver<TransportCommand>,
         config_path: Option<PathBuf>,
     ) {
@@ -877,7 +874,7 @@ impl UPClientVsomeip {
         }
 
         // TODO: Should this be fallible?
-        Self::start_app(&app_name, config_path.as_deref());
+        Self::create_app(&app_name, config_path.as_deref());
         trace!(
             "{}:{} - After starting app for client_id: {} app_name: {}",
             UP_CLIENT_VSOMEIP_TAG,
