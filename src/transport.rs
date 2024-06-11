@@ -47,8 +47,6 @@ use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_run
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 
-use tokio::sync::oneshot::error;
-
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
@@ -229,16 +227,17 @@ impl UTransport for UPClientVsomeip {
 
                         let message_type = RegistrationType::Response(client_id);
                         let (tx, rx) = oneshot::channel();
-                        let _tx_res = self
-                            .tx_to_event_loop
-                            .send(TransportCommand::RegisterListener(
+                        send_to_inner_with_status(
+                            &self.tx_to_event_loop,
+                            TransportCommand::RegisterListener(
                                 src.clone(),
                                 Some(sink.clone()),
                                 message_type,
                                 msg_handler,
                                 tx,
-                            ))
-                            .await;
+                            ),
+                        )
+                        .await?;
                         await_internal_function(
                             UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                             rx,
@@ -255,10 +254,8 @@ impl UTransport for UPClientVsomeip {
         }
 
         let (tx, rx) = oneshot::channel();
-        let _tx_res = self
-            .tx_to_event_loop
-            .send(TransportCommand::Send(message, tx))
-            .await;
+        send_to_inner_with_status(&self.tx_to_event_loop, TransportCommand::Send(message, tx))
+            .await?;
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
@@ -302,17 +299,11 @@ impl UTransport for UPClientVsomeip {
 
             for app_config in &application_configs {
                 let (tx, rx) = oneshot::channel();
-                self
-                    .tx_to_event_loop
-                    .send(TransportCommand::InitializeNewApp(
-                        app_config.id,
-                        app_config.name.clone(),
-                        tx,
-                    ))
-                    .await
-                    .map_err(|e| {
-                        UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to initialize new app, due to an issue requesting to inner handler: {:?}", e))
-                    })?;
+                send_to_inner_with_status(
+                    &self.tx_to_event_loop,
+                    TransportCommand::InitializeNewApp(app_config.id, app_config.name.clone(), tx),
+                )
+                .await?;
                 let app_created_res = await_internal_function(
                     "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
                     rx,
@@ -375,16 +366,17 @@ impl UTransport for UPClientVsomeip {
                 let registration_type = RegistrationType::Request(app_config.id);
 
                 let (tx, rx) = oneshot::channel();
-                let _tx_res = self
-                    .tx_to_event_loop
-                    .send(TransportCommand::RegisterListener(
+                send_to_inner_with_status(
+                    &self.tx_to_event_loop,
+                    TransportCommand::RegisterListener(
                         src,
                         Some(sink),
                         registration_type,
                         msg_handler,
                         tx,
-                    ))
-                    .await;
+                    ),
+                )
+                .await?;
                 await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
                     .await?;
             }
@@ -433,14 +425,15 @@ impl UTransport for UPClientVsomeip {
                 UP_CLIENT_VSOMEIP_TAG,
                 UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
             );
-            let _tx_res = self
-                .tx_to_event_loop
-                .send(TransportCommand::InitializeNewApp(
+            send_to_inner_with_status(
+                &self.tx_to_event_loop,
+                TransportCommand::InitializeNewApp(
                     registration_type.client_id(),
                     app_name.clone(),
                     tx,
-                ))
-                .await;
+                ),
+            )
+            .await?;
             await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
                 .await?;
         }
@@ -451,16 +444,11 @@ impl UTransport for UPClientVsomeip {
         }
 
         let (tx, rx) = oneshot::channel();
-        let _tx_res = self
-            .tx_to_event_loop
-            .send(TransportCommand::RegisterListener(
-                src,
-                sink,
-                registration_type,
-                msg_handler,
-                tx,
-            ))
-            .await;
+        send_to_inner_with_status(
+            &self.tx_to_event_loop,
+            TransportCommand::RegisterListener(src, sink, registration_type, msg_handler, tx),
+        )
+        .await?;
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
     }
 
@@ -596,15 +584,11 @@ impl UTransport for UPClientVsomeip {
         let comp_listener = ComparableListener::new(listener);
 
         let (tx, rx) = oneshot::channel();
-        let _tx_res = self
-            .tx_to_event_loop
-            .send(TransportCommand::UnregisterListener(
-                src,
-                sink,
-                registration_type.clone(),
-                tx,
-            ))
-            .await;
+        send_to_inner_with_status(
+            &self.tx_to_event_loop,
+            TransportCommand::UnregisterListener(src, sink, registration_type.clone(), tx),
+        )
+        .await?;
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let listener_id = {
