@@ -178,13 +178,16 @@ impl UTransport for UPClientVsomeip {
             &message,
             source_filter,
             sink_filter,
-            message_type,
+            message_type.clone(),
         )
         .await?;
 
         let (tx, rx) = oneshot::channel();
-        send_to_inner_with_status(&self.tx_to_event_loop, TransportCommand::Send(message, tx))
-            .await?;
+        send_to_inner_with_status(
+            &self.tx_to_event_loop,
+            TransportCommand::Send(message, message_type, tx),
+        )
+        .await?;
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 

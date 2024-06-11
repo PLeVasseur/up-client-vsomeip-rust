@@ -42,8 +42,7 @@ use message_conversions::convert_umsg_to_vsomeip_msg;
 
 mod determinations;
 use determinations::{
-    create_request_id, determine_message_type, find_app_name, retrieve_session_id,
-    split_u32_to_u16, split_u32_to_u8,
+    create_request_id, find_app_name, retrieve_session_id, split_u32_to_u16, split_u32_to_u8,
 };
 
 mod vsomeip_config;
@@ -84,7 +83,11 @@ enum TransportCommand {
         RegistrationType,
         oneshot::Sender<Result<(), UStatus>>,
     ),
-    Send(UMessage, oneshot::Sender<Result<(), UStatus>>),
+    Send(
+        UMessage,
+        RegistrationType,
+        oneshot::Sender<Result<(), UStatus>>,
+    ),
     // Additional helpful commands
     InitializeNewApp(
         ClientId,
@@ -151,7 +154,6 @@ impl UPClientVsomeip {
                 format!("Configuration file not found at: {:?}", config_path),
             ));
         }
-
         Self::new_internal(authority_name, ue_id, Some(config_path))
     }
 
@@ -166,7 +168,7 @@ impl UPClientVsomeip {
     ) -> Result<Self, UStatus> {
         let (tx, rx) = channel(10000);
 
-        Self::app_event_loop(rx, config_path);
+        Self::start_app_event_loop(rx, config_path);
 
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
@@ -235,8 +237,8 @@ impl UPClientVsomeip {
         thread::sleep(Duration::from_millis(50));
     }
 
-    fn app_event_loop(
-        mut rx_to_event_loop: Receiver<TransportCommand>,
+    fn start_app_event_loop(
+        rx_to_event_loop: Receiver<TransportCommand>,
         config_path: Option<&Path>,
     ) {
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
@@ -252,160 +254,7 @@ impl UPClientVsomeip {
 
             runtime.block_on(async move {
                 trace!("Within blocked runtime");
-
-                let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
-
-                trace!("Entering command loop");
-                while let Some(cmd) = rx_to_event_loop.recv().await {
-                    trace!("Received TransportCommand");
-
-                    match cmd {
-                        TransportCommand::RegisterListener(
-                            src,
-                            sink,
-                            registration_type,
-                            msg_handler,
-                            return_channel,
-                        ) => {
-                            trace!(
-                                "{}:{} - Attempting to register listener: src: {src:?} sink: {sink:?}",
-                                UP_CLIENT_VSOMEIP_TAG,
-                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                            );
-
-                            trace!("registration_type: {registration_type:?}");
-
-                            let app_name = find_app_name(registration_type.client_id()).await;
-
-                            let Ok(app_name) = app_name else {
-                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                continue;
-                            };
-
-                            let_cxx_string!(app_name_cxx = app_name);
-
-                            let mut application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
-
-                            let res = Self::register_listener_internal(
-                                src,
-                                sink,
-                                registration_type,
-                                msg_handler,
-                                &mut application_wrapper,
-                                &runtime_wrapper,
-                            )
-                                .await;
-                            trace!("Sending back results of registration");
-                            Self::return_oneshot_result(res, return_channel).await;
-                            trace!("Sent back results of registration");
-                            continue;
-                        }
-                        TransportCommand::UnregisterListener(src, sink, registration_type, return_channel) => {
-
-                            let app_name = find_app_name(registration_type.client_id()).await;
-
-                            let Ok(app_name) = app_name else {
-                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                continue;
-                            };
-
-                            let_cxx_string!(app_name_cxx = app_name);
-
-                            let application_wrapper = make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx));
-
-                            Self::unregister_listener_internal(
-                                src,
-                                sink,
-                                registration_type,
-                                return_channel,
-                                &application_wrapper,
-                                &runtime_wrapper,
-                            )
-                                .await
-                        }
-                        TransportCommand::Send(umsg, return_channel) => {
-                            trace!(
-                                "{}:{} - Attempting to send UMessage: {:?}",
-                                UP_CLIENT_VSOMEIP_TAG,
-                                UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                                umsg
-                            );
-
-                            let Some(source_filter) = umsg.attributes.source.as_ref() else {
-                                Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "UMessage provided with no source")), return_channel).await;
-                                continue;
-                            };
-
-                            let sink_filter = umsg.attributes.sink.as_ref();
-
-                            let message_type = determine_message_type(source_filter, &sink_filter.cloned());
-                            let Ok(message_type) = message_type else {
-                                let err = message_type.err().unwrap();
-                                Self::return_oneshot_result(Err(err), return_channel).await;
-                                continue;
-                            };
-
-                            trace!("inside TransportCommand::Send dispatch, message_type: {message_type:?}");
-
-                            let app_name = find_app_name(message_type.client_id()).await;
-
-                            let Ok(app_name) = app_name else {
-                                Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel).await;
-                                continue;
-                            };
-
-                            let_cxx_string!(app_name_cxx = app_name.clone());
-
-                            let application = get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
-                            if application.is_null() {
-                                let err = format!("No application exists for {app_name} under client_id: {}", message_type.client_id());
-                                Self::return_oneshot_result(Err(UStatus::fail_with_code(UCode::INTERNAL, err)), return_channel).await;
-                                continue;
-                            }
-                            let mut application_wrapper = make_application_wrapper(application);
-                            let app_client_id = get_pinned_application(&application_wrapper).get_client();
-                            trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
-
-                            Self::send_internal(
-                                umsg,
-                                return_channel,
-                                &mut application_wrapper,
-                                &runtime_wrapper,
-                            )
-                                .await
-                        }
-                        TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
-                            trace!("{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
-                                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                                client_id, app_name
-                            );
-                            let new_app_res = Self::initialize_new_app_internal(client_id, app_name.clone(), config_path.clone(), &runtime_wrapper).await;
-                            trace!("{}:{} - After attempt to create new app for client_id: {} app_name: {}",
-                                UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                                client_id, app_name
-                            );
-
-                            if let Err(err) = new_app_res {
-                                error!("Unable to create new app: {:?}", err);
-                                Self::return_oneshot_result(Err(err), return_channel).await;
-                                continue;
-                            }
-
-                            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                            if let std::collections::hash_map::Entry::Vacant(e) = client_id_app_mapping.entry(client_id) {
-                                e.insert(app_name.clone());
-                                trace!("Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING", client_id, app_name);
-                                Self::return_oneshot_result(Ok(()), return_channel).await;
-                            } else {
-                                let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
-                                let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                                Self::return_oneshot_result(Err(err), return_channel).await;
-                                continue;
-                            }
-                        }
-                    }
-                    trace!("Hit bottom of event loop");
-                }
+                Self::app_event_loop(rx_to_event_loop, config_path).await;
                 info!("Broke out of loop! You probably dropped the UPClientVsomeip");
             });
             trace!("Parking dedicated thread");
@@ -413,6 +262,191 @@ impl UPClientVsomeip {
             trace!("Made past dedicated thread park");
         });
         trace!("Past thread spawn");
+    }
+
+    async fn app_event_loop(
+        mut rx_to_event_loop: Receiver<TransportCommand>,
+        config_path: Option<PathBuf>,
+    ) {
+        let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
+
+        trace!("Entering command loop");
+        while let Some(cmd) = rx_to_event_loop.recv().await {
+            trace!("Received TransportCommand");
+
+            match cmd {
+                TransportCommand::RegisterListener(
+                    src,
+                    sink,
+                    registration_type,
+                    msg_handler,
+                    return_channel,
+                ) => {
+                    trace!(
+                        "{}:{} - Attempting to register listener: src: {src:?} sink: {sink:?}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                    );
+
+                    trace!("registration_type: {registration_type:?}");
+
+                    let app_name = find_app_name(registration_type.client_id()).await;
+
+                    let Ok(app_name) = app_name else {
+                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
+                            .await;
+                        continue;
+                    };
+
+                    let_cxx_string!(app_name_cxx = app_name);
+
+                    let mut application_wrapper = make_application_wrapper(
+                        get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
+                    );
+
+                    let res = Self::register_listener_internal(
+                        src,
+                        sink,
+                        registration_type,
+                        msg_handler,
+                        &mut application_wrapper,
+                        &runtime_wrapper,
+                    )
+                    .await;
+                    trace!("Sending back results of registration");
+                    Self::return_oneshot_result(res, return_channel).await;
+                    trace!("Sent back results of registration");
+                    continue;
+                }
+                TransportCommand::UnregisterListener(
+                    src,
+                    sink,
+                    registration_type,
+                    return_channel,
+                ) => {
+                    let app_name = find_app_name(registration_type.client_id()).await;
+
+                    let Ok(app_name) = app_name else {
+                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
+                            .await;
+                        continue;
+                    };
+
+                    let_cxx_string!(app_name_cxx = app_name);
+
+                    let application_wrapper = make_application_wrapper(
+                        get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
+                    );
+
+                    let res = Self::unregister_listener_internal(
+                        src,
+                        sink,
+                        registration_type,
+                        &application_wrapper,
+                        &runtime_wrapper,
+                    )
+                    .await;
+                    Self::return_oneshot_result(res, return_channel).await;
+                    continue;
+                }
+                TransportCommand::Send(umsg, message_type, return_channel) => {
+                    trace!(
+                        "{}:{} - Attempting to send UMessage: {:?}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                        umsg
+                    );
+
+                    trace!(
+                        "inside TransportCommand::Send dispatch, message_type: {message_type:?}"
+                    );
+
+                    let app_name = find_app_name(message_type.client_id()).await;
+
+                    let Ok(app_name) = app_name else {
+                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
+                            .await;
+                        continue;
+                    };
+
+                    let_cxx_string!(app_name_cxx = app_name.clone());
+
+                    let application =
+                        get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx);
+                    if application.is_null() {
+                        let err = format!(
+                            "No application exists for {app_name} under client_id: {}",
+                            message_type.client_id()
+                        );
+                        Self::return_oneshot_result(
+                            Err(UStatus::fail_with_code(UCode::INTERNAL, err)),
+                            return_channel,
+                        )
+                        .await;
+                        continue;
+                    }
+                    let mut application_wrapper = make_application_wrapper(application);
+                    let app_client_id = get_pinned_application(&application_wrapper).get_client();
+                    trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
+
+                    Self::send_internal(
+                        umsg,
+                        return_channel,
+                        &mut application_wrapper,
+                        &runtime_wrapper,
+                    )
+                    .await
+                }
+                TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
+                    trace!(
+                        "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                        client_id,
+                        app_name
+                    );
+                    let new_app_res = Self::initialize_new_app_internal(
+                        client_id,
+                        app_name.clone(),
+                        config_path.clone(),
+                        &runtime_wrapper,
+                    )
+                    .await;
+                    trace!(
+                        "{}:{} - After attempt to create new app for client_id: {} app_name: {}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                        client_id,
+                        app_name
+                    );
+
+                    if let Err(err) = new_app_res {
+                        error!("Unable to create new app: {:?}", err);
+                        Self::return_oneshot_result(Err(err), return_channel).await;
+                        continue;
+                    }
+
+                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        client_id_app_mapping.entry(client_id)
+                    {
+                        e.insert(app_name.clone());
+                        trace!(
+                            "Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING",
+                            client_id,
+                            app_name
+                        );
+                        Self::return_oneshot_result(Ok(()), return_channel).await;
+                    } else {
+                        let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
+                        let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
+                        Self::return_oneshot_result(Err(err), return_channel).await;
+                        continue;
+                    }
+                }
+            }
+            trace!("Hit bottom of event loop");
+        }
     }
 
     async fn register_listener_internal(
@@ -486,6 +520,7 @@ impl UPClientVsomeip {
                     msg_handler,
                 );
 
+                // Letting vsomeip settle
                 tokio::time::sleep(Duration::from_millis(5)).await;
 
                 trace!(
@@ -601,40 +636,10 @@ impl UPClientVsomeip {
                 Ok(())
             }
             RegistrationType::AllPointToPoint(_) => {
-                trace!(
-                    "{}:{} - Registering for all point-to-point style messages.",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                );
-
-                let service_id = vsomeip::ANY_SERVICE;
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let method_id = vsomeip::ANY_METHOD;
-
-                trace!(
-                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                    service_id,
-                    instance_id,
-                    method_id
-                );
-
-                register_message_handler_fn_ptr_safe(
-                    application_wrapper,
-                    service_id,
-                    instance_id,
-                    method_id,
-                    msg_handler,
-                );
-
-                trace!(
-                    "{}:{} - Registered vsomeip message handler.",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                );
-
-                Ok(())
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Should be impossible to register point-to-point internally",
+                ));
             }
         }
     }
@@ -643,11 +648,9 @@ impl UPClientVsomeip {
         source_filter: UUri,
         sink_filter: Option<UUri>,
         registration_type: RegistrationType,
-        return_channel: oneshot::Sender<Result<(), UStatus>>,
         application_wrapper: &UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-    ) {
-        // Implementation goes here
+    ) -> Result<(), UStatus> {
         trace!(
             "{}:{} - Attempting to unregister: source_filter: {:?} & sink_filter: {:?}",
             UP_CLIENT_VSOMEIP_TAG,
@@ -678,8 +681,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-
-                Self::return_oneshot_result(Ok(()), return_channel).await;
+                Ok(())
             }
             RegistrationType::Request(_) => {
                 trace!(
@@ -688,15 +690,10 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = sink_filter else {
-                    Self::return_oneshot_result(
-                        Err(UStatus::fail_with_code(
-                            UCode::INVALID_ARGUMENT,
-                            "Request doesn't contain sink",
-                        )),
-                        return_channel,
-                    )
-                    .await;
-                    return;
+                    return Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Request doesn't contain sink",
+                    ));
                 };
 
                 let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
@@ -715,7 +712,7 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), return_channel).await;
+                Ok(())
             }
             RegistrationType::Response(_) => {
                 trace!(
@@ -724,15 +721,10 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = sink_filter else {
-                    Self::return_oneshot_result(
-                        Err(UStatus::fail_with_code(
-                            UCode::INVALID_ARGUMENT,
-                            "Request doesn't contain sink",
-                        )),
-                        return_channel,
-                    )
-                    .await;
-                    return;
+                    return Err(UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        "Request doesn't contain sink",
+                    ));
                 };
 
                 let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
@@ -751,32 +743,13 @@ impl UPClientVsomeip {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                Self::return_oneshot_result(Ok(()), return_channel).await;
+                Ok(())
             }
             RegistrationType::AllPointToPoint(_) => {
-                trace!(
-                    "{}:{} - Unregistering for all point-to-point style messages.",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                );
-
-                let service_id = vsomeip::ANY_SERVICE;
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let method_id = vsomeip::ANY_METHOD;
-
-                get_pinned_application(application_wrapper).unregister_message_handler(
-                    service_id,
-                    instance_id,
-                    method_id,
-                );
-
-                trace!(
-                    "{}:{} - Unregistered vsomeip message handler.",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                );
-
-                Self::return_oneshot_result(Ok(()), return_channel).await;
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Should be impossible to unregister point-to-point internally",
+                ));
             }
         }
     }
