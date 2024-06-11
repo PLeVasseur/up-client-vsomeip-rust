@@ -19,7 +19,7 @@ use log::{info, trace};
 use up_rust::{ComparableListener, UCode, UStatus, UUri};
 
 pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
-    info!("listener_id was not used since we already have registered for this Request");
+    info!("listener_id was not used since we already have registered for this");
     let mut free_ids = FREE_LISTENER_IDS.write().await;
     free_ids.insert(listener_id);
     UStatus::fail_with_code(

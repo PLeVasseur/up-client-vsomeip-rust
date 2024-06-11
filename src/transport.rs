@@ -28,7 +28,7 @@ use crate::{
 use async_trait::async_trait;
 use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
-use log::{error, info, trace, warn};
+use log::{error, trace, warn};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -189,9 +189,7 @@ impl UTransport for UPClientVsomeip {
                     let comp_listener = ComparableListener::new(Arc::clone(&listener));
                     let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
                     if !insert_into_listener_id_map(key, listener_id).await {
-                        info!("listener_id was not used since we already have registered for this Request");
-                        let mut free_ids = FREE_LISTENER_IDS.write().await;
-                        free_ids.insert(listener_id);
+                        trace!("{:?}", free_listener_id(listener_id).await);
                     } else {
                         // TODO: Need to do some verification on returned Option<>
                         LISTENER_REGISTRY
