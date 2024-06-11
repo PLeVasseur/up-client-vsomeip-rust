@@ -174,82 +174,13 @@ impl UTransport for UPClientVsomeip {
         let app_name = format!("{}", message_type.client_id());
         trace!("app_name: {app_name}");
 
-        let maybe_point_to_point_listener = {
-            let point_to_point_listener = self.point_to_point_listener.read().await;
-            (*point_to_point_listener).as_ref().cloned()
-        };
-
-        if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
-            match message_type {
-                RegistrationType::Request(client_id) => {
-                    trace!("Sending a Request and we have a point-to-point listener");
-
-                    let listener_id = find_available_listener_id().await?;
-                    let listener = point_to_point_listener.clone();
-                    let comp_listener = ComparableListener::new(Arc::clone(&listener));
-                    let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-                    if !insert_into_listener_id_map(key, listener_id).await {
-                        trace!("{:?}", free_listener_id(listener_id).await);
-                    } else {
-                        // TODO: Need to do some verification on returned Option<>
-                        LISTENER_REGISTRY
-                            .write()
-                            .await
-                            .insert(listener_id, listener.clone());
-
-                        let extern_fn = get_extern_fn(listener_id);
-                        let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-                        let Some(src) = message.attributes.sink.as_ref() else {
-                            let err_msg = "Request message doesn't have a sink";
-                            error!("{err_msg}");
-                            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-                        };
-                        let Some(sink) = message.attributes.source.as_ref() else {
-                            let err_msg = "Request message doesn't have a source";
-                            error!("{err_msg}");
-                            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-                        };
-
-                        trace!("source used when registering:\n{src:?}");
-                        trace!("sink used when registering:\n{sink:?}");
-
-                        {
-                            let mut listener_client_id_mapping =
-                                LISTENER_CLIENT_ID_MAPPING.write().await;
-                            // TODO: Check that this succeeds
-                            listener_client_id_mapping.insert(listener_id, client_id);
-                        }
-
-                        trace!("listener_id mapped to client_id: listener_id: {listener_id} client_id: {client_id}");
-
-                        let message_type = RegistrationType::Response(client_id);
-                        let (tx, rx) = oneshot::channel();
-                        send_to_inner_with_status(
-                            &self.tx_to_event_loop,
-                            TransportCommand::RegisterListener(
-                                src.clone(),
-                                Some(sink.clone()),
-                                message_type,
-                                msg_handler,
-                                tx,
-                            ),
-                        )
-                        .await?;
-                        await_internal_function(
-                            UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
-                            rx,
-                        )
-                        .await?;
-                    }
-                }
-                _ => {
-                    trace!(
-                        "Sending non-Request when we have a point-to-point listener established"
-                    );
-                }
-            }
-        }
+        self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
+            &message,
+            source_filter,
+            sink_filter,
+            message_type,
+        )
+        .await?;
 
         let (tx, rx) = oneshot::channel();
         send_to_inner_with_status(&self.tx_to_event_loop, TransportCommand::Send(message, tx))
@@ -274,112 +205,7 @@ impl UTransport for UPClientVsomeip {
         trace!("registration_type: {registration_type:?}");
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            let Some(config_path) = &self.config_path else {
-                let err_msg = "No path to a vsomeip config file was provided";
-                error!("{err_msg}");
-                return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
-            };
-
-            let application_configs = extract_applications(config_path)?;
-            trace!("Got vsomeip application_configs: {application_configs:?}");
-
-            {
-                let mut point_to_point_listener = self.point_to_point_listener.write().await;
-                if point_to_point_listener.is_some() {
-                    return Err(UStatus::fail_with_code(
-                        UCode::ALREADY_EXISTS,
-                        "We already have a point-to-point UListener registered",
-                    ));
-                }
-                *point_to_point_listener = Some(listener.clone());
-                trace!("We found a point-to-point listener and set it");
-            }
-
-            for app_config in &application_configs {
-                let (tx, rx) = oneshot::channel();
-                send_to_inner_with_status(
-                    &self.tx_to_event_loop,
-                    TransportCommand::InitializeNewApp(app_config.id, app_config.name.clone(), tx),
-                )
-                .await?;
-                let app_created_res = await_internal_function(
-                    "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
-                    rx,
-                )
-                .await;
-
-                let listener_id = find_available_listener_id().await?;
-                let comp_listener = ComparableListener::new(listener.clone());
-
-                let src = UUri {
-                    authority_name: "*".to_string(),
-                    ue_id: 0x0000_FFFF,     // any instance, any service
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                };
-
-                // TODO: How to explicitly handle instance_id?
-                //  I'm not sure it's possible to set within the vsomeip config file
-                let sink = UUri {
-                    authority_name: self.authority_name.clone(),
-                    ue_id: app_config.id as u32,
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                };
-
-                let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
-                {
-                    let mut id_map = LISTENER_ID_MAP.write().await;
-                    id_map.insert(key, listener_id);
-                }
-
-                let mut hasher = DefaultHasher::new();
-                comp_listener.hash(&mut hasher);
-                let listener_hash = hasher.finish();
-
-                trace!("Inserted into src: {src:?} sink: {sink:?} listener_hash: {listener_hash} listener_id: {listener_id}");
-
-                // TODO: Need to do some verification on returned Option<>
-                LISTENER_REGISTRY
-                    .write()
-                    .await
-                    .insert(listener_id, listener.clone());
-                match app_created_res {
-                    Ok(_) => {
-                        let mut listener_client_id_mapping =
-                            LISTENER_CLIENT_ID_MAPPING.write().await;
-                        trace!("Adding listener_id -> client_id: listener_id: {listener_id} app_config.id: {}", app_config.id);
-                        listener_client_id_mapping.insert(listener_id, app_config.id);
-                    }
-                    Err(_) => {
-                        // TODO: Add logging
-                    }
-                }
-
-                let extern_fn = get_extern_fn(listener_id);
-                let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-                let registration_type = RegistrationType::Request(app_config.id);
-
-                let (tx, rx) = oneshot::channel();
-                send_to_inner_with_status(
-                    &self.tx_to_event_loop,
-                    TransportCommand::RegisterListener(
-                        src,
-                        Some(sink),
-                        registration_type,
-                        msg_handler,
-                        tx,
-                    ),
-                )
-                .await?;
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
-                    .await?;
-            }
-
-            return Ok(());
+            return self.register_point_to_point_listener(&listener).await;
         }
 
         let listener_id = find_available_listener_id().await?;
@@ -466,101 +292,9 @@ impl UTransport for UPClientVsomeip {
         };
 
         if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            let Some(config_path) = &self.config_path else {
-                let err_msg = "No path to a vsomeip config file was provided";
-                error!("{err_msg}");
-                return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
-            };
-
-            let application_configs = extract_applications(config_path)?;
-            trace!("Got vsomeip application_configs: {application_configs:?}");
-
-            let ptp_comp_listener = {
-                let point_to_point_listener = self.point_to_point_listener.read().await;
-                let Some(ref point_to_point_listener) = *point_to_point_listener else {
-                    return Err(UStatus::fail_with_code(
-                        UCode::ALREADY_EXISTS,
-                        "No point-to-point listener found, we can't unregister it",
-                    ));
-                };
-                ComparableListener::new(point_to_point_listener.clone())
-            };
-            let comp_listener = ComparableListener::new(listener.clone());
-            if ptp_comp_listener != comp_listener {
-                return Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "listener provided doesn't match registered point_to_point_listener",
-                ));
-            }
-
-            for app_config in &application_configs {
-                let src = UUri {
-                    authority_name: "*".to_string(),
-                    ue_id: 0x0000_FFFF,     // any instance, any service
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                };
-                let sink = UUri {
-                    authority_name: self.authority_name.clone(),
-                    ue_id: app_config.id as u32,
-                    ue_version_major: 0xFF, // any
-                    resource_id: 0xFFFF,    // any
-                    ..Default::default()
-                };
-
-                trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
-
-                let listener_id = {
-                    let mut id_map = LISTENER_ID_MAP.write().await;
-
-                    trace!("LISTENER_ID_MAP");
-                    for ((src, sink, comparable_listener), listener_id) in id_map.iter() {
-                        let mut hasher = DefaultHasher::new();
-                        comparable_listener.hash(&mut hasher);
-                        let listener_hash = hasher.finish();
-
-                        trace!("src: {src:?} sink: {sink:?} listener: {listener_hash} listener_id: {listener_id}");
-                    }
-
-                    if let Some(&id) =
-                        id_map.get(&(src.clone(), Some(sink.clone()), comp_listener.clone()))
-                    {
-                        id_map.remove(&(src.clone(), Some(sink.clone()), comp_listener.clone()));
-                        id
-                    } else {
-                        return Err(UStatus::fail_with_code(
-                            UCode::INTERNAL,
-                            "Listener not found",
-                        ));
-                    }
-                };
-
-                {
-                    let mut registry = LISTENER_REGISTRY.write().await;
-                    registry.remove(&listener_id);
-                }
-
-                {
-                    let mut free_ids = FREE_LISTENER_IDS.write().await;
-                    free_ids.insert(listener_id);
-                }
-
-                {
-                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                    client_id_app_mapping.remove(&registration_type.client_id());
-                }
-
-                {
-                    let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
-                    listener_client_id_mapping.remove(&listener_id);
-                }
-            }
-
-            // TODO: Consider if we want to go and stop the vsomeip application
-            //  Probably a good idea to do this in the drop impl
-
-            return Ok(());
+            return self
+                .unregister_point_to_point_listener(&listener, &registration_type)
+                .await;
         }
 
         {
@@ -638,5 +372,284 @@ impl UTransport for UPClientVsomeip {
             UCode::UNIMPLEMENTED,
             "This method is not implemented for vsomeip. Use register_listener instead.",
         ))
+    }
+}
+
+impl UPClientVsomeip {
+    async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
+        &self,
+        message: &UMessage,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        message_type: RegistrationType,
+    ) -> Result<(), UStatus> {
+        let maybe_point_to_point_listener = {
+            let point_to_point_listener = self.point_to_point_listener.read().await;
+            (*point_to_point_listener).as_ref().cloned()
+        };
+
+        if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
+            if message_type != RegistrationType::Request(message_type.client_id()) {
+                trace!("Sending non-Request when we have a point-to-point listener established");
+                return Ok(());
+            }
+            trace!("Sending a Request and we have a point-to-point listener");
+
+            let listener_id = find_available_listener_id().await?;
+            let listener = point_to_point_listener.clone();
+            let comp_listener = ComparableListener::new(Arc::clone(&listener));
+            let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+            if !insert_into_listener_id_map(key, listener_id).await {
+                trace!("{:?}", free_listener_id(listener_id).await);
+                return Ok(());
+            }
+            // TODO: Need to do some verification on returned Option<>
+            LISTENER_REGISTRY
+                .write()
+                .await
+                .insert(listener_id, listener.clone());
+
+            let extern_fn = get_extern_fn(listener_id);
+            let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+            let Some(src) = message.attributes.sink.as_ref() else {
+                let err_msg = "Request message doesn't have a sink";
+                error!("{err_msg}");
+                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+            };
+            let Some(sink) = message.attributes.source.as_ref() else {
+                let err_msg = "Request message doesn't have a source";
+                error!("{err_msg}");
+                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+            };
+
+            trace!("source used when registering:\n{src:?}");
+            trace!("sink used when registering:\n{sink:?}");
+
+            {
+                let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+                // TODO: Check that this succeeds
+                listener_client_id_mapping.insert(listener_id, message_type.client_id());
+            }
+
+            trace!(
+                "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
+                message_type.client_id()
+            );
+
+            let message_type = RegistrationType::Response(message_type.client_id());
+            let (tx, rx) = oneshot::channel();
+            send_to_inner_with_status(
+                &self.tx_to_event_loop,
+                TransportCommand::RegisterListener(
+                    src.clone(),
+                    Some(sink.clone()),
+                    message_type,
+                    msg_handler,
+                    tx,
+                ),
+            )
+            .await?;
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn register_point_to_point_listener(
+        &self,
+        listener: &Arc<dyn UListener>,
+    ) -> Result<(), UStatus> {
+        let Some(config_path) = &self.config_path else {
+            let err_msg = "No path to a vsomeip config file was provided";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+        };
+
+        let application_configs = extract_applications(config_path)?;
+        trace!("Got vsomeip application_configs: {application_configs:?}");
+
+        {
+            let mut point_to_point_listener = self.point_to_point_listener.write().await;
+            if point_to_point_listener.is_some() {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "We already have a point-to-point UListener registered",
+                ));
+            }
+            *point_to_point_listener = Some(listener.clone());
+            trace!("We found a point-to-point listener and set it");
+        }
+
+        for app_config in &application_configs {
+            let (tx, rx) = oneshot::channel();
+            send_to_inner_with_status(
+                &self.tx_to_event_loop,
+                TransportCommand::InitializeNewApp(app_config.id, app_config.name.clone(), tx),
+            )
+            .await?;
+            await_internal_function(
+                "Initializing point-to-point listener apps. ApplicationConfig: {app_config:?}",
+                rx,
+            )
+            .await?;
+
+            let listener_id = find_available_listener_id().await?;
+            let comp_listener = ComparableListener::new(listener.clone());
+
+            let src = UUri {
+                authority_name: "*".to_string(),
+                ue_id: 0x0000_FFFF,     // any instance, any service
+                ue_version_major: 0xFF, // any
+                resource_id: 0xFFFF,    // any
+                ..Default::default()
+            };
+
+            // TODO: How to explicitly handle instance_id?
+            //  I'm not sure it's possible to set within the vsomeip config file
+            let sink = UUri {
+                authority_name: self.authority_name.clone(),
+                ue_id: app_config.id as u32,
+                ue_version_major: 0xFF, // any
+                resource_id: 0xFFFF,    // any
+                ..Default::default()
+            };
+
+            let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
+            {
+                let mut id_map = LISTENER_ID_MAP.write().await;
+                id_map.insert(key, listener_id);
+            }
+
+            let mut hasher = DefaultHasher::new();
+            comp_listener.hash(&mut hasher);
+            let listener_hash = hasher.finish();
+
+            trace!("Inserted into src: {src:?} sink: {sink:?} listener_hash: {listener_hash} listener_id: {listener_id}");
+
+            // TODO: Need to do some verification on returned Option<>
+            LISTENER_REGISTRY
+                .write()
+                .await
+                .insert(listener_id, listener.clone());
+
+            {
+                let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+                trace!(
+                    "Adding listener_id -> client_id: listener_id: {listener_id} app_config.id: {}",
+                    app_config.id
+                );
+                listener_client_id_mapping.insert(listener_id, app_config.id);
+            }
+
+            let extern_fn = get_extern_fn(listener_id);
+            let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+            let registration_type = RegistrationType::Request(app_config.id);
+
+            let (tx, rx) = oneshot::channel();
+            send_to_inner_with_status(
+                &self.tx_to_event_loop,
+                TransportCommand::RegisterListener(
+                    src,
+                    Some(sink),
+                    registration_type,
+                    msg_handler,
+                    tx,
+                ),
+            )
+            .await?;
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn unregister_point_to_point_listener(
+        &self,
+        listener: &Arc<dyn UListener>,
+        registration_type: &RegistrationType,
+    ) -> Result<(), UStatus> {
+        let Some(config_path) = &self.config_path else {
+            let err_msg = "No path to a vsomeip config file was provided";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+        };
+
+        let application_configs = extract_applications(config_path)?;
+        trace!("Got vsomeip application_configs: {application_configs:?}");
+
+        let ptp_comp_listener = {
+            let point_to_point_listener = self.point_to_point_listener.read().await;
+            let Some(ref point_to_point_listener) = *point_to_point_listener else {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "No point-to-point listener found, we can't unregister it",
+                ));
+            };
+            ComparableListener::new(point_to_point_listener.clone())
+        };
+        let comp_listener = ComparableListener::new(listener.clone());
+        if ptp_comp_listener != comp_listener {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "listener provided doesn't match registered point_to_point_listener",
+            ));
+        }
+
+        for app_config in &application_configs {
+            let src = UUri {
+                authority_name: "*".to_string(),
+                ue_id: 0x0000_FFFF,     // any instance, any service
+                ue_version_major: 0xFF, // any
+                resource_id: 0xFFFF,    // any
+                ..Default::default()
+            };
+            let sink = UUri {
+                authority_name: self.authority_name.clone(),
+                ue_id: app_config.id as u32,
+                ue_version_major: 0xFF, // any
+                resource_id: 0xFFFF,    // any
+                ..Default::default()
+            };
+
+            trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
+
+            let listener_id = {
+                let mut id_map = LISTENER_ID_MAP.write().await;
+                if let Some(&id) =
+                    id_map.get(&(src.clone(), Some(sink.clone()), comp_listener.clone()))
+                {
+                    id_map.remove(&(src.clone(), Some(sink.clone()), comp_listener.clone()));
+                    id
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "Listener not found",
+                    ));
+                }
+            };
+
+            {
+                let mut registry = LISTENER_REGISTRY.write().await;
+                registry.remove(&listener_id);
+            }
+
+            {
+                let mut free_ids = FREE_LISTENER_IDS.write().await;
+                free_ids.insert(listener_id);
+            }
+
+            {
+                let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
+                client_id_app_mapping.remove(&registration_type.client_id());
+            }
+
+            {
+                let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+                listener_client_id_mapping.remove(&listener_id);
+            }
+        }
+        Ok(())
     }
 }
