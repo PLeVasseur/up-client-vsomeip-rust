@@ -47,6 +47,8 @@ use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_run
 use vsomeip_sys::safe_glue::get_pinned_runtime;
 use vsomeip_sys::vsomeip;
 
+use tokio::sync::oneshot::error;
+
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
@@ -116,6 +118,21 @@ async fn await_internal_function(
     }
 }
 
+async fn send_to_inner_with_status(
+    tx: &tokio::sync::mpsc::Sender<TransportCommand>,
+    transport_command: TransportCommand,
+) -> Result<(), UStatus> {
+    tx.send(transport_command).await.map_err(|e| {
+        UStatus::fail_with_code(
+            UCode::INTERNAL,
+            format!(
+                "Unable to transmit request to internal vsomeip application handler, err: {:?}",
+                e
+            ),
+        )
+    })
+}
+
 #[async_trait]
 impl UTransport for UPClientVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
@@ -129,13 +146,9 @@ impl UTransport for UPClientVsomeip {
         };
 
         let sink_filter = message.attributes.sink.as_ref();
-
         let message_type = determine_message_type(source_filter, &sink_filter.cloned())?;
-
         trace!("inside send(), message_type: {message_type:?}");
-
         let app_name = find_app_name(message_type.client_id()).await;
-
         trace!("app_name: {app_name:?}");
 
         if let Err(err) = app_name {
@@ -151,14 +164,11 @@ impl UTransport for UPClientVsomeip {
                 message_type.client_id(),
                 app_name
             );
-            let _tx_res = self
-                .tx_to_event_loop
-                .send(TransportCommand::InitializeNewApp(
-                    message_type.client_id(),
-                    app_name,
-                    tx,
-                ))
-                .await;
+            send_to_inner_with_status(
+                &self.tx_to_event_loop,
+                TransportCommand::InitializeNewApp(message_type.client_id(), app_name, tx),
+            )
+            .await?;
             await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
                 .await?;
         }
