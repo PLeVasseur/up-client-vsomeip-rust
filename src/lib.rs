@@ -316,7 +316,6 @@ impl UPClientVsomeip {
                     trace!("Sending back results of registration");
                     Self::return_oneshot_result(res, return_channel).await;
                     trace!("Sent back results of registration");
-                    continue;
                 }
                 TransportCommand::UnregisterListener(
                     src,
@@ -347,7 +346,6 @@ impl UPClientVsomeip {
                     )
                     .await;
                     Self::return_oneshot_result(res, return_channel).await;
-                    continue;
                 }
                 TransportCommand::Send(umsg, message_type, return_channel) => {
                     trace!(
@@ -389,13 +387,9 @@ impl UPClientVsomeip {
                     let app_client_id = get_pinned_application(&application_wrapper).get_client();
                     trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
 
-                    Self::send_internal(
-                        umsg,
-                        return_channel,
-                        &mut application_wrapper,
-                        &runtime_wrapper,
-                    )
-                    .await
+                    let res =
+                        Self::send_internal(umsg, &mut application_wrapper, &runtime_wrapper).await;
+                    Self::return_oneshot_result(res, return_channel).await;
                 }
                 TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
                     trace!(
@@ -441,7 +435,6 @@ impl UPClientVsomeip {
                         let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
                         let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
                         Self::return_oneshot_result(Err(err), return_channel).await;
-                        continue;
                     }
                 }
             }
@@ -635,12 +628,10 @@ impl UPClientVsomeip {
 
                 Ok(())
             }
-            RegistrationType::AllPointToPoint(_) => {
-                return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Should be impossible to register point-to-point internally",
-                ));
-            }
+            RegistrationType::AllPointToPoint(_) => Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Should be impossible to register point-to-point internally",
+            )),
         }
     }
 
@@ -745,47 +736,34 @@ impl UPClientVsomeip {
 
                 Ok(())
             }
-            RegistrationType::AllPointToPoint(_) => {
-                return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Should be impossible to unregister point-to-point internally",
-                ));
-            }
+            RegistrationType::AllPointToPoint(_) => Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Should be impossible to unregister point-to-point internally",
+            )),
         }
     }
 
     async fn send_internal(
         umsg: UMessage,
-        return_channel: oneshot::Sender<Result<(), UStatus>>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-    ) {
+    ) -> Result<(), UStatus> {
         match umsg
             .attributes
             .type_
             .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
         {
             UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
-                Self::return_oneshot_result(
-                    Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        "Unspecified message type not supported",
-                    )),
-                    return_channel,
-                )
-                .await;
-                return;
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "Unspecified message type not supported",
+                ));
             }
             UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
-                Self::return_oneshot_result(
-                    Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        "Notification is not supported",
-                    )),
-                    return_channel,
-                )
-                .await;
-                return;
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "Notification is not supported",
+                ));
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
                 let vsomeip_msg_res =
@@ -797,8 +775,7 @@ impl UPClientVsomeip {
                         "{}:{} Converting UMessage to vsomeip message failed: {:?}",
                         UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, err
                     );
-                    Self::return_oneshot_result(Err(err), return_channel).await;
-                    return;
+                    return Err(err);
                 };
 
                 let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
@@ -836,8 +813,7 @@ impl UPClientVsomeip {
                         "{}:{} Converting UMessage to vsomeip message failed: {:?}",
                         UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, err
                     );
-                    Self::return_oneshot_result(Err(err), return_channel).await;
-                    return;
+                    return Err(err);
                 };
                 let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
                 let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
@@ -859,8 +835,7 @@ impl UPClientVsomeip {
                 get_pinned_application(application_wrapper).send(shared_ptr_message);
             }
         }
-
-        Self::return_oneshot_result(Ok(()), return_channel).await;
+        Ok(())
     }
 
     async fn return_oneshot_result(
