@@ -189,9 +189,9 @@ pub fn get_data_safe(payload_wrapper: &PayloadWrapper) -> Vec<u8> {
 
     if data_ptr.is_null() {
         trace!("get_data_safe: data_ptr is null");
-    } else {
-        trace!("get_data_safe: data_ptr is not null");
+        return Vec::new();
     }
+    trace!("get_data_safe: data_ptr is not null");
 
     trace!("Before slice::from_raw_parts");
 
