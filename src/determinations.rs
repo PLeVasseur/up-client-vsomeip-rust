@@ -11,9 +11,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::{
-    CLIENT_ID_APP_MAPPING, CLIENT_ID_SESSION_ID_TRACKING, FREE_LISTENER_IDS, LISTENER_ID_MAP,
+use crate::listener_registry::{
+    CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_ID_AUTHORITY_NAME, LISTENER_ID_MAP,
+    LISTENER_ID_REMOTE_AUTHORITY_NAME,
 };
+use crate::rpc_correlation::CLIENT_ID_SESSION_ID_TRACKING;
 use crate::{
     ApplicationName, AuthorityName, ClientId, RegistrationType, RequestId, SessionId, UeId,
 };
@@ -51,19 +53,50 @@ pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
 }
 
 pub(crate) async fn insert_into_listener_id_map(
+    authority_name: &AuthorityName,
+    remote_authority_name: &AuthorityName,
     key: (UUri, Option<UUri>, ComparableListener),
     listener_id: usize,
 ) -> bool {
+    // TODO: Should ensure that we don't record a partial transaction by rolling back any pieces which succeeded if a latter part fails
+
     let mut id_map = LISTENER_ID_MAP.write().await;
     if id_map.insert(key, listener_id).is_some() {
         trace!(
-            "Not inserted into LISTENER_ID_MAP since wa already have registered for this Request"
+            "Not inserted into LISTENER_ID_MAP since we already have registered for this Request"
         );
-        false
+        return false;
     } else {
         trace!("Inserted into LISTENER_ID_MAP");
-        true
     }
+
+    let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+    if listener_id_authority_name
+        .insert(listener_id, authority_name.to_string())
+        .is_some()
+    {
+        trace!(
+            "Not inserted into LISTENER_ID_AUTHORITY_NAME since we already have registered for this Request"
+        );
+        return false;
+    } else {
+        trace!("Inserted into LISTENER_ID_AUTHORITY_NAME");
+    }
+
+    let mut listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+    if listener_id_remote_authority_name
+        .insert(listener_id, remote_authority_name.to_string())
+        .is_some()
+    {
+        trace!(
+            "Not inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME since we already have registered for this Request"
+        );
+        return false;
+    } else {
+        trace!("Inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME");
+    }
+
+    true
 }
 
 pub(crate) async fn find_available_listener_id() -> Result<usize, UStatus> {

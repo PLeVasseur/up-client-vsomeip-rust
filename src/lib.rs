@@ -35,7 +35,6 @@ use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 
 pub mod transport;
-use transport::CLIENT_ID_APP_MAPPING;
 
 mod message_conversions;
 use message_conversions::convert_umsg_to_vsomeip_msg_and_send;
@@ -45,7 +44,11 @@ use determinations::{
     create_request_id, find_app_name, retrieve_session_id, split_u32_to_u16, split_u32_to_u8,
 };
 
+mod listener_registry;
+mod rpc_correlation;
 mod vsomeip_config;
+
+use listener_registry::CLIENT_ID_APP_MAPPING;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -133,6 +136,9 @@ pub struct UPTransportVsomeip {
     authority_name: AuthorityName,
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
+    remote_authority_name: AuthorityName,
+    // we're going to be using this for error messages, so suppress this warning for now
+    #[allow(dead_code)]
     ue_id: UeId,
     // we're going to be using this for error messages, so suppress this warning for now
     #[allow(dead_code)]
@@ -145,6 +151,7 @@ pub struct UPTransportVsomeip {
 impl UPTransportVsomeip {
     pub fn new_with_config(
         authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
         ue_id: UeId,
         config_path: &Path,
     ) -> Result<Self, UStatus> {
@@ -154,15 +161,25 @@ impl UPTransportVsomeip {
                 format!("Configuration file not found at: {:?}", config_path),
             ));
         }
-        Self::new_internal(authority_name, ue_id, Some(config_path))
+        Self::new_internal(
+            authority_name,
+            remote_authority_name,
+            ue_id,
+            Some(config_path),
+        )
     }
 
-    pub fn new(authority_name: &AuthorityName, ue_id: UeId) -> Result<Self, UStatus> {
-        Self::new_internal(authority_name, ue_id, None)
+    pub fn new(
+        authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+    ) -> Result<Self, UStatus> {
+        Self::new_internal(authority_name, remote_authority_name, ue_id, None)
     }
 
     fn new_internal(
         authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
         ue_id: UeId,
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
@@ -182,6 +199,7 @@ impl UPTransportVsomeip {
 
         Ok(Self {
             authority_name: authority_name.to_string(),
+            remote_authority_name: remote_authority_name.to_string(),
             ue_id,
             tx_to_event_loop: tx,
             point_to_point_listener: None.into(),

@@ -15,6 +15,10 @@ use crate::determinations::{
     any_uuri, any_uuri_fixed_authority_id, determine_message_type, determine_registration_type,
     find_app_name, find_available_listener_id, free_listener_id, insert_into_listener_id_map,
 };
+use crate::listener_registry::{
+    get_extern_fn, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_ID_CLIENT_ID_MAPPING,
+    LISTENER_ID_MAP, LISTENER_REGISTRY,
+};
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
@@ -53,58 +57,6 @@ use vsomeip_sys::vsomeip;
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
-
-static RUNTIME: Lazy<Arc<Runtime>> =
-    Lazy::new(|| Arc::new(Runtime::new().expect("Failed to create Tokio runtime")));
-
-fn get_runtime() -> Arc<Runtime> {
-    Arc::clone(&RUNTIME)
-}
-
-const THREAD_NUM: usize = 10;
-
-// Create a separate tokio Runtime for running the callback
-lazy_static! {
-    static ref CB_RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(THREAD_NUM)
-        .enable_all()
-        .build()
-        .expect("Unable to create callback runtime");
-}
-
-// TODO: Spin this off into its own concept as what's needed from within a listener
-type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
-lazy_static! {
-    // TODO: Remove this in favor of LISTENER_ID_AUTHORITY_NAME
-    pub(crate) static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
-    pub(crate) static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref LISTENER_ID_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
-}
-
-// TODO: Spin this off into its own concept for which applications are active and their names
-lazy_static! {
-    pub(crate) static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
-        RwLock::new(HashMap::new());
-}
-
-// TODO: Spin this off into its own concept as what's needed for RPC Request -> Response correlation
-lazy_static! {
-    pub(crate) static ref UE_REQUEST_CORRELATION: RwLock<HashMap<RequestId, ReqId>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref ME_REQUEST_CORRELATION: RwLock<HashMap<ReqId, RequestId>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref CLIENT_ID_SESSION_ID_TRACKING: RwLock<HashMap<ClientId, SessionId>> =
-        RwLock::new(HashMap::new());
-}
-
-generate_message_handler_extern_c_fns!(10000);
 
 async fn await_internal_function(
     function_id: &str,
@@ -284,7 +236,14 @@ impl UTransport for UPTransportVsomeip {
         let comp_listener = ComparableListener::new(listener.clone());
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
-        if !insert_into_listener_id_map(key, listener_id).await {
+        if !insert_into_listener_id_map(
+            &self.authority_name,
+            &self.remote_authority_name,
+            key,
+            listener_id,
+        )
+        .await
+        {
             return Err(free_listener_id(listener_id).await);
         }
         trace!("Inserted into LISTENER_ID_MAP");
@@ -400,7 +359,14 @@ impl UPTransportVsomeip {
             let listener = point_to_point_listener.clone();
             let comp_listener = ComparableListener::new(Arc::clone(&listener));
             let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-            if !insert_into_listener_id_map(key, listener_id).await {
+            if !insert_into_listener_id_map(
+                &self.authority_name,
+                &self.remote_authority_name,
+                key,
+                listener_id,
+            )
+            .await
+            {
                 trace!("{:?}", free_listener_id(listener_id).await);
                 return Ok(());
             }
@@ -515,7 +481,14 @@ impl UPTransportVsomeip {
             let sink = any_uuri_fixed_authority_id(&self.authority_name, app_config.id);
 
             let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
-            if !insert_into_listener_id_map(key, listener_id).await {
+            if !insert_into_listener_id_map(
+                &self.authority_name,
+                &self.remote_authority_name,
+                key,
+                listener_id,
+            )
+            .await
+            {
                 return Err(free_listener_id(listener_id).await);
             }
 

@@ -11,10 +11,10 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::transport::{AUTHORITY_NAME, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
+use crate::rpc_correlation::{ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
 use crate::{
-    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, EventId, InstanceId,
-    ServiceId, ME_AUTHORITY,
+    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, AuthorityName,
+    EventId, InstanceId, ServiceId, ME_AUTHORITY,
 };
 use cxx::UniquePtr;
 use lazy_static::lazy_static;
@@ -327,6 +327,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
 }
 
 pub async fn convert_vsomeip_msg_to_umsg(
+    authority_name: &AuthorityName,
+    mechatronics_authority_name: &AuthorityName,
     vsomeip_message: &mut UniquePtr<MessageWrapper>,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
@@ -349,15 +351,13 @@ pub async fn convert_vsomeip_msg_to_umsg(
         request_id, client_id, session_id, service_id, instance_id, method_id, interface_version, payload_bytes
     );
 
-    let authority_name = { AUTHORITY_NAME.lock().await.clone() };
-
     trace!("unloaded all relevant info from vsomeip message");
 
     match msg_type {
         message_type_e::MT_REQUEST => {
             trace!("MT_REQUEST type");
             let sink = UUri {
-                authority_name,
+                authority_name: authority_name.to_string(),
                 ue_id: service_id as u32,
                 ue_version_major: interface_version as u32,
                 resource_id: method_id as u32,
@@ -365,7 +365,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
             };
 
             let source = UUri {
-                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                authority_name: mechatronics_authority_name.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"
@@ -424,7 +424,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
             //  interface_version... going to set this manually to 1 for now
             let interface_version = 1;
             let source = UUri {
-                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                authority_name: mechatronics_authority_name.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
                 ue_version_major: interface_version as u32,
                 resource_id: method_id as u32,
@@ -449,7 +449,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
         message_type_e::MT_RESPONSE => {
             trace!("MT_RESPONSE type");
             let sink = UUri {
-                authority_name,
+                authority_name: authority_name.to_string(),
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"
@@ -457,7 +457,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
             };
 
             let source = UUri {
-                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                authority_name: mechatronics_authority_name.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
                 ue_version_major: interface_version as u32,
                 resource_id: method_id as u32,
@@ -496,7 +496,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
         message_type_e::MT_ERROR => {
             trace!("MT_ERROR type");
             let sink = UUri {
-                authority_name,
+                authority_name: authority_name.to_string(),
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"
@@ -504,7 +504,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
             };
 
             let source = UUri {
-                authority_name: ME_AUTHORITY.to_string(), // TODO: Should we set this to anything specific?
+                authority_name: mechatronics_authority_name.to_string(), // TODO: Should we set this to anything specific?
                 ue_id: service_id as u32,
                 ue_version_major: interface_version as u32,
                 resource_id: method_id as u32,
