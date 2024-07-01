@@ -38,7 +38,7 @@ pub mod transport;
 use transport::CLIENT_ID_APP_MAPPING;
 
 mod message_conversions;
-use message_conversions::convert_umsg_to_vsomeip_msg;
+use message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 
 mod determinations;
 use determinations::{
@@ -768,80 +768,20 @@ impl UPTransportVsomeip {
                 ));
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
-                let _vsomeip_msg_res =
-                    convert_umsg_to_vsomeip_msg(&umsg, application_wrapper, runtime_wrapper).await;
-
-                // let Ok(mut vsomeip_msg) = vsomeip_msg_res else {
-                //     let err = vsomeip_msg_res.err().unwrap();
-                //     error!(
-                //         "{}:{} Converting UMessage to vsomeip message failed: {:?}",
-                //         UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, err
-                //     );
-                //     return Err(err);
-                // };
-                //
-                // let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
-                // let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
-                // let event_id = get_pinned_message_base(&vsomeip_msg).get_method();
-                // let _interface_version =
-                //     get_pinned_message_base(&vsomeip_msg).get_interface_version();
-                //
-                // trace!(
-                //     "{}:{} Sending SOME/IP NOTIFICATION with service: {} instance: {} event: {}",
-                //     UP_CLIENT_VSOMEIP_TAG,
-                //     UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                //     service_id,
-                //     instance_id,
-                //     event_id
-                // );
-
-                // let payload = get_message_payload(&mut vsomeip_msg).get_shared_ptr();
-                // // TODO: Note that we cannot set the interface_version
-                // get_pinned_application(application_wrapper).notify(
-                //     service_id,
-                //     instance_id,
-                //     event_id,
-                //     payload,
-                //     true,
-                // );
+                let _vsomeip_msg_res = convert_umsg_to_vsomeip_msg_and_send(
+                    &umsg,
+                    application_wrapper,
+                    runtime_wrapper,
+                )
+                .await;
             }
             UMessageType::UMESSAGE_TYPE_REQUEST | UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                let _vsomeip_msg_res =
-                    convert_umsg_to_vsomeip_msg(&umsg, application_wrapper, runtime_wrapper).await;
-
-                // TODO: For some reason the payload which is attached within convert_umsg_to_vsomeip_msg
-                //  appears to be invalid when returned, perhaps because we're passing the pinned
-                //  value out of where it was allocated on the stack? In any case, for now we
-                //  will send from within convert_umsg_to_vsomeip_msg
-                // let Ok(mut vsomeip_msg) = vsomeip_msg_res else {
-                //     let err = vsomeip_msg_res.err().unwrap();
-                //     error!(
-                //         "{}:{} Converting UMessage to vsomeip message failed: {:?}",
-                //         UP_CLIENT_VSOMEIP_TAG, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, err
-                //     );
-                //     return Err(err);
-                // };
-                // let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
-                // let instance_id = get_pinned_message_base(&vsomeip_msg).get_instance();
-                // let method_id = get_pinned_message_base(&vsomeip_msg).get_method();
-                // let _interface_version =
-                //     get_pinned_message_base(&vsomeip_msg).get_interface_version();
-                //
-                // trace!(
-                //     "{}:{} Sending SOME/IP message with service: {} instance: {} method: {}",
-                //     UP_CLIENT_VSOMEIP_TAG,
-                //     UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-                //     service_id,
-                //     instance_id,
-                //     method_id
-                // );
-                //
-                // let payload_wrapper = get_message_payload(&mut vsomeip_msg);
-                // let payload = get_data_safe(&payload_wrapper);
-                // trace!("immediately before calling vsomeip send, here's the payload: {payload:?}");
-                //
-                // let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-                // get_pinned_application(application_wrapper).send(shared_ptr_message);
+                let _vsomeip_msg_res = convert_umsg_to_vsomeip_msg_and_send(
+                    &umsg,
+                    application_wrapper,
+                    runtime_wrapper,
+                )
+                .await;
             }
         }
         Ok(())

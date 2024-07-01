@@ -44,11 +44,11 @@ lazy_static! {
         RwLock::new(HashSet::new());
 }
 
-pub async fn convert_umsg_to_vsomeip_msg(
+pub async fn convert_umsg_to_vsomeip_msg_and_send(
     umsg: &UMessage,
     application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+) -> Result<(), UStatus> {
     let Some(source) = umsg.attributes.source.as_ref() else {
         return Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
@@ -128,7 +128,7 @@ pub async fn convert_umsg_to_vsomeip_msg(
                 true,
             );
 
-            Ok(vsomeip_msg)
+            Ok(())
         }
         UMessageType::UMESSAGE_TYPE_REQUEST => {
             let Some(sink) = umsg.attributes.sink.as_ref() else {
@@ -224,7 +224,7 @@ pub async fn convert_umsg_to_vsomeip_msg(
             let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
             get_pinned_application(application_wrapper).send(shared_ptr_message);
 
-            Ok(vsomeip_msg)
+            Ok(())
         }
         UMessageType::UMESSAGE_TYPE_RESPONSE => {
             trace!(
@@ -317,7 +317,7 @@ pub async fn convert_umsg_to_vsomeip_msg(
             let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
             get_pinned_application(application_wrapper).send(shared_ptr_message);
 
-            Ok(vsomeip_msg)
+            Ok(())
         }
         _ => Err(UStatus::fail_with_code(
             UCode::INTERNAL,
@@ -373,9 +373,6 @@ pub async fn convert_vsomeip_msg_to_umsg(
             };
 
             // TODO: Not sure where to get this
-            //  Steven said Ivan posted something to a Slack thread; need to check
-            //  Hmm, didn't find this. Asked Steven for help
-            //  He pointed me to something about SOME/IP-SD, but not Request AFAICT
             let ttl = 1000;
 
             trace!("Prior to building Request");

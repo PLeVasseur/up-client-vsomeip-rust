@@ -18,7 +18,7 @@ use crate::determinations::{
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
-    ApplicationName, ClientId, ReqId, RequestId, SessionId,
+    ApplicationName, AuthorityName, ClientId, ReqId, RequestId, SessionId,
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
 };
@@ -72,26 +72,36 @@ lazy_static! {
         .expect("Unable to create callback runtime");
 }
 
+// TODO: Spin this off into its own concept as what's needed from within a listener
+type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
 lazy_static! {
+    // TODO: Remove this in favor of LISTENER_ID_AUTHORITY_NAME
     pub(crate) static ref AUTHORITY_NAME: Mutex<String> = Mutex::new(String::new());
-    pub(crate) static ref LISTENER_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
+    pub(crate) static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
         RwLock::new(HashMap::new());
+    pub(crate) static ref LISTENER_ID_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
+        RwLock::new(HashMap::new());
+    pub(crate) static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
+}
+
+// TODO: Spin this off into its own concept for which applications are active and their names
+lazy_static! {
     pub(crate) static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
         RwLock::new(HashMap::new());
+}
+
+// TODO: Spin this off into its own concept as what's needed for RPC Request -> Response correlation
+lazy_static! {
     pub(crate) static ref UE_REQUEST_CORRELATION: RwLock<HashMap<RequestId, ReqId>> =
         RwLock::new(HashMap::new());
     pub(crate) static ref ME_REQUEST_CORRELATION: RwLock<HashMap<ReqId, RequestId>> =
         RwLock::new(HashMap::new());
     pub(crate) static ref CLIENT_ID_SESSION_ID_TRACKING: RwLock<HashMap<ClientId, SessionId>> =
         RwLock::new(HashMap::new());
-}
-
-type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
-
-lazy_static! {
-    pub(crate) static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
-        RwLock::new(HashMap::new());
-    pub(crate) static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
 }
 
 generate_message_handler_extern_c_fns!(10000);
@@ -619,7 +629,7 @@ impl UPTransportVsomeip {
                 UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to re-insert listener_id back into free listeners, listener_id: {listener_id}"))
             })?;
 
-            let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+            let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
             listener_client_id_mapping.remove(&listener_id).ok_or_else(|| {
                 UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to locate client_id (i.e. for app) for listener_id: {listener_id}"))
             })?
@@ -688,7 +698,7 @@ impl UPTransportVsomeip {
         client_id: ClientId,
         listener_id: usize,
     ) -> Result<(), UStatus> {
-        let mut listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.write().await;
+        let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
         listener_client_id_mapping.insert(listener_id, client_id).map(|_| Err(UStatus::fail_with_code(
             UCode::INTERNAL,
             format!("Unable to have the same listener_id with a different client_id, i.e. tied to app: listener_id: {} client_id: {}", listener_id, client_id),

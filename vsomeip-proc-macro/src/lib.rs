@@ -91,7 +91,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             // Use the runtime to run the async function within the LocalSet
             local_set.spawn_local(async move {
                 let app_name = {
-                    let listener_client_id_mapping = LISTENER_CLIENT_ID_MAPPING.read().await;
+                    let listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.read().await;
                     if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
                         let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
                         if let Some(app_name) = client_id_app_mapping.get(&client_id) {
