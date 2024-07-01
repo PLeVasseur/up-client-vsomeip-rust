@@ -16,8 +16,9 @@ use crate::determinations::{
     find_app_name, find_available_listener_id, free_listener_id, insert_into_listener_id_map,
 };
 use crate::listener_registry::{
-    get_extern_fn, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_ID_CLIENT_ID_MAPPING,
-    LISTENER_ID_MAP, LISTENER_REGISTRY,
+    get_extern_fn, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_ID_AUTHORITY_NAME,
+    LISTENER_ID_CLIENT_ID_MAPPING, LISTENER_ID_MAP, LISTENER_ID_REMOTE_AUTHORITY_NAME,
+    LISTENER_REGISTRY,
 };
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
@@ -246,7 +247,7 @@ impl UTransport for UPTransportVsomeip {
         {
             return Err(free_listener_id(listener_id).await);
         }
-        trace!("Inserted into LISTENER_ID_MAP");
+        trace!("Inserted into LISTENER_ID_MAP within transport");
 
         Self::register_listener_id_with_listener(listener_id, listener).await?;
 
@@ -589,6 +590,36 @@ impl UPTransportVsomeip {
         };
 
         let _client_id = {
+            let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+
+            trace!(
+                "checking listener_id_authority_name: {:?}",
+                *listener_id_authority_name
+            );
+
+            listener_id_authority_name
+                .remove(&listener_id)
+                .ok_or_else(|| {
+                    UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        format!("Unable to locate authority_name for listener_id: {listener_id}"),
+                    )
+                })?;
+
+            let mut listener_id_remote_authority_name =
+                LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+
+            listener_id_remote_authority_name
+                .remove(&listener_id)
+                .ok_or_else(|| {
+                    UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        format!(
+                            "Unable to locate remote_authority_name for listener_id: {listener_id}"
+                        ),
+                    )
+                })?;
+
             let mut registry = LISTENER_REGISTRY.write().await;
             registry.remove(&listener_id).ok_or_else(|| {
                 UStatus::fail_with_code(

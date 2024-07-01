@@ -58,6 +58,13 @@ pub(crate) async fn insert_into_listener_id_map(
     key: (UUri, Option<UUri>, ComparableListener),
     listener_id: usize,
 ) -> bool {
+    trace!(
+        "authority_name: {}, remote_authority_name: {}, listener_id: {}",
+        authority_name,
+        remote_authority_name,
+        listener_id
+    );
+
     // TODO: Should ensure that we don't record a partial transaction by rolling back any pieces which succeeded if a latter part fails
 
     let mut id_map = LISTENER_ID_MAP.write().await;
@@ -71,6 +78,12 @@ pub(crate) async fn insert_into_listener_id_map(
     }
 
     let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+
+    trace!(
+        "checking listener_id_authority_name: {:?}",
+        *listener_id_authority_name
+    );
+
     if listener_id_authority_name
         .insert(listener_id, authority_name.to_string())
         .is_some()
@@ -103,6 +116,7 @@ pub(crate) async fn find_available_listener_id() -> Result<usize, UStatus> {
     let mut free_ids = FREE_LISTENER_IDS.write().await;
     if let Some(&id) = free_ids.iter().next() {
         free_ids.remove(&id);
+        trace!("find_available_listener_id: {id}");
         Ok(id)
     } else {
         Err(UStatus::fail_with_code(
