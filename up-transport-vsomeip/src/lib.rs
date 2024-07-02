@@ -11,6 +11,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+mod determine_message_type;
+
 pub mod transport;
 
 pub struct UPClientVsomeip {}
+
+type UeId = u16;
+type ClientId = u16;
