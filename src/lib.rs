@@ -40,11 +40,9 @@ mod message_conversions;
 use message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 
 mod determinations;
-use determinations::{
-    create_request_id, find_app_name, retrieve_session_id, split_u32_to_u16, split_u32_to_u8,
-};
 
 mod listener_registry;
+use listener_registry::find_app_name;
 mod rpc_correlation;
 mod vsomeip_config;
 
@@ -59,8 +57,43 @@ const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str = "initialize_new_app_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 
-// TODO: Revisit what authority to attach, if any, to the remote mE. For now, just assign "me_authority"
-const ME_AUTHORITY: &str = "me_authority";
+pub(crate) fn any_uuri() -> UUri {
+    UUri {
+        authority_name: "*".to_string(),
+        ue_id: 0x0000_FFFF,     // any instance, any service
+        ue_version_major: 0xFF, // any
+        resource_id: 0xFFFF,    // any
+        ..Default::default()
+    }
+}
+
+pub(crate) fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id: UeId) -> UUri {
+    UUri {
+        authority_name: authority_name.to_string(),
+        ue_id: ue_id as u32,
+        ue_version_major: 0xFF, // any
+        resource_id: 0xFFFF,    // any
+        ..Default::default()
+    }
+}
+
+pub(crate) fn split_u32_to_u16(value: u32) -> (u16, u16) {
+    let most_significant_bits = (value >> 16) as u16;
+    let least_significant_bits = (value & 0xFFFF) as u16;
+    (most_significant_bits, least_significant_bits)
+}
+
+pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
+    let byte1 = (value >> 24) as u8;
+    let byte2 = (value >> 16 & 0xFF) as u8;
+    let byte3 = (value >> 8 & 0xFF) as u8;
+    let byte4 = (value & 0xFF) as u8;
+    (byte1, byte2, byte3, byte4)
+}
+
+pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
+    ((client_id as u32) << 16) | (session_id as u32)
+}
 
 lazy_static! {
     static ref OFFERED_SERVICES: RwLock<HashSet<(ServiceId, InstanceId, MethodId)>> =

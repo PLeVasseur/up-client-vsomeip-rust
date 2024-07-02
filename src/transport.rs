@@ -11,19 +11,16 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determinations::{
-    any_uuri, any_uuri_fixed_authority_id, determine_message_type, determine_registration_type,
-    find_app_name, find_available_listener_id, free_listener_id, insert_into_listener_id_map,
-};
+use crate::determinations::{determine_message_type, determine_registration_type};
 use crate::listener_registry::{
-    get_extern_fn, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS, LISTENER_ID_AUTHORITY_NAME,
-    LISTENER_ID_CLIENT_ID_MAPPING, LISTENER_ID_MAP, LISTENER_ID_REMOTE_AUTHORITY_NAME,
-    LISTENER_REGISTRY,
+    find_app_name, find_available_listener_id, free_listener_id, get_extern_fn,
+    insert_into_listener_id_map, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS,
+    LISTENER_ID_AUTHORITY_NAME, LISTENER_ID_CLIENT_ID_MAPPING, LISTENER_ID_MAP,
+    LISTENER_ID_REMOTE_AUTHORITY_NAME, LISTENER_REGISTRY,
 };
-use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::vsomeip_config::extract_applications;
 use crate::{
-    ApplicationName, AuthorityName, ClientId, ReqId, RequestId, SessionId,
+    any_uuri, any_uuri_fixed_authority_id, ApplicationName, ClientId,
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
 };
@@ -32,28 +29,16 @@ use crate::{
     TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
 };
 use async_trait::async_trait;
-use cxx::{let_cxx_string, SharedPtr};
-use lazy_static::lazy_static;
 use log::{error, trace, warn};
-use once_cell::sync::Lazy;
-use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
-use tokio::sync::RwLock;
-use tokio::task::LocalSet;
-use tokio::time::{timeout, Instant};
+use tokio::time::timeout;
 use up_rust::{
     ComparableListener, UAttributesValidators, UCode, UListener, UMessage, UMessageType, UStatus,
     UTransport, UUri,
 };
-use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
-use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::get_pinned_runtime;
-use vsomeip_sys::vsomeip;
 
 const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 

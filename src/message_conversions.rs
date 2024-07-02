@@ -11,10 +11,10 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::rpc_correlation::{ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
+use crate::rpc_correlation::{retrieve_session_id, ME_REQUEST_CORRELATION, UE_REQUEST_CORRELATION};
 use crate::{
-    create_request_id, retrieve_session_id, split_u32_to_u16, split_u32_to_u8, AuthorityName,
-    EventId, InstanceId, ServiceId, ME_AUTHORITY,
+    create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName, EventId, InstanceId,
+    ServiceId,
 };
 use cxx::UniquePtr;
 use lazy_static::lazy_static;

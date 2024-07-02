@@ -1,8 +1,8 @@
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
-use crate::{AuthorityName, ClientId, SessionId};
+use crate::{ApplicationName, AuthorityName, ClientId};
 use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
-use log::{error, trace};
+use log::{error, info, trace};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -51,6 +51,90 @@ lazy_static! {
     pub(crate) static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
 }
 
+pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
+    info!("listener_id was not used since we already have registered for this");
+    let mut free_ids = FREE_LISTENER_IDS.write().await;
+    free_ids.insert(listener_id);
+    UStatus::fail_with_code(
+        UCode::ALREADY_EXISTS,
+        "Already have registered with this source, sink and listener",
+    )
+}
+
+pub(crate) async fn insert_into_listener_id_map(
+    authority_name: &AuthorityName,
+    remote_authority_name: &AuthorityName,
+    key: (UUri, Option<UUri>, ComparableListener),
+    listener_id: usize,
+) -> bool {
+    trace!(
+        "authority_name: {}, remote_authority_name: {}, listener_id: {}",
+        authority_name,
+        remote_authority_name,
+        listener_id
+    );
+
+    // TODO: Should ensure that we don't record a partial transaction by rolling back any pieces which succeeded if a latter part fails
+
+    let mut id_map = LISTENER_ID_MAP.write().await;
+    if id_map.insert(key, listener_id).is_some() {
+        trace!(
+            "Not inserted into LISTENER_ID_MAP since we already have registered for this Request"
+        );
+        return false;
+    } else {
+        trace!("Inserted into LISTENER_ID_MAP");
+    }
+
+    let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+
+    trace!(
+        "checking listener_id_authority_name: {:?}",
+        *listener_id_authority_name
+    );
+
+    if listener_id_authority_name
+        .insert(listener_id, authority_name.to_string())
+        .is_some()
+    {
+        trace!(
+            "Not inserted into LISTENER_ID_AUTHORITY_NAME since we already have registered for this Request"
+        );
+        return false;
+    } else {
+        trace!("Inserted into LISTENER_ID_AUTHORITY_NAME");
+    }
+
+    let mut listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+    if listener_id_remote_authority_name
+        .insert(listener_id, remote_authority_name.to_string())
+        .is_some()
+    {
+        trace!(
+            "Not inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME since we already have registered for this Request"
+        );
+        return false;
+    } else {
+        trace!("Inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME");
+    }
+
+    true
+}
+
+pub(crate) async fn find_available_listener_id() -> Result<usize, UStatus> {
+    let mut free_ids = FREE_LISTENER_IDS.write().await;
+    if let Some(&id) = free_ids.iter().next() {
+        free_ids.remove(&id);
+        trace!("find_available_listener_id: {id}");
+        Ok(id)
+    } else {
+        Err(UStatus::fail_with_code(
+            UCode::RESOURCE_EXHAUSTED,
+            "No more extern C fns available",
+        ))
+    }
+}
+
 // TODO: Implement functions here which interact with the above
 
 lazy_static! {
@@ -59,3 +143,15 @@ lazy_static! {
 }
 
 // TODO: Implement functions here which interact with the above
+
+pub(crate) async fn find_app_name(client_id: ClientId) -> Result<ApplicationName, UStatus> {
+    let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
+    if let Some(app_name) = client_id_app_mapping.get(&client_id) {
+        Ok(app_name.clone())
+    } else {
+        Err(UStatus::fail_with_code(
+            UCode::NOT_FOUND,
+            format!("There was no app_name found for client_id: {}", client_id),
+        ))
+    }
+}
