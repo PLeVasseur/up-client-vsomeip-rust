@@ -57,6 +57,7 @@ const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str = "initialize_new_app_internal";
 const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 
+// TODO: use function from up-rust when merged
 pub(crate) fn any_uuri() -> UUri {
     UUri {
         authority_name: "*".to_string(),
@@ -67,6 +68,7 @@ pub(crate) fn any_uuri() -> UUri {
     }
 }
 
+// TODO: upstream into up-rust
 pub(crate) fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id: UeId) -> UUri {
     UUri {
         authority_name: authority_name.to_string(),
@@ -77,12 +79,14 @@ pub(crate) fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id:
     }
 }
 
+// TODO: upstream this into up-rust
 pub(crate) fn split_u32_to_u16(value: u32) -> (u16, u16) {
     let most_significant_bits = (value >> 16) as u16;
     let least_significant_bits = (value & 0xFFFF) as u16;
     (most_significant_bits, least_significant_bits)
 }
 
+// TODO: upstream this into up-rust
 pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     let byte1 = (value >> 24) as u8;
     let byte2 = (value >> 16 & 0xFF) as u8;
@@ -91,6 +95,7 @@ pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     (byte1, byte2, byte3, byte4)
 }
 
+// TODO: upstream this into up-rust
 pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
     ((client_id as u32) << 16) | (session_id as u32)
 }
@@ -164,17 +169,9 @@ impl RegistrationType {
 }
 
 pub struct UPTransportVsomeip {
-    // we're going to be using this for error messages, so suppress this warning for now
-    #[allow(dead_code)]
     authority_name: AuthorityName,
-    // we're going to be using this for error messages, so suppress this warning for now
-    #[allow(dead_code)]
     remote_authority_name: AuthorityName,
-    // we're going to be using this for error messages, so suppress this warning for now
-    #[allow(dead_code)]
     ue_id: UeId,
-    // we're going to be using this for error messages, so suppress this warning for now
-    #[allow(dead_code)]
     config_path: Option<PathBuf>,
     // if this is not None, indicates that we are in a dedicated point-to-point mode
     point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
