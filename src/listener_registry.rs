@@ -246,14 +246,10 @@ pub(crate) async fn register_listener_id_with_listener(
     Ok(())
 }
 
-// TODO: Implement functions here which interact with the above
-
 lazy_static! {
     static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
         RwLock::new(HashMap::new());
 }
-
-// TODO: Implement functions here which interact with the above
 
 pub(crate) async fn map_listener_id_to_client_id(
     client_id: ClientId,

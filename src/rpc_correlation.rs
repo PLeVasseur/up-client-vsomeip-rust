@@ -3,7 +3,8 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
-// TODO: Spin this off into its own concept as what's needed for RPC Request -> Response correlation
+// TODO: Remove all references to these lazy_static except for within this file to reduce
+//  code sprawl
 lazy_static! {
     pub(crate) static ref UE_REQUEST_CORRELATION: RwLock<HashMap<RequestId, ReqId>> =
         RwLock::new(HashMap::new());
