@@ -22,6 +22,17 @@ pub(crate) enum RegistrationType {
     AllPointToPoint(ClientId),
 }
 
+impl RegistrationType {
+    pub fn client_id(&self) -> ClientId {
+        match self {
+            RegistrationType::Publish(client_id) => *client_id,
+            RegistrationType::Request(client_id) => *client_id,
+            RegistrationType::Response(client_id) => *client_id,
+            RegistrationType::AllPointToPoint(client_id) => *client_id,
+        }
+    }
+}
+
 // infer the type of message desired based on the filters provided
 pub(crate) fn determine_registration_type(
     source_filter: &UUri,

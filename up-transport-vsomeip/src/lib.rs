@@ -17,6 +17,7 @@ mod determine_message_type;
 mod listener_registry;
 mod message_conversions;
 mod rpc_correlation;
+mod transport_inner;
 mod vsomeip_offered_requested;
 
 pub mod transport;
