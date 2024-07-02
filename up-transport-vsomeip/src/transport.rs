@@ -11,13 +11,13 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::UPClientVsomeip;
+use crate::UPTransportVsomeip;
 use async_trait::async_trait;
 use std::sync::Arc;
 use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri};
 
 #[async_trait]
-impl UTransport for UPClientVsomeip {
+impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
         // implementation goes here
         println!("Sending message: {:?}", message);

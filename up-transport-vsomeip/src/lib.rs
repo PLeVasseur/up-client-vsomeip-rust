@@ -11,13 +11,17 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use up_rust::{UUri, UUID};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use up_rust::{UCode, UListener, UStatus, UUri, UUID};
 
 mod determine_message_type;
 mod listener_registry;
 mod message_conversions;
 mod rpc_correlation;
 mod transport_inner;
+use transport_inner::UPTransportVsomeipInner;
 mod vsomeip_offered_requested;
 
 pub mod transport;
@@ -65,8 +69,6 @@ pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> R
     ((client_id as u32) << 16) | (session_id as u32)
 }
 
-pub struct UPClientVsomeip {}
-
 type ApplicationName = String;
 type AuthorityName = String;
 type UeId = u16;
@@ -78,3 +80,74 @@ type EventId = u16;
 type ServiceId = u16;
 type InstanceId = u16;
 type MethodId = u16;
+
+pub struct UPTransportVsomeip {
+    inner_transport: UPTransportVsomeipInner,
+    authority_name: AuthorityName,
+    remote_authority_name: AuthorityName,
+    ue_id: UeId,
+    config_path: Option<PathBuf>,
+    // if this is not None, indicates that we are in a dedicated point-to-point mode
+    point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
+}
+
+impl UPTransportVsomeip {
+    pub fn new_with_config(
+        authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+        config_path: &Path,
+    ) -> Result<Self, UStatus> {
+        if !config_path.exists() {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!("Configuration file not found at: {:?}", config_path),
+            ));
+        }
+        Self::new_internal(
+            authority_name,
+            remote_authority_name,
+            ue_id,
+            Some(config_path),
+        )
+    }
+
+    pub fn new(
+        authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+    ) -> Result<Self, UStatus> {
+        Self::new_internal(authority_name, remote_authority_name, ue_id, None)
+    }
+
+    fn new_internal(
+        authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+        config_path: Option<&Path>,
+    ) -> Result<Self, UStatus> {
+        let inner_transport = UPTransportVsomeipInner::new(config_path);
+        let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
+
+        Ok(Self {
+            inner_transport,
+            authority_name: authority_name.to_string(),
+            remote_authority_name: remote_authority_name.to_string(),
+            ue_id,
+            point_to_point_listener: None.into(),
+            config_path,
+        })
+    }
+}
+
+// TODO: We need to ensure that we properly cleanup / unregister all message handlers
+//  and then remove the application
+// impl Drop for UPClientVsomeip {
+//     fn drop(&mut self) {
+//         // TODO: Should do this a bit more carefully, for now we will just stop all active vsomeip
+//         //  applications
+//         //  - downside of doing this drastic option is that _if_ you wanted to keep one client
+//         //    active and let another be dropped, this would put your client in a bad state
+//
+//     }
+// }
