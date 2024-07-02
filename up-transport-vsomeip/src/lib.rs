@@ -22,6 +22,7 @@ mod message_conversions;
 mod rpc_correlation;
 mod transport_inner;
 use transport_inner::UPTransportVsomeipInner;
+mod vsomeip_config;
 mod vsomeip_offered_requested;
 
 pub mod transport;
