@@ -25,7 +25,7 @@ exclude = [
 ]
 keywords = ["uProtocol", "SDK", "vsomeip", "SOMEIP"]
 license = "Apache-2.0"
-name = "up-client-vsomeip-rust"
+name = "up-transport-vsomeip"
 readme = "README.md"
 repository = "https://github.com/eclipse-uprotocol/up-client-vsomeip-rust"
 rust-version = "1.72"
@@ -38,9 +38,10 @@ rand = { version = "0.8" }
 regex = { version = "1.10" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
-up-rust = { git = "https://github.com/eclipse-uprotocol/up-rust", version = "0.1.5" }
+up-rust = { git = "https://github.com/eclipse-uprotocol/up-rust", rev = "3a50104421a801d52e1d9c68979db54c013ce43d" }
 url = { version = "2.5" }
 uuid = { version = "1.7", features = ["v8"] }
+vsomeip-sys = { path = "vsomeip-sys" }
 
 [dev-dependencies]
 test-case = { version = "3.3" }
