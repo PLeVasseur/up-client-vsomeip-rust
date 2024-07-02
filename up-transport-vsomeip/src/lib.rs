@@ -15,6 +15,7 @@ use up_rust::UUID;
 
 mod determine_message_type;
 mod rpc_correlation;
+mod vsomeip_offered_requested;
 
 pub mod transport;
 
@@ -25,3 +26,7 @@ type ClientId = u16;
 type ReqId = UUID;
 type SessionId = u16;
 type RequestId = u32;
+type EventId = u16;
+type ServiceId = u16;
+type InstanceId = u16;
+type MethodId = u16;
