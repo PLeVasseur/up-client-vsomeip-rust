@@ -64,7 +64,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
     let expanded = quote! {
 
         lazy_static! {
-            pub(crate) static ref FREE_LISTENER_IDS: RwLock<HashSet<usize>> = {
+            static ref FREE_LISTENER_IDS: RwLock<HashSet<usize>> = {
                 #free_listener_ids_init
                 RwLock::new(set)
             };

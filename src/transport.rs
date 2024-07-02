@@ -14,13 +14,12 @@
 use crate::determinations::{determine_message_type, determine_registration_type};
 use crate::listener_registry::{
     find_app_name, find_available_listener_id, free_listener_id, get_extern_fn,
-    insert_into_listener_id_map, CLIENT_ID_APP_MAPPING, FREE_LISTENER_IDS,
-    LISTENER_ID_AUTHORITY_NAME, LISTENER_ID_CLIENT_ID_MAPPING, LISTENER_ID_MAP,
-    LISTENER_ID_REMOTE_AUTHORITY_NAME, LISTENER_REGISTRY,
+    insert_into_listener_id_map, map_listener_id_to_client_id, register_listener_id_with_listener,
+    release_listener_id,
 };
 use crate::vsomeip_config::extract_applications;
 use crate::{
-    any_uuri, any_uuri_fixed_authority_id, ApplicationName, ClientId,
+    any_uuri, any_uuri_fixed_authority_id, ApplicationName,
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
 };
@@ -234,7 +233,7 @@ impl UTransport for UPTransportVsomeip {
         }
         trace!("Inserted into LISTENER_ID_MAP within transport");
 
-        Self::register_listener_id_with_listener(listener_id, listener).await?;
+        register_listener_id_with_listener(listener_id, listener).await?;
 
         let app_name = find_app_name(registration_type.client_id()).await;
         let extern_fn = get_extern_fn(listener_id);
@@ -247,7 +246,7 @@ impl UTransport for UPTransportVsomeip {
         self.initialize_vsomeip_app_as_needed(&registration_type, app_name)
             .await?;
 
-        Self::map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
+        map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
 
         let (tx, rx) = oneshot::channel();
         send_to_inner_with_status(
@@ -279,21 +278,7 @@ impl UTransport for UPTransportVsomeip {
                 .await;
         }
 
-        {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            if client_id_app_mapping
-                .get(&registration_type.client_id())
-                .is_none()
-            {
-                return Err(UStatus::fail_with_code(
-                    UCode::NOT_FOUND,
-                    format!(
-                        "There was no app_name found for client_id: {}",
-                        registration_type.client_id()
-                    ),
-                ));
-            }
-        }
+        find_app_name(registration_type.client_id()).await?;
 
         let (tx, rx) = oneshot::channel();
         send_to_inner_with_status(
@@ -304,7 +289,7 @@ impl UTransport for UPTransportVsomeip {
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let comp_listener = ComparableListener::new(listener);
-        Self::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
+        release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
 
         Ok(())
     }
@@ -356,7 +341,7 @@ impl UPTransportVsomeip {
                 trace!("{:?}", free_listener_id(listener_id).await);
                 return Ok(());
             }
-            Self::register_listener_id_with_listener(listener_id, listener).await?;
+            register_listener_id_with_listener(listener_id, listener).await?;
 
             let extern_fn = get_extern_fn(listener_id);
             let msg_handler = MessageHandlerFnPtr(extern_fn);
@@ -375,7 +360,7 @@ impl UPTransportVsomeip {
             trace!("source used when registering:\n{src:?}");
             trace!("sink used when registering:\n{sink:?}");
 
-            Self::map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
+            map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
 
             trace!(
                 "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
@@ -398,24 +383,6 @@ impl UPTransportVsomeip {
             await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
                 .await?;
         }
-        Ok(())
-    }
-
-    async fn register_listener_id_with_listener(
-        listener_id: usize,
-        listener: Arc<dyn UListener>,
-    ) -> Result<(), UStatus> {
-        LISTENER_REGISTRY
-            .write()
-            .await
-            .insert(listener_id, listener.clone())
-            .map(|_| {
-                Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Unable to register the same listener_id and listener twice",
-                ))
-            })
-            .unwrap_or(Ok(()))?;
         Ok(())
     }
 
@@ -478,9 +445,9 @@ impl UPTransportVsomeip {
                 return Err(free_listener_id(listener_id).await);
             }
 
-            Self::register_listener_id_with_listener(listener_id, listener.clone()).await?;
+            register_listener_id_with_listener(listener_id, listener.clone()).await?;
 
-            Self::map_listener_id_to_client_id(app_config.id, listener_id).await?;
+            map_listener_id_to_client_id(app_config.id, listener_id).await?;
 
             let extern_fn = get_extern_fn(listener_id);
             let msg_handler = MessageHandlerFnPtr(extern_fn);
@@ -543,95 +510,8 @@ impl UPTransportVsomeip {
 
             trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
 
-            Self::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
+            release_listener_id(&src, &Some(&sink), &comp_listener).await?;
         }
-        Ok(())
-    }
-
-    async fn release_listener_id(
-        source_filter: &UUri,
-        sink_filter: &Option<&UUri>,
-        comp_listener: &ComparableListener,
-    ) -> Result<(), UStatus> {
-        let listener_id = {
-            let mut id_map = LISTENER_ID_MAP.write().await;
-            if let Some(&id) = id_map.get(&(
-                source_filter.clone(),
-                sink_filter.cloned(),
-                comp_listener.clone(),
-            )) {
-                id_map.remove(&(
-                    source_filter.clone(),
-                    sink_filter.cloned(),
-                    comp_listener.clone(),
-                ));
-                id
-            } else {
-                return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Listener not found",
-                ));
-            }
-        };
-
-        let _client_id = {
-            let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
-
-            trace!(
-                "checking listener_id_authority_name: {:?}",
-                *listener_id_authority_name
-            );
-
-            listener_id_authority_name
-                .remove(&listener_id)
-                .ok_or_else(|| {
-                    UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!("Unable to locate authority_name for listener_id: {listener_id}"),
-                    )
-                })?;
-
-            let mut listener_id_remote_authority_name =
-                LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
-
-            listener_id_remote_authority_name
-                .remove(&listener_id)
-                .ok_or_else(|| {
-                    UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!(
-                            "Unable to locate remote_authority_name for listener_id: {listener_id}"
-                        ),
-                    )
-                })?;
-
-            let mut registry = LISTENER_REGISTRY.write().await;
-            registry.remove(&listener_id).ok_or_else(|| {
-                UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    format!("Unable to locate UListener for listener_id: {listener_id}"),
-                )
-            })?;
-
-            let mut free_ids = FREE_LISTENER_IDS.write().await;
-            free_ids.insert(listener_id).then_some(()).ok_or_else(|| {
-                UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to re-insert listener_id back into free listeners, listener_id: {listener_id}"))
-            })?;
-
-            let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
-            listener_client_id_mapping.remove(&listener_id).ok_or_else(|| {
-                UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to locate client_id (i.e. for app) for listener_id: {listener_id}"))
-            })?
-        };
-
-        // TODO: If we're going to remove the client_id -> app_name mapping we should only do so if
-        //  there are no other users of this client_id
-        //  Would also imply that we should close down the vsomeip application
-        // {
-        //     let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-        //     client_id_app_mapping.remove(&registration_type.client_id());
-        // }
-
         Ok(())
     }
 
@@ -681,18 +561,5 @@ impl UPTransportVsomeip {
                 Ok(app_name.unwrap())
             }
         }
-    }
-
-    async fn map_listener_id_to_client_id(
-        client_id: ClientId,
-        listener_id: usize,
-    ) -> Result<(), UStatus> {
-        let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
-        listener_client_id_mapping.insert(listener_id, client_id).map(|_| Err(UStatus::fail_with_code(
-            UCode::INTERNAL,
-            format!("Unable to have the same listener_id with a different client_id, i.e. tied to app: listener_id: {} client_id: {}", listener_id, client_id),
-        )))
-            .unwrap_or(Ok(()))?;
-        Ok(())
     }
 }

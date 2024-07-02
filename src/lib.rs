@@ -46,7 +46,7 @@ use listener_registry::find_app_name;
 mod rpc_correlation;
 mod vsomeip_config;
 
-use listener_registry::CLIENT_ID_APP_MAPPING;
+use crate::listener_registry::add_client_id_app_name;
 
 const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeip";
 const UP_CLIENT_VSOMEIP_FN_TAG_NEW_INTERNAL: &str = "new_internal";
@@ -475,22 +475,8 @@ impl UPTransportVsomeip {
                         continue;
                     }
 
-                    let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        client_id_app_mapping.entry(client_id)
-                    {
-                        e.insert(app_name.clone());
-                        trace!(
-                            "Inserted client_id: {} and app_name: {} into CLIENT_ID_APP_MAPPING",
-                            client_id,
-                            app_name
-                        );
-                        Self::return_oneshot_result(Ok(()), return_channel).await;
-                    } else {
-                        let err_msg = format!("Already had key. Somehow we already had an application running for client_id: {}", client_id);
-                        let err = UStatus::fail_with_code(UCode::ALREADY_EXISTS, err_msg);
-                        Self::return_oneshot_result(Err(err), return_channel).await;
-                    }
+                    let add_res = add_client_id_app_name(client_id, &app_name).await;
+                    Self::return_oneshot_result(add_res, return_channel).await;
                 }
             }
             trace!("Hit bottom of event loop");
@@ -860,12 +846,9 @@ impl UPTransportVsomeip {
             client_id,
             app_name
         );
-        let existing_app = {
-            let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-            client_id_app_mapping.contains_key(&client_id)
-        };
+        let found_app_res = find_app_name(client_id).await;
 
-        if existing_app {
+        if found_app_res.is_ok() {
             let err = UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
                 format!(
