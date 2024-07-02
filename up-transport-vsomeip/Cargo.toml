@@ -26,6 +26,7 @@ readme = "README.md"
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
+cxx = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
@@ -36,6 +37,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 vsomeip-sys = { workspace = true }
 lazy_static = { workspace = true }
+protobuf = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
 

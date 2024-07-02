@@ -14,6 +14,7 @@
 use up_rust::{UUri, UUID};
 
 mod determine_message_type;
+mod message_conversions;
 mod rpc_correlation;
 mod vsomeip_offered_requested;
 

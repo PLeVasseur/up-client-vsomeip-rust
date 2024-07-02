@@ -39,6 +39,7 @@ version = "0.1.0"
 [workspace.dependencies]
 async-trait = { version = "0.1" }
 bytes = { version = "1.5" }
+cxx = { version = "1.0" }
 rand = { version = "0.8" }
 regex = { version = "1.10" }
 serde = { version = "1.0", features = ["derive"] }
@@ -49,6 +50,7 @@ url = { version = "2.5" }
 uuid = { version = "1.7", features = ["v8"] }
 vsomeip-sys = { path = "vsomeip-sys" }
 lazy_static = "1.4.0"
+protobuf = "3.4.0"
 env_logger = "0.11.3"
 log = { version = "0.4.21", features = [] }
 
