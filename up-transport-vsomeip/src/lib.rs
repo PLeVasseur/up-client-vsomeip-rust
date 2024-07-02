@@ -14,6 +14,7 @@
 use up_rust::{UUri, UUID};
 
 mod determine_message_type;
+mod listener_registry;
 mod message_conversions;
 mod rpc_correlation;
 mod vsomeip_offered_requested;
@@ -65,6 +66,7 @@ pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> R
 
 pub struct UPClientVsomeip {}
 
+type ApplicationName = String;
 type AuthorityName = String;
 type UeId = u16;
 type ClientId = u16;

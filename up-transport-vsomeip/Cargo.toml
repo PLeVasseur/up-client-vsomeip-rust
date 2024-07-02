@@ -35,11 +35,13 @@ tokio = { workspace = true }
 up-rust = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+vsomeip-proc-macro = { workspace = true }
 vsomeip-sys = { workspace = true }
 lazy_static = { workspace = true }
 protobuf = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
+once_cell = { workspace = true }
 
 [dev-dependencies]
 test-case = { version = "3.3" }
