@@ -11,8 +11,14 @@
 # SPDX-License-Identifier: Apache-2.0
 ################################################################################
 
-[package]
-author = "Eclipse Foundation uProtocol project"
+[workspace]
+resolver = "2"
+members = [
+    "up-transport-vsomeip",
+    "vsomeip-sys",
+]
+
+[workspace.package]
 documentation = "https://github.com/eclipse-uprotocol/up-spec#readme"
 edition = "2021"
 exclude = [
@@ -25,13 +31,12 @@ exclude = [
 ]
 keywords = ["uProtocol", "SDK", "vsomeip", "SOMEIP"]
 license = "Apache-2.0"
-name = "up-transport-vsomeip"
 readme = "README.md"
-repository = "https://github.com/eclipse-uprotocol/up-client-vsomeip-rust"
-rust-version = "1.72"
+repository = "https://github.com/eclipse-uprotocol/up-transport-vsomeip-rust"
+rust-version = "1.74"
 version = "0.1.0"
 
-[dependencies]
+[workspace.dependencies]
 async-trait = { version = "0.1" }
 bytes = { version = "1.5" }
 rand = { version = "0.8" }
@@ -43,5 +48,5 @@ url = { version = "2.5" }
 uuid = { version = "1.7", features = ["v8"] }
 vsomeip-sys = { path = "vsomeip-sys" }
 
-[dev-dependencies]
+[workspace.dev-dependencies]
 test-case = { version = "3.3" }

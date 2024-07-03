@@ -14,8 +14,10 @@
 use decompress::ExtractOptsBuilder;
 use reqwest::blocking::Client;
 use std::error::Error;
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 use std::{env, fs};
 
@@ -104,32 +106,100 @@ fn main() -> miette::Result<()> {
         .join("autocxx-build-dir")
         .join("rs")
         .join("autocxx-ffi-default-gen.rs");
-    if let Ok(mut contents) = fs::read_to_string(&file_path) {
-        // Insert #[allow(unused_imports)] for specific lines
-        contents = contents.replace(
-            "pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;",
-            "#[allow(unused_imports)]  pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;"
-        );
+    println!("cargo:warning=# file_path : {}", file_path.display());
 
-        contents = contents.replace(
-            "pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;",
-            "#[allow(unused_imports)]  pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;"
-        );
-
-        // Removing pub from an unsafe function we never use to suppress warning
-        contents = contents.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
-
-        // Rewriting a doc comment translated from C++ to not use [] link syntax
-        contents = contents.replace("successfully [de]registered", "successfully de/registered");
-
-        // Adding a derived Debug for the message_type_e enum
-        contents = contents.replace(
-            "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
-              "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
-        );
-
-        fs::write(&file_path, contents).expect("Unable to write file");
+    if !file_path.exists() {
+        panic!("Unable to find autocxx generated code to rewrite");
     }
+
+    // Run rustfmt on the file
+    let status = Command::new("rustfmt")
+        .arg(&file_path)
+        .status()
+        .expect("Failed to execute rustfmt");
+
+    if !status.success() {
+        panic!("Failed to format autocxx generated file");
+    }
+
+    // Open the input file for reading
+    let input_file = File::open(&file_path).expect("Failed to open the input file for reading");
+    let reader = BufReader::new(input_file);
+
+    // Create a temporary file for writing the modified content
+    let temp_file_path = file_path.with_extension("tmp");
+    let temp_file =
+        File::create(&temp_file_path).expect("Failed to create a temporary file for writing");
+    let mut writer = BufWriter::new(temp_file);
+
+    for line in reader.lines() {
+        let mut line = line.expect("Failed to read a line from the input file");
+        line = line.replace(
+            "pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
+            "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete"
+        );
+        line = line.replace(
+            "pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;",
+            "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;"
+        );
+        line = line.replace(
+            "pub use super::super::bindgen::root::std::chrono::seconds;",
+            "",
+        );
+        line = line.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
+        line = line.replace("successfully [de]registered", "successfully de/registered");
+        line = line.replace(
+            "#[derive(Clone, Hash, PartialEq, Eq)]",
+            "#[derive(Clone, Hash, PartialEq, Eq, Debug)]",
+        );
+        line = line.replace(
+            "pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);",
+            "pub(crate) unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);"
+        );
+        // line = line.replace(
+        //     "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
+        //     "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
+        // );
+        writeln!(writer, "{}", line).expect("Failed to write a line to the temporary file");
+    }
+
+    writer.flush().expect("Failed to flush the writer buffer");
+    fs::rename(temp_file_path, file_path)
+        .expect("Failed to rename the temporary file to the original file");
+
+    // let input_file = File::open(&file_path).expect("Unable to find autocxx generated file");
+    // let reader = BufReader::new(input_file);
+    // let mut modified_lines = Vec::new();
+    //
+    // for line in reader.lines() {
+    //     let mut line = line.expect("Unable to read line");
+    //     line = line.replace(
+    //         "pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;",
+    //         "#[allow(unused_imports)] pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;"
+    //     );
+    //     line = line.replace(
+    //         "pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;",
+    //         "#[allow(unused_imports)] pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;"
+    //     );
+    //     line = line.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
+    //     line = line.replace("successfully [de]registered", "successfully de/registered");
+    //     line = line.replace(
+    //         "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
+    //         "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
+    //     );
+    //     modified_lines.push(line);
+    // }
+    //
+    // let output_file = File::create(&file_path).expect("Unable to write out autocxx modified file");
+    // let mut writer = BufWriter::new(output_file);
+    //
+    // for line in modified_lines {
+    //     writeln!(writer, "{}", line).expect("Unable to write line");
+    // }
+    //
+    // writer.flush().expect("Unable to flush writer for file");
+
+    println!("cargo:warning=# rewrote the autocxx file");
 
     Ok(())
 }

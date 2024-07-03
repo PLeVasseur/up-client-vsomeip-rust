@@ -48,7 +48,7 @@ unsafe impl ExternType for MessageHandlerFnPtr {
     type Kind = cxx::kind::Trivial;
 }
 
-/// A Rust wrapper around the extern "C" fn used when registering a [subscription_status_handler_t](vsomeip::subscription_status_handler_t)
+/// A Rust wrapper around the extern "C" fn used when registering a [subscription_status_handler_t](crate::vsomeip::subscription_status_handler_t)
 ///
 /// # Rationale
 ///

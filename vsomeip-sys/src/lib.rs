@@ -27,6 +27,7 @@ include_cpp! {
     generate!("vsomeip_v3::application")
     generate!("vsomeip_v3::message_base")
     generate!("vsomeip_v3::message_t")
+    generate!("vsomeip_v3::subscription_status_handler_t")
     generate!("vsomeip_v3::ANY_MAJOR")
     generate!("vsomeip_v3::ANY_MINOR")
     generate!("vsomeip_v3::ANY_INSTANCE")

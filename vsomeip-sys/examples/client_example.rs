@@ -72,7 +72,7 @@ fn main() {
         let payload_string = "Hello, vsomeip!";
         let payload_data = payload_string.as_bytes();
 
-        set_data_safe(get_pinned_payload(&payload_wrapper), &payload_data);
+        set_data_safe(get_pinned_payload(&payload_wrapper), payload_data);
         set_message_payload(&mut request, &mut payload_wrapper);
 
         let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();

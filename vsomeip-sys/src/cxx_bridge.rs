@@ -143,7 +143,8 @@ mod autocxx_failed {
         /// # Safety
         ///
         /// We are simply creating a binding here for one that autocxx failed to generate
-        pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);
+        #[allow(clippy::missing_safety_doc)]
+        pub(crate) unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);
 
         pub fn get_data(self: &payload) -> *const u8;
 
