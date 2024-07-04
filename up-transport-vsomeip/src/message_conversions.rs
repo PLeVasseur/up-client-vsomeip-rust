@@ -187,7 +187,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             // TODO: Remove -- For debugging
             if log_enabled!(Trace) {
                 let vsomeip_payload_read = get_message_payload(&mut vsomeip_msg);
-                let payload_bytes = get_data_safe(&*vsomeip_payload_read);
+                let payload_bytes = get_data_safe(&vsomeip_payload_read);
                 trace!("After setting vsomeip payload and retrieving, it is: {payload_bytes:?}");
             }
 
@@ -239,7 +239,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 req_id.to_hyphenated_string()
             );
 
-            let request_id = remove_me_request_correlation(&req_id).await?;
+            let request_id = remove_me_request_correlation(req_id).await?;
 
             trace!(
                 "{} - Found correlated request_id: {}",
