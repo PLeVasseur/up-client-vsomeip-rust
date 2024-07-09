@@ -14,7 +14,7 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::registry::{get_extern_fn, Registry};
+use crate::registry::{get_extern_fn, CloseVsomeipApp, Registry};
 use crate::transport_inner::TransportCommand;
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
@@ -288,7 +288,13 @@ impl UTransport for UPTransportVsomeip {
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let comp_listener = ComparableListener::new(listener);
-        Registry::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
+        let close_vsomeip_app =
+            Registry::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
+
+        if let CloseVsomeipApp::True(client_id) = close_vsomeip_app {
+            trace!("No more remaining listeners for client_id: {client_id}")
+            // TODO: implement sending new TransportCommand to shut down vsomeip app
+        }
 
         Ok(())
     }
@@ -516,7 +522,13 @@ impl UPTransportVsomeip {
 
             trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
 
-            Registry::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
+            let close_vsomeip_app =
+                Registry::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
+
+            if let CloseVsomeipApp::True(client_id) = close_vsomeip_app {
+                trace!("No more remaining listeners for client_id: {client_id}")
+                // TODO: implement sending new TransportCommand to shut down vsomeip app
+            }
         }
         Ok(())
     }

@@ -53,8 +53,6 @@ generate_message_handler_extern_c_fns!(10000);
 
 type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
 lazy_static! {
-    static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
-        RwLock::new(HashMap::new());
     static ref LISTENER_ID_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
         RwLock::new(HashMap::new());
     static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
@@ -62,8 +60,17 @@ lazy_static! {
     static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
         RwLock::new(HashMap::new());
     static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
+    static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
+        RwLock::new(HashMap::new());
+    static ref CLIENT_ID_TO_LISTENER_ID_MAPPING: RwLock<HashMap<ClientId, HashSet<usize>>> =
+        RwLock::new(HashMap::new());
     static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
         RwLock::new(HashMap::new());
+}
+
+pub(crate) enum CloseVsomeipApp {
+    False,
+    True(ClientId),
 }
 
 pub(crate) struct Registry;
@@ -92,9 +99,12 @@ impl Registry {
             listener_id
         );
 
-        // TODO: Should ensure that we don't record a partial transaction by rolling back any pieces which succeeded if a latter part fails
+        // TODO: Should write unit tests to ensure that we don't record a partial transaction by rolling back any pieces which succeeded if a latter part fails
 
         let mut id_map = LISTENER_ID_MAP.write().await;
+        let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+        let mut listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+
         if id_map.insert(key.clone(), listener_id).is_some() {
             let msg = format!("Not inserted into LISTENER_ID_MAP since we already have registered for this Request: key-uuri: {:?} key-option-uuri: {:?} listener_id: {}",
                               key.0, key.1, listener_id);
@@ -103,8 +113,6 @@ impl Registry {
         } else {
             trace!("Inserted into LISTENER_ID_MAP");
         }
-
-        let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
 
         trace!(
             "checking listener_id_authority_name: {:?}",
@@ -117,18 +125,26 @@ impl Registry {
         {
             let msg = "Not inserted into LISTENER_ID_AUTHORITY_NAME since we already have registered for this Request";
             trace!("{msg}");
+
+            // if we fail here we should roll-back the insertion into id_map
+            id_map.remove(&key);
+
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, msg));
         } else {
             trace!("Inserted into LISTENER_ID_AUTHORITY_NAME");
         }
 
-        let mut listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
         if listener_id_remote_authority_name
             .insert(listener_id, remote_authority_name.to_string())
             .is_some()
         {
             let msg = "Not inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME since we already have registered for this Request";
             trace!("{msg}");
+
+            // if we fail here we should roll-back the insertion into id_map and listener_id_authority_name
+            id_map.remove(&key);
+            listener_id_authority_name.remove(&listener_id);
+
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, msg));
         } else {
             trace!("Inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME");
@@ -155,7 +171,7 @@ impl Registry {
         source_filter: &UUri,
         sink_filter: &Option<&UUri>,
         comp_listener: &ComparableListener,
-    ) -> Result<(), UStatus> {
+    ) -> Result<CloseVsomeipApp, UStatus> {
         let listener_id = {
             let mut id_map = LISTENER_ID_MAP.write().await;
             if let Some(&id) = id_map.get(&(
@@ -177,72 +193,113 @@ impl Registry {
             }
         };
 
-        let _client_id = {
+        let (maybe_client_id, errs) = {
+            let mut errs = Vec::new();
+
             let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
+            let mut listener_id_remote_authority_name =
+                LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+            let mut listener_registry = LISTENER_REGISTRY.write().await;
+            let mut free_ids = FREE_LISTENER_IDS.write().await;
 
             trace!(
                 "checking listener_id_authority_name: {:?}",
                 *listener_id_authority_name
             );
 
-            listener_id_authority_name
-                .remove(&listener_id)
-                .ok_or_else(|| {
-                    UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!("Unable to locate authority_name for listener_id: {listener_id}"),
-                    )
-                })?;
+            let removal_result = listener_id_authority_name.remove(&listener_id);
+            if removal_result.is_none() {
+                errs.push(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!("Unable to locate authority_name for listener_id: {listener_id}"),
+                ));
+            }
 
-            let mut listener_id_remote_authority_name =
-                LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+            let removal_result = listener_id_remote_authority_name.remove(&listener_id);
+            if removal_result.is_none() {
+                errs.push(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!(
+                        "Unable to locate remote_authority_name for listener_id: {listener_id}"
+                    ),
+                ))
+            }
 
-            listener_id_remote_authority_name
-                .remove(&listener_id)
-                .ok_or_else(|| {
-                    UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!(
-                            "Unable to locate remote_authority_name for listener_id: {listener_id}"
-                        ),
-                    )
-                })?;
-
-            let mut registry = LISTENER_REGISTRY.write().await;
-            registry.remove(&listener_id).ok_or_else(|| {
-                UStatus::fail_with_code(
+            let removal_result = listener_registry.remove(&listener_id);
+            if removal_result.is_none() {
+                errs.push(UStatus::fail_with_code(
                     UCode::INTERNAL,
                     format!("Unable to locate UListener for listener_id: {listener_id}"),
-                )
-            })?;
+                ));
+            }
 
-            let mut free_ids = FREE_LISTENER_IDS.write().await;
-            free_ids.insert(listener_id).then_some(()).ok_or_else(|| {
-                UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to re-insert listener_id back into free listeners, listener_id: {listener_id}"))
-            })?;
+            let insertion_success = free_ids.insert(listener_id);
+            if insertion_success {
+                errs.push(
+                    UStatus::fail_with_code(UCode::INTERNAL, format!("Unable to re-insert listener_id back into free listeners, listener_id: {listener_id}"))
+                );
+            }
 
             let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
-            listener_client_id_mapping
-                .remove(&listener_id)
-                .ok_or_else(|| {
-                    UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!(
-                            "Unable to locate client_id (i.e. for app) for listener_id: {listener_id}"
-                        ),
-                    )
-                })?
+            let client_id_result = listener_client_id_mapping.remove(&listener_id);
+
+            if client_id_result.is_none() {
+                errs.push(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!(
+                        "Unable to locate client_id (i.e. for app) for listener_id: {listener_id}"
+                    ),
+                ));
+            }
+
+            (client_id_result, errs)
         };
 
-        // TODO: If we're going to remove the client_id -> app_name mapping we should only do so if
-        //  there are no other users of this client_id
-        //  Would also imply that we should close down the vsomeip application
-        // {
-        //     let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
-        //     client_id_app_mapping.remove(&registration_type.client_id());
-        // }
+        let concat_errs = {
+            let err_msgs = {
+                let mut err_msgs = String::new();
 
-        Ok(())
+                if !errs.is_empty() {
+                    for err in errs {
+                        err_msgs.push_str(&*err.message.unwrap());
+                    }
+                }
+
+                err_msgs
+            };
+
+            UStatus::fail_with_code(UCode::INTERNAL, err_msgs)
+        };
+
+        let Some(client_id) = maybe_client_id else {
+            return Err(concat_errs);
+        };
+
+        let mut client_id_to_listener_ids = CLIENT_ID_TO_LISTENER_ID_MAPPING.write().await;
+        if !client_id_to_listener_ids.contains_key(&client_id) {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!("Unable to find any listener_ids for client_id: {client_id}"),
+            ));
+        }
+
+        client_id_to_listener_ids
+            .entry(client_id)
+            .and_modify(|listener_ids| {
+                listener_ids.remove(&listener_id);
+            });
+
+        if client_id_to_listener_ids
+            .entry(client_id)
+            .or_default()
+            .is_empty()
+        {
+            // TODO: Need to properly shut down vsomeip app in transport
+            client_id_to_listener_ids.remove(&client_id);
+            return Ok(CloseVsomeipApp::True(client_id));
+        }
+
+        Ok(CloseVsomeipApp::False)
     }
 
     pub(crate) async fn register_listener_id_with_listener(
@@ -267,12 +324,43 @@ impl Registry {
         client_id: ClientId,
         listener_id: usize,
     ) -> Result<(), UStatus> {
+        let mut errs = Vec::new();
+
         let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.write().await;
-        listener_client_id_mapping.insert(listener_id, client_id).map(|_| Err(UStatus::fail_with_code(
-            UCode::INTERNAL,
-            format!("Unable to have the same listener_id with a different client_id, i.e. tied to app: listener_id: {} client_id: {}", listener_id, client_id),
-        )))
-            .unwrap_or(Ok(()))?;
+        let mut client_id_to_listener_id_mapping = CLIENT_ID_TO_LISTENER_ID_MAPPING.write().await;
+
+        let insertion_result = listener_client_id_mapping.insert(listener_id, client_id);
+        if insertion_result.is_some() {
+            errs.push(
+                UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!("Unable to have the same listener_id with a different client_id, i.e. tied to app: listener_id: {} client_id: {}", listener_id, client_id),
+                )
+            );
+        }
+
+        if !client_id_to_listener_id_mapping.contains_key(&client_id) {
+            client_id_to_listener_id_mapping.insert(client_id.clone(), HashSet::new());
+        }
+
+        client_id_to_listener_id_mapping.entry(client_id).and_modify(|listener_ids| {
+            let already_exists = !listener_ids.insert(listener_id);
+            if already_exists {
+                errs.push(
+                    UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("There already exists a listener_id under this client_id. listener_id: {} client_id: {}", listener_id, client_id))
+                );
+            }
+        });
+
+        if !errs.is_empty() {
+            let mut err_msgs = String::new();
+            for err in errs {
+                err_msgs.push_str(&*err.message.unwrap());
+            }
+
+            return Err(UStatus::fail_with_code(UCode::INTERNAL, err_msgs));
+        }
+
         Ok(())
     }
 
