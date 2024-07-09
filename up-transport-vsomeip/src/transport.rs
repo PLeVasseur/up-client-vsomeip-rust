@@ -14,11 +14,7 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::listener_registry::{
-    find_app_name, find_available_listener_id, free_listener_id, get_extern_fn,
-    insert_into_listener_id_map, map_listener_id_to_client_id, register_listener_id_with_listener,
-    release_listener_id,
-};
+use crate::registry::{get_extern_fn, Registry};
 use crate::transport_inner::TransportCommand;
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
@@ -30,6 +26,7 @@ use crate::UPTransportVsomeip;
 use crate::{any_uuri, any_uuri_fixed_authority_id, ApplicationName};
 use async_trait::async_trait;
 use log::{error, trace, warn};
+use protobuf::EnumOrUnknown;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -171,7 +168,7 @@ impl UTransport for UPTransportVsomeip {
 
         let message_type = determine_send_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
-        let app_name = find_app_name(message_type.client_id()).await;
+        let app_name = Registry::find_app_name(message_type.client_id()).await;
         trace!("app_name: {app_name:?}");
 
         self.initialize_vsomeip_app_as_needed(&message_type, app_name)
@@ -215,14 +212,14 @@ impl UTransport for UPTransportVsomeip {
             return self.register_point_to_point_listener(&listener).await;
         }
 
-        let listener_id = find_available_listener_id().await?;
+        let listener_id = Registry::find_available_listener_id().await?;
 
         trace!("Obtained listener_id: {}", listener_id);
 
         let comp_listener = ComparableListener::new(listener.clone());
         let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
 
-        if !insert_into_listener_id_map(
+        if let Err(err) = Registry::insert_into_listener_id_map(
             &self.authority_name,
             &self.remote_authority_name,
             key,
@@ -230,13 +227,14 @@ impl UTransport for UPTransportVsomeip {
         )
         .await
         {
-            return Err(free_listener_id(listener_id).await);
+            error!("{err:?}");
+            return Err(Registry::free_listener_id(listener_id).await);
         }
         trace!("Inserted into LISTENER_ID_MAP within transport");
 
-        register_listener_id_with_listener(listener_id, listener).await?;
+        Registry::register_listener_id_with_listener(listener_id, listener).await?;
 
-        let app_name = find_app_name(registration_type.client_id()).await;
+        let app_name = Registry::find_app_name(registration_type.client_id()).await;
         let extern_fn = get_extern_fn(listener_id);
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let src = source_filter.clone();
@@ -247,7 +245,7 @@ impl UTransport for UPTransportVsomeip {
         self.initialize_vsomeip_app_as_needed(&registration_type, app_name)
             .await?;
 
-        map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
+        Registry::map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
 
         let (tx, rx) = oneshot::channel();
         send_to_inner_with_status(
@@ -279,7 +277,7 @@ impl UTransport for UPTransportVsomeip {
                 .await;
         }
 
-        find_app_name(registration_type.client_id()).await?;
+        Registry::find_app_name(registration_type.client_id()).await?;
 
         let (tx, rx) = oneshot::channel();
         send_to_inner_with_status(
@@ -290,7 +288,7 @@ impl UTransport for UPTransportVsomeip {
         await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
 
         let comp_listener = ComparableListener::new(listener);
-        release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
+        Registry::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
 
         Ok(())
     }
@@ -314,77 +312,83 @@ impl UPTransportVsomeip {
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
         message_type: RegistrationType,
-    ) -> Result<(), UStatus> {
+    ) -> Result<bool, UStatus> {
         let maybe_point_to_point_listener = {
             let point_to_point_listener = self.point_to_point_listener.read().await;
             (*point_to_point_listener).as_ref().cloned()
         };
 
-        if let Some(ref point_to_point_listener) = maybe_point_to_point_listener {
-            if message_type != RegistrationType::Request(message_type.client_id()) {
-                trace!("Sending non-Request when we have a point-to-point listener established");
-                return Ok(());
-            }
-            trace!("Sending a Request and we have a point-to-point listener");
+        let Some(ref point_to_point_listener) = maybe_point_to_point_listener else {
+            return Ok(false);
+        };
 
-            let listener_id = find_available_listener_id().await?;
-            let listener = point_to_point_listener.clone();
-            let comp_listener = ComparableListener::new(Arc::clone(&listener));
-            let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-            if !insert_into_listener_id_map(
-                &self.authority_name,
-                &self.remote_authority_name,
-                key,
-                listener_id,
-            )
-            .await
-            {
-                trace!("{:?}", free_listener_id(listener_id).await);
-                return Ok(());
-            }
-            register_listener_id_with_listener(listener_id, listener).await?;
-
-            let extern_fn = get_extern_fn(listener_id);
-            let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-            let Some(src) = message.attributes.sink.as_ref() else {
-                let err_msg = "Request message doesn't have a sink";
-                error!("{err_msg}");
-                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-            };
-            let Some(sink) = message.attributes.source.as_ref() else {
-                let err_msg = "Request message doesn't have a source";
-                error!("{err_msg}");
-                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-            };
-
-            trace!("source used when registering:\n{src:?}");
-            trace!("sink used when registering:\n{sink:?}");
-
-            map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
-
-            trace!(
-                "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
-                message_type.client_id()
-            );
-
-            let message_type = RegistrationType::Response(message_type.client_id());
-            let (tx, rx) = oneshot::channel();
-            send_to_inner_with_status(
-                &self.inner_transport.transport_command_sender,
-                TransportCommand::RegisterListener(
-                    src.clone(),
-                    Some(sink.clone()),
-                    message_type,
-                    msg_handler,
-                    tx,
-                ),
-            )
-            .await?;
-            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
-                .await?;
+        if message_type != RegistrationType::Request(message_type.client_id()) {
+            trace!("Sending non-Request when we have a point-to-point listener established");
+            return Ok(true);
         }
-        Ok(())
+        trace!("Sending a Request and we have a point-to-point listener");
+
+        let listener_id = Registry::find_available_listener_id().await?;
+        let listener = point_to_point_listener.clone();
+        let comp_listener = ComparableListener::new(Arc::clone(&listener));
+        let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+        if let Err(err) = Registry::insert_into_listener_id_map(
+            &self.authority_name,
+            &self.remote_authority_name,
+            key,
+            listener_id,
+        )
+        .await
+        {
+            return if err.code == EnumOrUnknown::from(UCode::ALREADY_EXISTS) {
+                Ok(true)
+            } else {
+                trace!("{:?}", Registry::free_listener_id(listener_id).await);
+                Err(err)
+            };
+        }
+        Registry::register_listener_id_with_listener(listener_id, listener).await?;
+
+        let extern_fn = get_extern_fn(listener_id);
+        let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+        let Some(src) = message.attributes.sink.as_ref() else {
+            let err_msg = "Request message doesn't have a sink";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+        };
+        let Some(sink) = message.attributes.source.as_ref() else {
+            let err_msg = "Request message doesn't have a source";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
+        };
+
+        trace!("source used when registering:\n{src:?}");
+        trace!("sink used when registering:\n{sink:?}");
+
+        Registry::map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
+
+        trace!(
+            "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
+            message_type.client_id()
+        );
+
+        let message_type = RegistrationType::Response(message_type.client_id());
+        let (tx, rx) = oneshot::channel();
+        send_to_inner_with_status(
+            &self.inner_transport.transport_command_sender,
+            TransportCommand::RegisterListener(
+                src.clone(),
+                Some(sink.clone()),
+                message_type,
+                msg_handler,
+                tx,
+            ),
+        )
+        .await?;
+        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await?;
+
+        Ok(true)
     }
 
     async fn register_point_to_point_listener(
@@ -426,7 +430,7 @@ impl UPTransportVsomeip {
             )
             .await?;
 
-            let listener_id = find_available_listener_id().await?;
+            let listener_id = Registry::find_available_listener_id().await?;
             let comp_listener = ComparableListener::new(listener.clone());
 
             let src = any_uuri();
@@ -435,7 +439,7 @@ impl UPTransportVsomeip {
             let sink = any_uuri_fixed_authority_id(&self.authority_name, app_config.id);
 
             let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
-            if !insert_into_listener_id_map(
+            if let Err(err) = Registry::insert_into_listener_id_map(
                 &self.authority_name,
                 &self.remote_authority_name,
                 key,
@@ -443,12 +447,13 @@ impl UPTransportVsomeip {
             )
             .await
             {
-                return Err(free_listener_id(listener_id).await);
+                error!("{err:?}");
+                return Err(Registry::free_listener_id(listener_id).await);
             }
 
-            register_listener_id_with_listener(listener_id, listener.clone()).await?;
+            Registry::register_listener_id_with_listener(listener_id, listener.clone()).await?;
 
-            map_listener_id_to_client_id(app_config.id, listener_id).await?;
+            Registry::map_listener_id_to_client_id(app_config.id, listener_id).await?;
 
             let extern_fn = get_extern_fn(listener_id);
             let msg_handler = MessageHandlerFnPtr(extern_fn);
@@ -511,7 +516,7 @@ impl UPTransportVsomeip {
 
             trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
 
-            release_listener_id(&src, &Some(&sink), &comp_listener).await?;
+            Registry::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
         }
         Ok(())
     }

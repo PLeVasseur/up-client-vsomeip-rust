@@ -17,8 +17,8 @@ use tokio::sync::RwLock;
 use up_rust::{UCode, UListener, UStatus, UUri, UUID};
 
 mod determine_message_type;
-mod listener_registry;
 mod message_conversions;
+mod registry;
 mod rpc_correlation;
 mod transport_inner;
 use transport_inner::UPTransportVsomeipInner;

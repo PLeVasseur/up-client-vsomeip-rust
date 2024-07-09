@@ -43,7 +43,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
         let fn_code = quote! {
             #[no_mangle]
-            pub extern "C" fn #extern_fn_name(vsomeip_msg: &SharedPtr<vsomeip::message>) {
+            extern "C" fn #extern_fn_name(vsomeip_msg: &SharedPtr<vsomeip::message>) {
                 trace!("Calling extern_fn: {}", #i);
                 call_shared_extern_fn(#i, vsomeip_msg);
             }

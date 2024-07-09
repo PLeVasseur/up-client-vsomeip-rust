@@ -12,8 +12,8 @@
  ********************************************************************************/
 
 use crate::determine_message_type::RegistrationType;
-use crate::listener_registry::{add_client_id_app_name, find_app_name};
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
+use crate::registry::Registry;
 use crate::vsomeip_offered_requested::{
     insert_event_requested, insert_service_offered, insert_service_requested, is_event_requested,
     is_service_offered, is_service_requested,
@@ -197,7 +197,7 @@ impl UPTransportVsomeipInner {
 
                     trace!("registration_type: {registration_type:?}");
 
-                    let app_name = find_app_name(registration_type.client_id()).await;
+                    let app_name = Registry::find_app_name(registration_type.client_id()).await;
 
                     let Ok(app_name) = app_name else {
                         Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
@@ -230,7 +230,7 @@ impl UPTransportVsomeipInner {
                     registration_type,
                     return_channel,
                 ) => {
-                    let app_name = find_app_name(registration_type.client_id()).await;
+                    let app_name = Registry::find_app_name(registration_type.client_id()).await;
 
                     let Ok(app_name) = app_name else {
                         Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
@@ -266,7 +266,7 @@ impl UPTransportVsomeipInner {
                         "inside TransportCommand::Send dispatch, message_type: {message_type:?}"
                     );
 
-                    let app_name = find_app_name(message_type.client_id()).await;
+                    let app_name = Registry::find_app_name(message_type.client_id()).await;
 
                     let Ok(app_name) = app_name else {
                         Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
@@ -327,7 +327,7 @@ impl UPTransportVsomeipInner {
                         continue;
                     }
 
-                    let add_res = add_client_id_app_name(client_id, &app_name).await;
+                    let add_res = Registry::add_client_id_app_name(client_id, &app_name).await;
                     Self::return_oneshot_result(add_res, return_channel).await;
                 }
             }
@@ -692,7 +692,7 @@ impl UPTransportVsomeipInner {
             client_id,
             app_name
         );
-        let found_app_res = find_app_name(client_id).await;
+        let found_app_res = Registry::find_app_name(client_id).await;
 
         if found_app_res.is_ok() {
             let err = UStatus::fail_with_code(
