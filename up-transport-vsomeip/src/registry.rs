@@ -294,7 +294,6 @@ impl Registry {
             .or_default()
             .is_empty()
         {
-            // TODO: Need to properly shut down vsomeip app in transport
             client_id_to_listener_ids.remove(&client_id);
             return Ok(CloseVsomeipApp::True(client_id));
         }

@@ -70,7 +70,12 @@ pub enum TransportCommand {
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
-    InitializeNewApp(
+    StartVsomeipApp(
+        ClientId,
+        ApplicationName,
+        oneshot::Sender<Result<(), UStatus>>,
+    ),
+    StopVsomeipApp(
         ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
@@ -298,7 +303,7 @@ impl UPTransportVsomeipInner {
                         Self::send_internal(umsg, &mut application_wrapper, &runtime_wrapper).await;
                     Self::return_oneshot_result(res, return_channel).await;
                 }
-                TransportCommand::InitializeNewApp(client_id, app_name, return_channel) => {
+                TransportCommand::StartVsomeipApp(client_id, app_name, return_channel) => {
                     trace!(
                         "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
                         UP_CLIENT_VSOMEIP_TAG,
@@ -306,7 +311,7 @@ impl UPTransportVsomeipInner {
                         client_id,
                         app_name
                     );
-                    let new_app_res = Self::initialize_new_app_internal(
+                    let new_app_res = Self::start_vsomeip_app_internal(
                         client_id,
                         app_name.clone(),
                         config_path.clone(),
@@ -329,6 +334,10 @@ impl UPTransportVsomeipInner {
 
                     let add_res = Registry::add_client_id_app_name(client_id, &app_name).await;
                     Self::return_oneshot_result(add_res, return_channel).await;
+                }
+                TransportCommand::StopVsomeipApp(client_id, app_name, return_channel) => {
+                    // TODO: Add in a function called stop_vsomeip_app_internal which will call into
+                    //  vsomeip-sys in order to stop the app
                 }
             }
             trace!("Hit bottom of event loop");
@@ -679,7 +688,7 @@ impl UPTransportVsomeipInner {
         }
     }
 
-    async fn initialize_new_app_internal(
+    async fn start_vsomeip_app_internal(
         client_id: ClientId,
         app_name: ApplicationName,
         config_path: Option<PathBuf>,

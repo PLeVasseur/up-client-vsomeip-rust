@@ -426,7 +426,7 @@ impl UPTransportVsomeip {
             let (tx, rx) = oneshot::channel();
             send_to_inner_with_status(
                 &self.inner_transport.transport_command_sender,
-                TransportCommand::InitializeNewApp(app_config.id, app_config.name.clone(), tx),
+                TransportCommand::StartVsomeipApp(app_config.id, app_config.name.clone(), tx),
             )
             .await?;
             await_internal_function(
@@ -555,7 +555,7 @@ impl UPTransportVsomeip {
                 );
                 send_to_inner_with_status(
                     &self.inner_transport.transport_command_sender,
-                    TransportCommand::InitializeNewApp(
+                    TransportCommand::StartVsomeipApp(
                         registration_type.client_id(),
                         app_name.clone(),
                         tx,
