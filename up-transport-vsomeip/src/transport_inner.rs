@@ -14,10 +14,7 @@
 use crate::determine_message_type::RegistrationType;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 use crate::registry::Registry;
-use crate::vsomeip_offered_requested::{
-    insert_event_requested, insert_service_offered, insert_service_requested, is_event_requested,
-    is_service_offered, is_service_requested,
-};
+use crate::vsomeip_offered_requested::VsomeipOfferedRequested;
 use crate::{split_u32_to_u16, ApplicationName, ClientId};
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace};
@@ -398,7 +395,9 @@ impl UPTransportVsomeipInner {
                     event_id
                 );
 
-                if !is_event_requested(service_id, instance_id, event_id).await {
+                if !VsomeipOfferedRequested::is_event_requested(service_id, instance_id, event_id)
+                    .await
+                {
                     get_pinned_application(application_wrapper).request_service(
                         service_id,
                         instance_id,
@@ -419,7 +418,12 @@ impl UPTransportVsomeipInner {
                         ANY_MAJOR,
                         event_id,
                     );
-                    insert_event_requested(service_id, instance_id, event_id).await;
+                    VsomeipOfferedRequested::insert_event_requested(
+                        service_id,
+                        instance_id,
+                        event_id,
+                    )
+                    .await;
                 }
 
                 register_message_handler_fn_ptr_safe(
@@ -467,14 +471,21 @@ impl UPTransportVsomeipInner {
                     method_id
                 );
 
-                if !is_service_offered(service_id, instance_id, method_id).await {
+                if !VsomeipOfferedRequested::is_service_offered(service_id, instance_id, method_id)
+                    .await
+                {
                     get_pinned_application(application_wrapper).offer_service(
                         service_id,
                         instance_id,
                         ANY_MAJOR,
                         ANY_MINOR,
                     );
-                    insert_service_offered(service_id, instance_id, method_id).await;
+                    VsomeipOfferedRequested::insert_service_offered(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    )
+                    .await;
                 }
 
                 register_message_handler_fn_ptr_safe(
@@ -504,14 +515,25 @@ impl UPTransportVsomeipInner {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                if !is_service_requested(service_id, instance_id, method_id).await {
+                if !VsomeipOfferedRequested::is_service_requested(
+                    service_id,
+                    instance_id,
+                    method_id,
+                )
+                .await
+                {
                     get_pinned_application(application_wrapper).request_service(
                         service_id,
                         instance_id,
                         ANY_MAJOR,
                         ANY_MINOR,
                     );
-                    insert_service_requested(service_id, instance_id, method_id).await;
+                    VsomeipOfferedRequested::insert_service_requested(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    )
+                    .await;
                 }
 
                 trace!(

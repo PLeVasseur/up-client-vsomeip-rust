@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 use crate::rpc_correlation::RpcCorrelation;
-use crate::vsomeip_offered_requested::{insert_event_offered, is_event_offered};
+use crate::vsomeip_offered_requested::VsomeipOfferedRequested;
 use crate::{create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName};
 use cxx::UniquePtr;
 use log::Level::Trace;
@@ -86,7 +86,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
 
             // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
             //  the UPClientVsomeip?
-            if !is_event_offered(service_id, instance_id, event_id).await {
+            if !VsomeipOfferedRequested::is_event_offered(service_id, instance_id, event_id).await {
                 get_pinned_application(application_wrapper).offer_service(
                     service_id,
                     instance_id,
@@ -102,7 +102,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                     event_id,
                 );
                 tokio::time::sleep(Duration::from_nanos(1)).await;
-                insert_event_offered(service_id, instance_id, event_id).await;
+                VsomeipOfferedRequested::insert_event_offered(service_id, instance_id, event_id)
+                    .await;
             }
 
             trace!("Immediately after request_service");
