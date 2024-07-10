@@ -11,9 +11,12 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use futures::executor;
+use log::error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::runtime::Handle;
+use tokio::sync::{oneshot, RwLock};
 use up_rust::{UCode, UListener, UStatus, UUri, UUID};
 
 mod determine_message_type;
@@ -131,8 +134,14 @@ impl UPTransportVsomeip {
         let inner_transport = UPTransportVsomeipInner::new(config_path);
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
+        let instance_id = uuid::Uuid::new_v4();
+        error!(
+            "Creating UPTransportVsomeip instance with instance_id: {}",
+            instance_id.hyphenated().to_string()
+        );
+
         Ok(Self {
-            instance_id: uuid::Uuid::new_v4(),
+            instance_id,
             inner_transport,
             authority_name: authority_name.to_string(),
             remote_authority_name: remote_authority_name.to_string(),
@@ -140,5 +149,31 @@ impl UPTransportVsomeip {
             point_to_point_listener: None.into(),
             config_path,
         })
+    }
+
+    pub fn delete_registry_items(&self) {
+        let instance_id = self.instance_id.clone();
+        error!(
+            "dropping UPTransportVsomeip with instance_id: {}",
+            instance_id.hyphenated().to_string()
+        );
+        let transport_command_sender = self.inner_transport.transport_command_sender.clone();
+
+        // Create a oneshot channel to wait for task completion
+        let (tx, rx) = oneshot::channel();
+
+        // Get the handle of the current runtime
+        let handle = Handle::current();
+
+        std::thread::spawn(move || {
+            handle.block_on(async move {
+                Self::delete_registry_items_internal(instance_id, transport_command_sender).await;
+                // Notify that the task is complete
+                let _ = tx.send(());
+            });
+        });
+
+        // Wait for the task to complete
+        let _ = executor::block_on(rx);
     }
 }

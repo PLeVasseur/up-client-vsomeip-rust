@@ -22,8 +22,8 @@ use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
 };
 use crate::vsomeip_config::extract_applications;
-use crate::UPTransportVsomeip;
 use crate::{any_uuri, any_uuri_fixed_authority_id, ApplicationName};
+use crate::{InstanceId, UPTransportVsomeip};
 use async_trait::async_trait;
 use futures::executor;
 use log::{error, trace, warn};
@@ -32,6 +32,7 @@ use protobuf::EnumOrUnknown;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::{Handle, Runtime};
+use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use up_rust::{
@@ -629,6 +630,114 @@ impl UPTransportVsomeip {
             }
         }
     }
+
+    pub(crate) async fn delete_registry_items_internal(
+        instance_id: uuid::Uuid,
+        transport_command_sender: Sender<TransportCommand>,
+    ) {
+        let instance_listener_ids = Registry::get_instance_listener_ids(instance_id).await;
+
+        for listener_id in instance_listener_ids {
+            error!("investigating listener_id: {listener_id}");
+
+            let Some(listener_configuration) =
+                Registry::get_listener_configuration(listener_id).await
+            else {
+                error!("Unable to find listener_configuration for listener_id: {listener_id}");
+                continue;
+            };
+            error!(
+                "found listener_configuration: src: {:?} sink: {:?}",
+                listener_configuration.0, listener_configuration.1
+            );
+            let src = listener_configuration.0;
+            let sink = listener_configuration.1;
+            let comp_listener = listener_configuration.2;
+
+            let close_vsomeip_app =
+                Registry::release_listener_id(&src, &sink.as_ref(), &comp_listener).await;
+
+            error!("close_vsomeip_app: {close_vsomeip_app:?}");
+
+            let close_vsomeip_app = {
+                match close_vsomeip_app {
+                    Ok(close_vsomeip_app) => close_vsomeip_app,
+                    Err(err) => {
+                        error!("Attempt to release listener id failed: {err:?}");
+                        continue;
+                    }
+                }
+            };
+            error!("found close_vsomeip_app");
+
+            if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
+                error!(
+                    "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
+                );
+                let (tx, rx) = oneshot::channel();
+                let send_res = send_to_inner_with_status(
+                    &transport_command_sender,
+                    TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
+                )
+                .await;
+
+                if let Err(err) = send_res {
+                    error!("Unable to send to inner_transport: {err:?}");
+                    continue;
+                }
+
+                let await_res =
+                    await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
+
+                if let Err(err) = await_res {
+                    error!("Failed to await internal function: {err:?}");
+                    continue;
+                }
+
+                error!("Stopped app with client_id: {client_id} app_name: {app_name}");
+            } else {
+                error!("for some reason we were not told to stop vsomeip app");
+            }
+        }
+
+        let instance_client_ids = Registry::get_instance_client_ids(instance_id).await;
+
+        error!(
+            "we have for instance_id: {} the following client_ids: {:?}",
+            instance_id.hyphenated().to_string(),
+            instance_client_ids
+        );
+
+        for client_id in instance_client_ids {
+            error!("checking for stopping client_id: {client_id}");
+
+            let Ok(app_name) = Registry::find_app_name(client_id).await else {
+                error!("Unable to find app_name for client_id: {client_id}");
+                continue;
+            };
+
+            let (tx, rx) = oneshot::channel();
+            let send_res = send_to_inner_with_status(
+                &transport_command_sender,
+                TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
+            )
+            .await;
+
+            if let Err(err) = send_res {
+                error!("Unable to send to inner_transport: {err:?}");
+                continue;
+            }
+
+            let await_res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
+
+            if let Err(err) = await_res {
+                error!("Failed to await internal function: {err:?}");
+                continue;
+            }
+
+            error!("Stopped app with client_id: {client_id} app_name: {app_name}");
+        }
+    }
 }
 
 impl Drop for UPTransportVsomeip {
@@ -648,106 +757,7 @@ impl Drop for UPTransportVsomeip {
 
         std::thread::spawn(move || {
             handle.block_on(async move {
-                let instance_listener_ids = Registry::get_instance_listener_ids(instance_id).await;
-
-                for listener_id in instance_listener_ids {
-
-                    error!("investigating listener_id: {listener_id}");
-
-                    let Some(listener_configuration) =
-                        Registry::get_listener_configuration(listener_id).await
-                        else {
-                            error!("Unable to find listener_configuration for listener_id: {listener_id}");
-                            continue;
-                        };
-                    error!("found listener_configuration: src: {:?} sink: {:?}", listener_configuration.0, listener_configuration.1);
-                    let src = listener_configuration.0;
-                    let sink = listener_configuration.1;
-                    let comp_listener = listener_configuration.2;
-
-                    let close_vsomeip_app =
-                        Registry::release_listener_id(&src, &sink.as_ref(), &comp_listener).await;
-
-                    error!("close_vsomeip_app: {close_vsomeip_app:?}");
-
-                    let close_vsomeip_app = {
-                        match close_vsomeip_app {
-                            Ok(close_vsomeip_app) => {
-                                close_vsomeip_app
-                            },
-                            Err(err) => {
-                                error!("Attempt to release listener id failed: {err:?}");
-                                continue;
-                            }
-                        }
-                    };
-                    error!("found close_vsomeip_app");
-
-                    if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
-                        error!(
-                            "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
-                        );
-                        let (tx, rx) = oneshot::channel();
-                        let send_res = send_to_inner_with_status(
-                            &transport_command_sender,
-                            TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
-                        )
-                            .await;
-
-                        if let Err(err) = send_res {
-                            error!("Unable to send to inner_transport: {err:?}");
-                            continue;
-                        }
-
-                        let await_res =
-                            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
-
-                        if let Err(err) = await_res {
-                            error!("Failed to await internal function: {err:?}");
-                            continue;
-                        }
-
-                        error!("Stopped app with client_id: {client_id} app_name: {app_name}");
-                    } else {
-                        error!("for some reason we were not told to stop vsomeip app");
-                    }
-                }
-
-                let instance_client_ids = Registry::get_instance_client_ids(instance_id).await;
-
-                error!("we have for instance_id: {} the following client_ids: {:?}", instance_id.hyphenated().to_string(), instance_client_ids);
-
-                for client_id in instance_client_ids {
-                    error!("checking for stopping client_id: {client_id}");
-
-                    let Ok(app_name) = Registry::find_app_name(client_id).await else {
-                        error!("Unable to find app_name for client_id: {client_id}");
-                        continue;
-                    };
-
-                    let (tx, rx) = oneshot::channel();
-                    let send_res = send_to_inner_with_status(
-                        &transport_command_sender,
-                        TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
-                    )
-                        .await;
-
-                    if let Err(err) = send_res {
-                        error!("Unable to send to inner_transport: {err:?}");
-                        continue;
-                    }
-
-                    let await_res =
-                        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
-
-                    if let Err(err) = await_res {
-                        error!("Failed to await internal function: {err:?}");
-                        continue;
-                    }
-
-                    error!("Stopped app with client_id: {client_id} app_name: {app_name}");
-                }
-
+                Self::delete_registry_items_internal(instance_id, transport_command_sender).await;
                 // Notify that the task is complete
                 let _ = tx.send(());
             });

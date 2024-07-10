@@ -434,4 +434,8 @@ async fn point_to_point() {
     assert!(iterations - point_to_point_listener_check.received_request() <= TEST_SLACK);
     assert!(iterations - point_to_point_listener_check.received_response() <= TEST_SLACK);
     assert!(iterations - response_listener_check.received_response() <= TEST_SLACK);
+
+    point_to_point_client.delete_registry_items();
+    service.delete_registry_items();
+    client.delete_registry_items();
 }
