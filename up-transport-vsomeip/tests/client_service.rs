@@ -15,7 +15,7 @@ use log::{error, info};
 use protobuf::Enum;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
@@ -67,7 +67,7 @@ impl UListener for ResponseListener {
     }
 }
 pub struct RequestListener {
-    client: Arc<UPTransportVsomeip>,
+    client: Weak<UPTransportVsomeip>,
     received_request: AtomicUsize,
 }
 
@@ -75,7 +75,7 @@ impl RequestListener {
     #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPTransportVsomeip>) -> Self {
         Self {
-            client,
+            client: Arc::downgrade(&client),
             received_request: AtomicUsize::new(0),
         }
     }
@@ -119,10 +119,11 @@ impl UListener for RequestListener {
                 response_msg.err().unwrap()
             );
         };
-        let client = self.client.clone();
-        let send_res = client.send(response_msg).await;
-        if let Err(err) = send_res {
-            panic!("Unable to send response_msg: {:?}", err);
+        if let Some(client) = self.client.upgrade() {
+            let send_res = client.send(response_msg).await;
+            if let Err(err) = send_res {
+                panic!("Unable to send response_msg: {:?}", err);
+            }
         }
     }
 

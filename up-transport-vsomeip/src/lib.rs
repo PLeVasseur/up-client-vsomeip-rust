@@ -150,30 +150,4 @@ impl UPTransportVsomeip {
             config_path,
         })
     }
-
-    pub fn delete_registry_items(&self) {
-        let instance_id = self.instance_id.clone();
-        error!(
-            "dropping UPTransportVsomeip with instance_id: {}",
-            instance_id.hyphenated().to_string()
-        );
-        let transport_command_sender = self.inner_transport.transport_command_sender.clone();
-
-        // Create a oneshot channel to wait for task completion
-        let (tx, rx) = oneshot::channel();
-
-        // Get the handle of the current runtime
-        let handle = Handle::current();
-
-        std::thread::spawn(move || {
-            handle.block_on(async move {
-                Self::delete_registry_items_internal(instance_id, transport_command_sender).await;
-                // Notify that the task is complete
-                let _ = tx.send(());
-            });
-        });
-
-        // Wait for the task to complete
-        let _ = executor::block_on(rx);
-    }
 }

@@ -88,22 +88,14 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             // Use the runtime to run the async function within the LocalSet
             local_set.spawn_local(async move {
-                let app_name = {
-                    let listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.read().await;
-                    if let Some(client_id) = listener_client_id_mapping.get(&listener_id) {
-                        let client_id_app_mapping = CLIENT_ID_APP_MAPPING.read().await;
-                        if let Some(app_name) = client_id_app_mapping.get(&client_id) {
-                            Ok(app_name.clone())
-                        } else {
-                            Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no app_name found for listener_id: {} and client_id: {}", listener_id, client_id)))
-                        }
-                    } else {
-                        Err(UStatus::fail_with_code(UCode::NOT_FOUND, format!("There was no client_id found for listener_id: {}", listener_id)))
-                    }
+                let client_id = Registry::get_client_id_from_listener_id(listener_id).await;
+                let Some(client_id) = client_id else {
+                    error!("There was no client_id found for listener_id: {}", listener_id);
+                    return;
                 };
 
-                let Ok(app_name) = app_name else {
-                    error!("App wasn't found to interact with: {:?}", app_name.err().unwrap());
+                let Ok(app_name) = Registry::find_app_name(client_id).await else {
+                    error!("There was no app_name found for listener_id: {} and client_id: {}", listener_id, client_id);
                     return;
                 };
 
@@ -122,13 +114,11 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 trace!("Made vsomeip_msg_wrapper");
 
-                let listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.read().await;
-                let Some(authority_name) = listener_id_authority_name.get(&listener_id) else {
+                let Some(authority_name) = Registry::get_listener_authority(listener_id).await else {
                     error!("No authority_name found for listener_id: {listener_id}");
                     return;
                 };
-                let listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.read().await;
-                let Some(remote_authority_name) = listener_id_remote_authority_name.get(&listener_id) else {
+                let Some(remote_authority_name) = Registry::get_listener_remote_authority(listener_id).await else {
                     error!("No remote_authority_name found for listener_id: {listener_id}");
                     return;
                 };
@@ -146,8 +136,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 trace!("Was able to convert to UMessage");
 
                 trace!("Calling extern function {}", listener_id);
-                let registry = LISTENER_REGISTRY.read().await;
-                if let Some((_, _, comparable_listener)) = registry.get(&listener_id) {
+                if let Some((_, _, comparable_listener)) = Registry::get_listener_configuration(listener_id).await {
                     trace!("Retrieved listener");
                     let listener = comparable_listener.into_inner();
 

@@ -130,6 +130,24 @@ impl Registry {
         };
     }
 
+    pub(crate) async fn get_listener_authority(listener_id: usize) -> Option<AuthorityName> {
+        let listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.read().await;
+
+        return match listener_id_authority_name.get(&listener_id) {
+            None => None,
+            Some(authority_name) => Some(authority_name.clone()),
+        };
+    }
+
+    pub(crate) async fn get_listener_remote_authority(listener_id: usize) -> Option<AuthorityName> {
+        let listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.read().await;
+
+        return match listener_id_remote_authority_name.get(&listener_id) {
+            None => None,
+            Some(remote_authority_name) => Some(remote_authority_name.clone()),
+        };
+    }
+
     pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
         info!("listener_id was not used since we already have registered for this");
         let mut free_ids = FREE_LISTENER_IDS.write().await;
@@ -404,6 +422,15 @@ impl Registry {
             })
             .unwrap_or(Ok(()))?;
         Ok(())
+    }
+
+    pub(crate) async fn get_client_id_from_listener_id(listener_id: usize) -> Option<ClientId> {
+        let mut listener_client_id_mapping = LISTENER_ID_CLIENT_ID_MAPPING.read().await;
+
+        match listener_client_id_mapping.get(&listener_id) {
+            None => None,
+            Some(client_id) => Some(*client_id),
+        }
     }
 
     pub(crate) async fn map_listener_id_to_client_id(
