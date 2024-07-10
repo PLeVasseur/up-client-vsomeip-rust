@@ -48,6 +48,7 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
     "initialize_new_app_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
+pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
 
 pub enum TransportCommand {
     // Primary purpose of a UTransport
@@ -335,9 +336,10 @@ impl UPTransportVsomeipInner {
                     let add_res = Registry::add_client_id_app_name(client_id, &app_name).await;
                     Self::return_oneshot_result(add_res, return_channel).await;
                 }
-                TransportCommand::StopVsomeipApp(client_id, app_name, return_channel) => {
-                    // TODO: Add in a function called stop_vsomeip_app_internal which will call into
-                    //  vsomeip-sys in order to stop the app
+                TransportCommand::StopVsomeipApp(_client_id, app_name, return_channel) => {
+                    let stop_res =
+                        Self::stop_vsomeip_app_internal(app_name, &runtime_wrapper).await;
+                    Self::return_oneshot_result(stop_res, return_channel).await;
                 }
             }
             trace!("Hit bottom of event loop");
@@ -729,6 +731,23 @@ impl UPTransportVsomeipInner {
             get_pinned_runtime(runtime_wrapper).get_application(&app_name_cxx),
         );
         Ok(app_wrapper)
+    }
+
+    async fn stop_vsomeip_app_internal(
+        app_name: ApplicationName,
+        runtime_wrapper: &UniquePtr<RuntimeWrapper>,
+    ) -> Result<(), UStatus> {
+        trace!("Stopping vsomeip application for app_name: {app_name}");
+
+        let_cxx_string!(app_name_cxx = app_name);
+
+        let mut app_wrapper = make_application_wrapper(
+            get_pinned_runtime(runtime_wrapper).get_application(&app_name_cxx),
+        );
+
+        get_pinned_application(&mut app_wrapper).stop();
+
+        Ok(())
     }
 }
 

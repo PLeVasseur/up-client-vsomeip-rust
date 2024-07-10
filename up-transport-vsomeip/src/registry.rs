@@ -70,7 +70,7 @@ lazy_static! {
 
 pub(crate) enum CloseVsomeipApp {
     False,
-    True(ClientId),
+    True(ClientId, ApplicationName),
 }
 
 pub(crate) struct Registry;
@@ -275,12 +275,14 @@ impl Registry {
             return Err(concat_errs);
         };
 
+        let mut errs = Vec::new();
+
         let mut client_id_to_listener_ids = CLIENT_ID_TO_LISTENER_ID_MAPPING.write().await;
         if !client_id_to_listener_ids.contains_key(&client_id) {
-            return Err(UStatus::fail_with_code(
+            errs.push(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
                 format!("Unable to find any listener_ids for client_id: {client_id}"),
-            ));
+            ))
         }
 
         client_id_to_listener_ids
@@ -295,7 +297,31 @@ impl Registry {
             .is_empty()
         {
             client_id_to_listener_ids.remove(&client_id);
-            return Ok(CloseVsomeipApp::True(client_id));
+
+            let mut client_id_app_mapping = CLIENT_ID_APP_MAPPING.write().await;
+            let removal_result = client_id_app_mapping.remove(&client_id);
+            match removal_result {
+                None => {
+                    errs.push(UStatus::fail_with_code(
+                        UCode::NOT_FOUND,
+                        format!("Unable to find app_name for client_id: {client_id}"),
+                    ));
+
+                    let mut err_msgs = String::new();
+
+                    if !errs.is_empty() {
+                        for err in errs {
+                            err_msgs.push_str(&*err.message.unwrap());
+                        }
+                    }
+
+                    return Err(UStatus::fail_with_code(UCode::INTERNAL, err_msgs));
+                }
+                Some(app_name) => {
+                    client_id_to_listener_ids.remove(&client_id);
+                    return Ok(CloseVsomeipApp::True(client_id, app_name));
+                }
+            }
         }
 
         Ok(CloseVsomeipApp::False)

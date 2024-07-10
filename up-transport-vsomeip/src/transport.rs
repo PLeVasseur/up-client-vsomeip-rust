@@ -15,7 +15,7 @@ use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
 use crate::registry::{get_extern_fn, CloseVsomeipApp, Registry};
-use crate::transport_inner::TransportCommand;
+use crate::transport_inner::{TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP};
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
@@ -291,9 +291,15 @@ impl UTransport for UPTransportVsomeip {
         let close_vsomeip_app =
             Registry::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
 
-        if let CloseVsomeipApp::True(client_id) = close_vsomeip_app {
-            trace!("No more remaining listeners for client_id: {client_id}")
-            // TODO: implement sending new TransportCommand to shut down vsomeip app
+        if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
+            trace!("No more remaining listeners for client_id: {client_id} app_name: {app_name}");
+            let (tx, rx) = oneshot::channel();
+            send_to_inner_with_status(
+                &self.inner_transport.transport_command_sender,
+                TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+            )
+            .await?;
+            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
         }
 
         Ok(())
@@ -525,9 +531,17 @@ impl UPTransportVsomeip {
             let close_vsomeip_app =
                 Registry::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
 
-            if let CloseVsomeipApp::True(client_id) = close_vsomeip_app {
-                trace!("No more remaining listeners for client_id: {client_id}")
-                // TODO: implement sending new TransportCommand to shut down vsomeip app
+            if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
+                trace!(
+                    "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
+                );
+                let (tx, rx) = oneshot::channel();
+                send_to_inner_with_status(
+                    &self.inner_transport.transport_command_sender,
+                    TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+                )
+                .await?;
+                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
             }
         }
         Ok(())
