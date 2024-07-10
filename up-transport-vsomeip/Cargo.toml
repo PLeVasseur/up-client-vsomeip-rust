@@ -42,6 +42,7 @@ protobuf = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
 once_cell = { workspace = true }
+futures = "0.3.30"
 
 [dev-dependencies]
 test-case = { version = "3.3" }

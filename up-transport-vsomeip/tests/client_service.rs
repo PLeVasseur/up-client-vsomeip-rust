@@ -53,11 +53,11 @@ impl UListener for ResponseListener {
         };
 
         let payload_bytes = payload.to_vec();
-        println!("Received response payload_bytes of: {payload_bytes:?}");
+        info!("Received response payload_bytes of: {payload_bytes:?}");
         let Ok(response_payload_string) = std::str::from_utf8(&payload_bytes) else {
             panic!("unable to convert payload_bytes to string");
         };
-        println!("Response payload_string: {response_payload_string}");
+        info!("Response payload_string: {response_payload_string}");
 
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
@@ -101,11 +101,11 @@ impl UListener for RequestListener {
         };
 
         let payload_bytes = payload.to_vec();
-        println!("Received request payload_bytes of: {payload_bytes:?}");
+        info!("Received request payload_bytes of: {payload_bytes:?}");
         let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
             panic!("Unable to unpack string from payload_bytes");
         };
-        println!("Request payload_string: {payload_string}");
+        info!("Request payload_string: {payload_string}");
 
         let response_payload_string = format!("Here's a response to: {payload_string}");
         let response_payload_bytes = response_payload_string.into_bytes();

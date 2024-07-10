@@ -147,9 +147,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 trace!("Calling extern function {}", listener_id);
                 let registry = LISTENER_REGISTRY.read().await;
-                if let Some(listener) = registry.get(&listener_id) {
+                if let Some((_, _, comparable_listener)) = registry.get(&listener_id) {
                     trace!("Retrieved listener");
-                    let listener = Arc::clone(listener);
+                    let listener = comparable_listener.into_inner();
 
                     // Send the listener and umsg back to the main thread
                     if tx.send((listener, umsg)).is_err() {

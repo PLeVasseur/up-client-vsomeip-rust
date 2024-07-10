@@ -25,10 +25,13 @@ use crate::vsomeip_config::extract_applications;
 use crate::UPTransportVsomeip;
 use crate::{any_uuri, any_uuri_fixed_authority_id, ApplicationName};
 use async_trait::async_trait;
+use futures::executor;
 use log::{error, trace, warn};
+use once_cell::sync::Lazy;
 use protobuf::EnumOrUnknown;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::runtime::{Handle, Runtime};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use up_rust::{
@@ -78,6 +81,9 @@ async fn send_to_inner_with_status(
         )
     })
 }
+
+static RUNTIME: Lazy<Arc<Runtime>> =
+    Lazy::new(|| Arc::new(Runtime::new().expect("Failed to create Tokio runtime")));
 
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
@@ -217,9 +223,14 @@ impl UTransport for UPTransportVsomeip {
         trace!("Obtained listener_id: {}", listener_id);
 
         let comp_listener = ComparableListener::new(listener.clone());
-        let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+        let key = (
+            source_filter.clone(),
+            sink_filter.cloned(),
+            comp_listener.clone(),
+        );
 
         if let Err(err) = Registry::insert_into_listener_id_map(
+            self.instance_id.clone(),
             &self.authority_name,
             &self.remote_authority_name,
             key,
@@ -232,7 +243,12 @@ impl UTransport for UPTransportVsomeip {
         }
         trace!("Inserted into LISTENER_ID_MAP within transport");
 
-        Registry::register_listener_id_with_listener(listener_id, listener).await?;
+        let listener_configuration = (
+            source_filter.clone(),
+            sink_filter.cloned(),
+            comp_listener.clone(),
+        );
+        Registry::register_listener_id_with_listener(listener_id, listener_configuration).await?;
 
         let app_name = Registry::find_app_name(registration_type.client_id()).await;
         let extern_fn = get_extern_fn(listener_id);
@@ -343,8 +359,13 @@ impl UPTransportVsomeip {
         let listener_id = Registry::find_available_listener_id().await?;
         let listener = point_to_point_listener.clone();
         let comp_listener = ComparableListener::new(Arc::clone(&listener));
-        let key = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+        let key = (
+            source_filter.clone(),
+            sink_filter.cloned(),
+            comp_listener.clone(),
+        );
         if let Err(err) = Registry::insert_into_listener_id_map(
+            self.instance_id.clone(),
             &self.authority_name,
             &self.remote_authority_name,
             key,
@@ -359,7 +380,12 @@ impl UPTransportVsomeip {
                 Err(err)
             };
         }
-        Registry::register_listener_id_with_listener(listener_id, listener).await?;
+        let listener_configuration = (
+            source_filter.clone(),
+            sink_filter.cloned(),
+            comp_listener.clone(),
+        );
+        Registry::register_listener_id_with_listener(listener_id, listener_configuration).await?;
 
         let extern_fn = get_extern_fn(listener_id);
         let msg_handler = MessageHandlerFnPtr(extern_fn);
@@ -432,7 +458,12 @@ impl UPTransportVsomeip {
             let (tx, rx) = oneshot::channel();
             send_to_inner_with_status(
                 &self.inner_transport.transport_command_sender,
-                TransportCommand::StartVsomeipApp(app_config.id, app_config.name.clone(), tx),
+                TransportCommand::StartVsomeipApp(
+                    self.instance_id.clone(),
+                    app_config.id,
+                    app_config.name.clone(),
+                    tx,
+                ),
             )
             .await?;
             await_internal_function(
@@ -452,6 +483,7 @@ impl UPTransportVsomeip {
 
             let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
             if let Err(err) = Registry::insert_into_listener_id_map(
+                self.instance_id.clone(),
                 &self.authority_name,
                 &self.remote_authority_name,
                 key,
@@ -463,7 +495,9 @@ impl UPTransportVsomeip {
                 return Err(Registry::free_listener_id(listener_id).await);
             }
 
-            Registry::register_listener_id_with_listener(listener_id, listener.clone()).await?;
+            let listener_configuration = (src.clone(), Some(sink.clone()), comp_listener.clone());
+            Registry::register_listener_id_with_listener(listener_id, listener_configuration)
+                .await?;
 
             Registry::map_listener_id_to_client_id(app_config.id, listener_id).await?;
 
@@ -570,6 +604,7 @@ impl UPTransportVsomeip {
                 send_to_inner_with_status(
                     &self.inner_transport.transport_command_sender,
                     TransportCommand::StartVsomeipApp(
+                        self.instance_id.clone(),
                         registration_type.client_id(),
                         app_name.clone(),
                         tx,
@@ -593,5 +628,132 @@ impl UPTransportVsomeip {
                 Ok(app_name.unwrap())
             }
         }
+    }
+}
+
+impl Drop for UPTransportVsomeip {
+    fn drop(&mut self) {
+        let instance_id = self.instance_id.clone();
+        error!(
+            "dropping UPTransportVsomeip with instance_id: {}",
+            instance_id.hyphenated().to_string()
+        );
+        let transport_command_sender = self.inner_transport.transport_command_sender.clone();
+
+        // Create a oneshot channel to wait for task completion
+        let (tx, rx) = oneshot::channel();
+
+        // Get the handle of the current runtime
+        let handle = Handle::current();
+
+        std::thread::spawn(move || {
+            handle.block_on(async move {
+                let instance_listener_ids = Registry::get_instance_listener_ids(instance_id).await;
+
+                for listener_id in instance_listener_ids {
+
+                    error!("investigating listener_id: {listener_id}");
+
+                    let Some(listener_configuration) =
+                        Registry::get_listener_configuration(listener_id).await
+                        else {
+                            error!("Unable to find listener_configuration for listener_id: {listener_id}");
+                            continue;
+                        };
+                    error!("found listener_configuration: src: {:?} sink: {:?}", listener_configuration.0, listener_configuration.1);
+                    let src = listener_configuration.0;
+                    let sink = listener_configuration.1;
+                    let comp_listener = listener_configuration.2;
+
+                    let close_vsomeip_app =
+                        Registry::release_listener_id(&src, &sink.as_ref(), &comp_listener).await;
+
+                    error!("close_vsomeip_app: {close_vsomeip_app:?}");
+
+                    let close_vsomeip_app = {
+                        match close_vsomeip_app {
+                            Ok(close_vsomeip_app) => {
+                                close_vsomeip_app
+                            },
+                            Err(err) => {
+                                error!("Attempt to release listener id failed: {err:?}");
+                                continue;
+                            }
+                        }
+                    };
+                    error!("found close_vsomeip_app");
+
+                    if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
+                        error!(
+                            "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
+                        );
+                        let (tx, rx) = oneshot::channel();
+                        let send_res = send_to_inner_with_status(
+                            &transport_command_sender,
+                            TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
+                        )
+                            .await;
+
+                        if let Err(err) = send_res {
+                            error!("Unable to send to inner_transport: {err:?}");
+                            continue;
+                        }
+
+                        let await_res =
+                            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
+
+                        if let Err(err) = await_res {
+                            error!("Failed to await internal function: {err:?}");
+                            continue;
+                        }
+
+                        error!("Stopped app with client_id: {client_id} app_name: {app_name}");
+                    } else {
+                        error!("for some reason we were not told to stop vsomeip app");
+                    }
+                }
+
+                let instance_client_ids = Registry::get_instance_client_ids(instance_id).await;
+
+                error!("we have for instance_id: {} the following client_ids: {:?}", instance_id.hyphenated().to_string(), instance_client_ids);
+
+                for client_id in instance_client_ids {
+                    error!("checking for stopping client_id: {client_id}");
+
+                    let Ok(app_name) = Registry::find_app_name(client_id).await else {
+                        error!("Unable to find app_name for client_id: {client_id}");
+                        continue;
+                    };
+
+                    let (tx, rx) = oneshot::channel();
+                    let send_res = send_to_inner_with_status(
+                        &transport_command_sender,
+                        TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
+                    )
+                        .await;
+
+                    if let Err(err) = send_res {
+                        error!("Unable to send to inner_transport: {err:?}");
+                        continue;
+                    }
+
+                    let await_res =
+                        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
+
+                    if let Err(err) = await_res {
+                        error!("Failed to await internal function: {err:?}");
+                        continue;
+                    }
+
+                    error!("Stopped app with client_id: {client_id} app_name: {app_name}");
+                }
+
+                // Notify that the task is complete
+                let _ = tx.send(());
+            });
+        });
+
+        // Wait for the task to complete
+        let _ = executor::block_on(rx);
     }
 }

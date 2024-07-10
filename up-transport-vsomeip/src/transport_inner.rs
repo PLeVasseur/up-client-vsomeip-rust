@@ -72,6 +72,7 @@ pub enum TransportCommand {
     ),
     // Additional helpful commands
     StartVsomeipApp(
+        uuid::Uuid,
         ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
@@ -304,7 +305,12 @@ impl UPTransportVsomeipInner {
                         Self::send_internal(umsg, &mut application_wrapper, &runtime_wrapper).await;
                     Self::return_oneshot_result(res, return_channel).await;
                 }
-                TransportCommand::StartVsomeipApp(client_id, app_name, return_channel) => {
+                TransportCommand::StartVsomeipApp(
+                    transport_instance_id,
+                    client_id,
+                    app_name,
+                    return_channel,
+                ) => {
                     trace!(
                         "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
                         UP_CLIENT_VSOMEIP_TAG,
@@ -334,6 +340,15 @@ impl UPTransportVsomeipInner {
                     }
 
                     let add_res = Registry::add_client_id_app_name(client_id, &app_name).await;
+                    let insert_res =
+                        Registry::insert_instance_client_id(transport_instance_id, client_id).await;
+
+                    error!("attempt to insert result into instance to client_ids mapping: instance_id: {} : {insert_res:?}", transport_instance_id.hyphenated().to_string());
+
+                    let instance_id_client_ids =
+                        Registry::get_instance_client_ids(transport_instance_id).await;
+                    error!("after insertion into instance_client_ids: {instance_id_client_ids:?}");
+
                     Self::return_oneshot_result(add_res, return_channel).await;
                 }
                 TransportCommand::StopVsomeipApp(_client_id, app_name, return_channel) => {

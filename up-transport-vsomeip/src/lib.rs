@@ -83,6 +83,7 @@ type InstanceId = u16;
 type MethodId = u16;
 
 pub struct UPTransportVsomeip {
+    instance_id: uuid::Uuid,
     inner_transport: UPTransportVsomeipInner,
     authority_name: AuthorityName,
     remote_authority_name: AuthorityName,
@@ -131,6 +132,7 @@ impl UPTransportVsomeip {
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
         Ok(Self {
+            instance_id: uuid::Uuid::new_v4(),
             inner_transport,
             authority_name: authority_name.to_string(),
             remote_authority_name: remote_authority_name.to_string(),
@@ -140,15 +142,3 @@ impl UPTransportVsomeip {
         })
     }
 }
-
-// TODO: We need to ensure that we properly cleanup / unregister all message handlers
-//  and then remove the application
-// impl Drop for UPClientVsomeip {
-//     fn drop(&mut self) {
-//         // TODO: Should do this a bit more carefully, for now we will just stop all active vsomeip
-//         //  applications
-//         //  - downside of doing this drastic option is that _if_ you wanted to keep one client
-//         //    active and let another be dropped, this would put your client in a bad state
-//
-//     }
-// }

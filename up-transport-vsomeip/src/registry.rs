@@ -57,7 +57,7 @@ lazy_static! {
         RwLock::new(HashMap::new());
     static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
         RwLock::new(HashMap::new());
-    static ref LISTENER_REGISTRY: RwLock<HashMap<usize, Arc<dyn UListener>>> =
+    static ref LISTENER_REGISTRY: RwLock<HashMap<usize, (UUri, Option<UUri>, ComparableListener)>> =
         RwLock::new(HashMap::new());
     static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
     static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
@@ -66,8 +66,13 @@ lazy_static! {
         RwLock::new(HashMap::new());
     static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
         RwLock::new(HashMap::new());
+    static ref TRANSPORT_INSTANCE_TO_LISTENER_ID: RwLock<HashMap<uuid::Uuid, HashSet<usize>>> =
+        RwLock::new(HashMap::new());
+    static ref TRANSPORT_INSTANCE_TO_CLIENT_ID: RwLock<HashMap<uuid::Uuid, HashSet<ClientId>>> =
+        RwLock::new(HashMap::new());
 }
 
+#[derive(Debug)]
 pub(crate) enum CloseVsomeipApp {
     False,
     True(ClientId, ApplicationName),
@@ -76,6 +81,55 @@ pub(crate) enum CloseVsomeipApp {
 pub(crate) struct Registry;
 
 impl Registry {
+    pub(crate) async fn insert_instance_client_id(
+        transport_instance_id: uuid::Uuid,
+        client_id: ClientId,
+    ) -> Result<(), UStatus> {
+        let mut transport_instance_to_client_id = TRANSPORT_INSTANCE_TO_CLIENT_ID.write().await;
+
+        let client_ids = transport_instance_to_client_id
+            .entry(transport_instance_id)
+            .or_default();
+        client_ids.insert(client_id);
+
+        Ok(())
+    }
+
+    pub(crate) async fn get_instance_client_ids(
+        transport_instance_id: uuid::Uuid,
+    ) -> HashSet<ClientId> {
+        let transport_instance_to_client_id = TRANSPORT_INSTANCE_TO_CLIENT_ID.read().await;
+
+        return match transport_instance_to_client_id.get(&transport_instance_id) {
+            None => HashSet::new(),
+            Some(client_ids) => client_ids.clone(),
+        };
+    }
+
+    pub(crate) async fn get_instance_listener_ids(
+        transport_instance_id: uuid::Uuid,
+    ) -> HashSet<usize> {
+        let transport_instance_to_listener_id = TRANSPORT_INSTANCE_TO_LISTENER_ID.read().await;
+
+        return match transport_instance_to_listener_id.get(&transport_instance_id) {
+            None => HashSet::new(),
+            Some(listener_ids) => listener_ids.clone(),
+        };
+    }
+
+    pub(crate) async fn get_listener_configuration(
+        listener_id: usize,
+    ) -> Option<(UUri, Option<UUri>, ComparableListener)> {
+        let listener_registry = LISTENER_REGISTRY.read().await;
+
+        return match listener_registry.get(&listener_id) {
+            None => None,
+            Some((src, sink, comparable_listener)) => {
+                Some((src.clone(), sink.clone(), comparable_listener.clone()))
+            }
+        };
+    }
+
     pub(crate) async fn free_listener_id(listener_id: usize) -> UStatus {
         info!("listener_id was not used since we already have registered for this");
         let mut free_ids = FREE_LISTENER_IDS.write().await;
@@ -87,6 +141,7 @@ impl Registry {
     }
 
     pub(crate) async fn insert_into_listener_id_map(
+        transport_instance_id: uuid::Uuid,
         authority_name: &AuthorityName,
         remote_authority_name: &AuthorityName,
         key: (UUri, Option<UUri>, ComparableListener),
@@ -104,6 +159,7 @@ impl Registry {
         let mut id_map = LISTENER_ID_MAP.write().await;
         let mut listener_id_authority_name = LISTENER_ID_AUTHORITY_NAME.write().await;
         let mut listener_id_remote_authority_name = LISTENER_ID_REMOTE_AUTHORITY_NAME.write().await;
+        let mut transport_instance_to_listener_id = TRANSPORT_INSTANCE_TO_LISTENER_ID.write().await;
 
         if id_map.insert(key.clone(), listener_id).is_some() {
             let msg = format!("Not inserted into LISTENER_ID_MAP since we already have registered for this Request: key-uuri: {:?} key-option-uuri: {:?} listener_id: {}",
@@ -149,6 +205,11 @@ impl Registry {
         } else {
             trace!("Inserted into LISTENER_ID_REMOTE_AUTHORITY_NAME");
         }
+
+        let listener_ids = transport_instance_to_listener_id
+            .entry(transport_instance_id)
+            .or_default();
+        listener_ids.insert(listener_id);
 
         Ok(())
     }
@@ -329,12 +390,12 @@ impl Registry {
 
     pub(crate) async fn register_listener_id_with_listener(
         listener_id: usize,
-        listener: Arc<dyn UListener>,
+        listener_configuration: (UUri, Option<UUri>, ComparableListener),
     ) -> Result<(), UStatus> {
         LISTENER_REGISTRY
             .write()
             .await
-            .insert(listener_id, listener.clone())
+            .insert(listener_id, listener_configuration)
             .map(|_| {
                 Err(UStatus::fail_with_code(
                     UCode::INTERNAL,

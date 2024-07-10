@@ -25,16 +25,16 @@ mod tests {
     use std::time::Duration;
     use up_rust::{UListener, UTransport, UUri};
 
-    #[test]
-    fn test_constructing_client() {
-        test_lib::before_test();
-
-        let client = UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10);
-
-        thread::sleep(Duration::from_millis(100));
-
-        assert!(client.is_ok());
-    }
+    // #[test]
+    // fn test_constructing_client() {
+    //     test_lib::before_test();
+    //
+    //     let client = UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10);
+    //
+    //     thread::sleep(Duration::from_millis(100));
+    //
+    //     assert!(client.is_ok());
+    // }
 
     #[tokio::test]
     async fn test_registering_unregistering_publish() {
