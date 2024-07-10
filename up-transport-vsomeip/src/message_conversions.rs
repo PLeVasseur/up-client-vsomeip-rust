@@ -11,10 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::rpc_correlation::{
-    insert_me_request_correlation, insert_ue_request_correlation, remove_me_request_correlation,
-    remove_ue_request_correlation, retrieve_session_id,
-};
+use crate::rpc_correlation::RpcCorrelation;
 use crate::vsomeip_offered_requested::{insert_event_offered, is_event_offered};
 use crate::{create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName};
 use cxx::UniquePtr;
@@ -154,7 +151,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 )
             })?;
             let app_client_id = get_pinned_application(application_wrapper).get_client();
-            let app_session_id = retrieve_session_id(app_client_id).await; // only rewritten by vsomeip for REQUESTs
+            let app_session_id = RpcCorrelation::retrieve_session_id(app_client_id).await; // only rewritten by vsomeip for REQUESTs
             let request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
@@ -166,7 +163,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 app_request_id, req_id.to_hyphenated_string(),
             );
 
-            insert_ue_request_correlation(app_request_id, req_id).await?;
+            RpcCorrelation::insert_ue_request_correlation(app_request_id, req_id).await?;
 
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
@@ -239,7 +236,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 req_id.to_hyphenated_string()
             );
 
-            let request_id = remove_me_request_correlation(req_id).await?;
+            let request_id = RpcCorrelation::remove_me_request_correlation(req_id).await?;
 
             trace!(
                 "{} - Found correlated request_id: {}",
@@ -378,7 +375,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 req_id.to_hyphenated_string(), request_id
             );
 
-            insert_me_request_correlation(req_id.clone(), request_id).await?;
+            RpcCorrelation::insert_me_request_correlation(req_id.clone(), request_id).await?;
 
             Ok(umsg)
         }
@@ -434,7 +431,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let req_id = remove_ue_request_correlation(request_id).await?;
+            let req_id = RpcCorrelation::remove_ue_request_correlation(request_id).await?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::OK.value())
@@ -472,7 +469,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let req_id = remove_ue_request_correlation(request_id).await?;
+            let req_id = RpcCorrelation::remove_ue_request_correlation(request_id).await?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::INTERNAL.value())
