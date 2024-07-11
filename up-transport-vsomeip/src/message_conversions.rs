@@ -11,13 +11,14 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::rpc_correlation::RpcCorrelation;
-use crate::vsomeip_offered_requested::VsomeipOfferedRequested;
-use crate::{create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName};
+use crate::{
+    create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName, UPTransportVsomeipStorage,
+};
 use cxx::UniquePtr;
 use log::Level::Trace;
 use log::{log_enabled, trace};
 use protobuf::Enum;
+use std::sync::Arc;
 use std::time::Duration;
 use up_rust::{UCode, UMessage, UMessageBuilder, UMessageType, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{
@@ -36,6 +37,7 @@ const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsom
 
 pub async fn convert_umsg_to_vsomeip_msg_and_send(
     umsg: &UMessage,
+    transport_storage: Arc<dyn UPTransportVsomeipStorage>,
     application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     runtime_wrapper: &UniquePtr<RuntimeWrapper>,
 ) -> Result<(), UStatus> {
@@ -86,7 +88,11 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
 
             // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
             //  the UPClientVsomeip?
-            if !VsomeipOfferedRequested::is_event_offered(service_id, instance_id, event_id).await {
+            if !transport_storage
+                .get_vsomeip_offered_requested_read()
+                .await
+                .is_event_offered(service_id, instance_id, event_id)
+            {
                 get_pinned_application(application_wrapper).offer_service(
                     service_id,
                     instance_id,
@@ -102,8 +108,10 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                     event_id,
                 );
                 tokio::time::sleep(Duration::from_nanos(1)).await;
-                VsomeipOfferedRequested::insert_event_offered(service_id, instance_id, event_id)
-                    .await;
+                transport_storage
+                    .get_vsomeip_offered_requested_write()
+                    .await
+                    .insert_event_offered(service_id, instance_id, event_id);
             }
 
             trace!("Immediately after request_service");
@@ -152,7 +160,10 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 )
             })?;
             let app_client_id = get_pinned_application(application_wrapper).get_client();
-            let app_session_id = RpcCorrelation::retrieve_session_id(app_client_id).await; // only rewritten by vsomeip for REQUESTs
+            let app_session_id = transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
             let request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
@@ -164,7 +175,10 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 app_request_id, req_id.to_hyphenated_string(),
             );
 
-            RpcCorrelation::insert_ue_request_correlation(app_request_id, req_id).await?;
+            transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .insert_ue_request_correlation(app_request_id, req_id)?;
 
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
@@ -237,7 +251,10 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 req_id.to_hyphenated_string()
             );
 
-            let request_id = RpcCorrelation::remove_me_request_correlation(req_id).await?;
+            let request_id = transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .remove_me_request_correlation(req_id)?;
 
             trace!(
                 "{} - Found correlated request_id: {}",
@@ -305,6 +322,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
 pub async fn convert_vsomeip_msg_to_umsg(
     authority_name: &AuthorityName,
     mechatronics_authority_name: &AuthorityName,
+    transport_storage: Arc<dyn UPTransportVsomeipStorage>,
     vsomeip_message: &mut UniquePtr<MessageWrapper>,
     _application_wrapper: &UniquePtr<ApplicationWrapper>,
     _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
@@ -376,7 +394,10 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 req_id.to_hyphenated_string(), request_id
             );
 
-            RpcCorrelation::insert_me_request_correlation(req_id.clone(), request_id).await?;
+            transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .insert_me_request_correlation(req_id.clone(), request_id)?;
 
             Ok(umsg)
         }
@@ -432,7 +453,10 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let req_id = RpcCorrelation::remove_ue_request_correlation(request_id).await?;
+            let req_id = transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .remove_ue_request_correlation(request_id)?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::OK.value())
@@ -470,7 +494,10 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 request_id
             );
-            let req_id = RpcCorrelation::remove_ue_request_correlation(request_id).await?;
+            let req_id = transport_storage
+                .get_rpc_correlation_write()
+                .await
+                .remove_ue_request_correlation(request_id)?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::INTERNAL.value())

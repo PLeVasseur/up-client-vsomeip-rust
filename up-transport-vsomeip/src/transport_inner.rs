@@ -14,14 +14,12 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::extern_fn_registry::{
-    get_extern_fn, ExternFnRegistry, MockableExternFnRegistry, Registry,
-};
+use crate::extern_fn_registry::{get_extern_fn, ExternFnRegistry, MockableExternFnRegistry};
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 use crate::rpc_correlation::RpcCorrelation2;
 use crate::vsomeip_config::extract_applications;
-use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
+use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
 use crate::{
     any_uuri, any_uuri_fixed_authority_id, split_u32_to_u16, ApplicationName, AuthorityName,
     ClientId, MockableUPTransportVsomeipInner, UPTransportVsomeipStorage, UeId,
@@ -78,7 +76,7 @@ pub(crate) struct UPTransportVsomeipInnerHandleStorage {
 }
 
 impl UPTransportVsomeipInnerHandleStorage {
-    pub async fn new(
+    pub fn new(
         local_authority: AuthorityName,
         remote_authority: AuthorityName,
         ue_id: UeId,
@@ -105,19 +103,16 @@ pub(crate) struct UPTransportVsomeipInnerHandle {
 }
 
 impl UPTransportVsomeipInnerHandle {
-    pub async fn new(
+    pub fn new(
         local_authority_name: &AuthorityName,
         remote_authority_name: &AuthorityName,
         ue_id: UeId,
     ) -> Result<Self, UStatus> {
-        let storage = Arc::new(
-            UPTransportVsomeipInnerHandleStorage::new(
-                local_authority_name.clone(),
-                remote_authority_name.clone(),
-                ue_id,
-            )
-            .await,
-        );
+        let storage = Arc::new(UPTransportVsomeipInnerHandleStorage::new(
+            local_authority_name.clone(),
+            remote_authority_name.clone(),
+            ue_id,
+        ));
 
         let engine = UPTransportVsomeipInnerEngine::new(None);
         let point_to_point_listener = TokioRwLock::new(None);
@@ -131,20 +126,17 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
-    pub async fn new_with_config(
+    pub fn new_with_config(
         local_authority_name: &AuthorityName,
         remote_authority_name: &AuthorityName,
         ue_id: UeId,
         config_path: &Path,
     ) -> Result<Self, UStatus> {
-        let storage = Arc::new(
-            UPTransportVsomeipInnerHandleStorage::new(
-                local_authority_name.clone(),
-                remote_authority_name.clone(),
-                ue_id,
-            )
-            .await,
-        );
+        let storage = Arc::new(UPTransportVsomeipInnerHandleStorage::new(
+            local_authority_name.clone(),
+            remote_authority_name.clone(),
+            ue_id,
+        ));
 
         let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
         let point_to_point_listener = TokioRwLock::new(None);
@@ -158,7 +150,7 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
-    pub(crate) async fn new_supply_storage(
+    pub(crate) fn new_supply_storage(
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(None);
@@ -173,7 +165,7 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
-    pub(crate) async fn new_with_config_supply_storage(
+    pub(crate) fn new_with_config_supply_storage(
         config_path: &Path,
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
@@ -374,11 +366,6 @@ impl UPTransportVsomeipInnerHandle {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
         };
 
-        trace!("source used when registering:\n{src:?}");
-        trace!("sink used when registering:\n{sink:?}");
-
-        Registry::map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
-
         trace!(
             "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
             message_type.client_id()
@@ -394,6 +381,21 @@ impl UPTransportVsomeipInnerHandle {
         let msg_handler = MessageHandlerFnPtr(extern_fn);
         let message_type = RegistrationType::Response(message_type.client_id());
 
+        let Some(app_name) = self
+            .get_storage()
+            .get_registry_read()
+            .await
+            .get_app_name_for_client_id(message_type.client_id())
+        else {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!(
+                    "No vsomeip app_name found for client_id: {}",
+                    message_type.client_id()
+                ),
+            ));
+        };
+
         let send_to_inner_res = Self::send_to_inner_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::RegisterListener(
@@ -401,6 +403,8 @@ impl UPTransportVsomeipInnerHandle {
                 sink_filter.cloned(),
                 message_type,
                 msg_handler,
+                app_name,
+                self.get_storage(),
                 tx,
             ),
         )
@@ -617,6 +621,8 @@ impl UPTransportVsomeipInnerHandle {
                     Some(sink_filter.clone()),
                     registration_type,
                     msg_handler,
+                    app_config.name.clone(),
+                    self.get_storage(),
                     tx,
                 ),
             )
@@ -676,14 +682,17 @@ impl UPTransportVsomeipInnerHandle {
                 "Searching for src: {source_filter:?} sink: {sink_filter:?} to find listener_id"
             );
 
-            self.get_storage()
+            let app_name_res = self
+                .get_storage()
                 .get_registry_read()
                 .await
-                .get_app_name_for_client_id(app_config.id)
-                .ok_or(UStatus::fail_with_code(
+                .get_app_name_for_client_id(app_config.id);
+            let Some(app_name) = app_name_res else {
+                return Err(UStatus::fail_with_code(
                     UCode::NOT_FOUND,
                     format!("No application found for client_id: {}", app_config.id),
-                ))?;
+                ));
+            };
 
             let (tx, rx) = oneshot::channel();
             let registration_type = {
@@ -706,6 +715,7 @@ impl UPTransportVsomeipInnerHandle {
                     source_filter.clone(),
                     Some(sink_filter.clone()),
                     registration_type,
+                    app_name,
                     tx,
                 ),
             )
@@ -1071,7 +1081,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             .get_storage()
             .get_registry_write()
             .await
-            .insert_client_and_app_name(registration_type.client_id(), app_name);
+            .insert_client_and_app_name(registration_type.client_id(), app_name.clone());
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
@@ -1110,14 +1120,19 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 ));
             };
             trace!(
-                "No more remaining listeners for client_id: {} app_name: {app_name}",
-                registration_type.client_id()
+                "No more remaining listeners for client_id: {} app_name: {}",
+                registration_type.client_id(),
+                app_name
             );
 
             let (tx, rx) = oneshot::channel();
             let send_to_inner_res = Self::send_to_inner_with_status(
                 &self.engine.transport_command_sender,
-                TransportCommand::StopVsomeipApp(registration_type.client_id(), app_name, tx),
+                TransportCommand::StopVsomeipApp(
+                    registration_type.client_id(),
+                    app_name.clone(),
+                    tx,
+                ),
             )
             .await;
             if let Err(err) = send_to_inner_res {
@@ -1143,6 +1158,8 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 sink_filter.cloned(),
                 registration_type,
                 msg_handler,
+                app_name,
+                self.get_storage(),
                 tx,
             ),
         )
@@ -1179,22 +1196,31 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .await;
         }
 
-        self.get_storage()
+        let app_name_res = self
+            .get_storage()
             .get_registry_read()
             .await
-            .get_app_name_for_client_id(registration_type.client_id())
-            .ok_or(UStatus::fail_with_code(
+            .get_app_name_for_client_id(registration_type.client_id());
+        let Some(app_name) = app_name_res else {
+            return Err(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
                 format!(
                     "No application found for client_id: {}",
                     registration_type.client_id()
                 ),
-            ))?;
+            ));
+        };
 
         let (tx, rx) = oneshot::channel();
         let send_to_inner_res = Self::send_to_inner_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::UnregisterListener(src, sink, registration_type.clone(), tx),
+            TransportCommand::UnregisterListener(
+                src,
+                sink,
+                registration_type.clone(),
+                app_name,
+                tx,
+            ),
         )
         .await;
         if let Err(err) = send_to_inner_res {
@@ -1350,7 +1376,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         let (tx, rx) = oneshot::channel();
         let send_to_inner_res = Self::send_to_inner_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::Send(message, message_type, tx),
+            TransportCommand::Send(message, message_type, app_name, self.get_storage(), tx),
         )
         .await;
         if let Err(err) = send_to_inner_res {
@@ -1368,32 +1394,31 @@ pub enum TransportCommand {
         Option<UUri>,
         RegistrationType,
         MessageHandlerFnPtr,
+        ApplicationName,
+        Arc<dyn UPTransportVsomeipStorage>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     UnregisterListener(
         UUri,
         Option<UUri>,
         RegistrationType,
+        ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
         UMessage,
         RegistrationType,
+        ApplicationName,
+        Arc<dyn UPTransportVsomeipStorage>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
-    StartVsomeipApp(
-        uuid::Uuid,
+    StartVsomeipApp2(
         ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     StopVsomeipApp(
-        ClientId,
-        ApplicationName,
-        oneshot::Sender<Result<(), UStatus>>,
-    ),
-    StartVsomeipApp2(
         ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
@@ -1510,6 +1535,8 @@ impl UPTransportVsomeipInnerEngine {
                     sink,
                     registration_type,
                     msg_handler,
+                    app_name,
+                    transport_storage,
                     return_channel,
                 ) => {
                     trace!(
@@ -1519,14 +1546,6 @@ impl UPTransportVsomeipInnerEngine {
                     );
 
                     trace!("registration_type: {registration_type:?}");
-
-                    let app_name = Registry::find_app_name(registration_type.client_id()).await;
-
-                    let Ok(app_name) = app_name else {
-                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
-                            .await;
-                        continue;
-                    };
 
                     let_cxx_string!(app_name_cxx = app_name);
 
@@ -1539,6 +1558,7 @@ impl UPTransportVsomeipInnerEngine {
                         sink,
                         registration_type,
                         msg_handler,
+                        transport_storage,
                         &mut application_wrapper,
                         &runtime_wrapper,
                     )
@@ -1551,16 +1571,9 @@ impl UPTransportVsomeipInnerEngine {
                     src,
                     sink,
                     registration_type,
+                    app_name,
                     return_channel,
                 ) => {
-                    let app_name = Registry::find_app_name(registration_type.client_id()).await;
-
-                    let Ok(app_name) = app_name else {
-                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
-                            .await;
-                        continue;
-                    };
-
                     let_cxx_string!(app_name_cxx = app_name);
 
                     let application_wrapper = make_application_wrapper(
@@ -1577,7 +1590,13 @@ impl UPTransportVsomeipInnerEngine {
                     .await;
                     Self::return_oneshot_result(res, return_channel).await;
                 }
-                TransportCommand::Send(umsg, message_type, return_channel) => {
+                TransportCommand::Send(
+                    umsg,
+                    message_type,
+                    app_name,
+                    transport_storage,
+                    return_channel,
+                ) => {
                     trace!(
                         "{}:{} - Attempting to send UMessage: {:?}",
                         UP_CLIENT_VSOMEIP_TAG,
@@ -1588,14 +1607,6 @@ impl UPTransportVsomeipInnerEngine {
                     trace!(
                         "inside TransportCommand::Send dispatch, message_type: {message_type:?}"
                     );
-
-                    let app_name = Registry::find_app_name(message_type.client_id()).await;
-
-                    let Ok(app_name) = app_name else {
-                        Self::return_oneshot_result(Err(app_name.err().unwrap()), return_channel)
-                            .await;
-                        continue;
-                    };
 
                     let_cxx_string!(app_name_cxx = app_name.clone());
 
@@ -1617,58 +1628,16 @@ impl UPTransportVsomeipInnerEngine {
                     let app_client_id = get_pinned_application(&application_wrapper).get_client();
                     trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
 
-                    let res =
-                        Self::send_internal(umsg, &mut application_wrapper, &runtime_wrapper).await;
-                    Self::return_oneshot_result(res, return_channel).await;
-                }
-                TransportCommand::StartVsomeipApp(
-                    transport_instance_id,
-                    client_id,
-                    app_name,
-                    return_channel,
-                ) => {
-                    trace!(
-                        "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
-                        UP_CLIENT_VSOMEIP_TAG,
-                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                        client_id,
-                        app_name
-                    );
-                    let new_app_res = Self::start_vsomeip_app_internal(
-                        client_id,
-                        app_name.clone(),
-                        config_path.clone(),
+                    let res = Self::send_internal(
+                        umsg,
+                        transport_storage,
+                        &mut application_wrapper,
                         &runtime_wrapper,
                     )
                     .await;
-                    trace!(
-                        "{}:{} - After attempt to create new app for client_id: {} app_name: {}",
-                        UP_CLIENT_VSOMEIP_TAG,
-                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                        client_id,
-                        app_name
-                    );
-
-                    if let Err(err) = new_app_res {
-                        error!("Unable to create new app: {:?}", err);
-                        Self::return_oneshot_result(Err(err), return_channel).await;
-                        continue;
-                    }
-
-                    let add_res = Registry::add_client_id_app_name(client_id, &app_name).await;
-                    let insert_res =
-                        Registry::insert_instance_client_id(transport_instance_id, client_id).await;
-
-                    error!("attempt to insert result into instance to client_ids mapping: instance_id: {} : {insert_res:?}", transport_instance_id.hyphenated().to_string());
-
-                    let instance_id_client_ids =
-                        Registry::get_instance_client_ids(transport_instance_id).await;
-                    error!("after insertion into instance_client_ids: {instance_id_client_ids:?}");
-
-                    Self::return_oneshot_result(add_res, return_channel).await;
+                    Self::return_oneshot_result(res, return_channel).await;
                 }
                 TransportCommand::StartVsomeipApp2(client_id, app_name, return_channel) => {
-                    // TODO: Implement based on StartVsomeipApp but w/o using Registry::
                     trace!(
                         "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
                         UP_CLIENT_VSOMEIP_TAG,
@@ -1718,6 +1687,7 @@ impl UPTransportVsomeipInnerEngine {
         sink_filter: Option<UUri>,
         registration_type: RegistrationType,
         msg_handler: MessageHandlerFnPtr,
+        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -1750,8 +1720,10 @@ impl UPTransportVsomeipInnerEngine {
                     event_id
                 );
 
-                if !VsomeipOfferedRequested::is_event_requested(service_id, instance_id, event_id)
+                if !transport_storage
+                    .get_vsomeip_offered_requested_write()
                     .await
+                    .insert_event_offered(service_id, instance_id, event_id)
                 {
                     get_pinned_application(application_wrapper).request_service(
                         service_id,
@@ -1773,12 +1745,10 @@ impl UPTransportVsomeipInnerEngine {
                         ANY_MAJOR,
                         event_id,
                     );
-                    VsomeipOfferedRequested::insert_event_requested(
-                        service_id,
-                        instance_id,
-                        event_id,
-                    )
-                    .await;
+                    transport_storage
+                        .get_vsomeip_offered_requested_write()
+                        .await
+                        .insert_event_requested(service_id, instance_id, event_id);
                 }
 
                 register_message_handler_fn_ptr_safe(
@@ -1826,8 +1796,10 @@ impl UPTransportVsomeipInnerEngine {
                     method_id
                 );
 
-                if !VsomeipOfferedRequested::is_service_offered(service_id, instance_id, method_id)
+                if !transport_storage
+                    .get_vsomeip_offered_requested_read()
                     .await
+                    .is_service_offered(service_id, instance_id, method_id)
                 {
                     get_pinned_application(application_wrapper).offer_service(
                         service_id,
@@ -1835,12 +1807,10 @@ impl UPTransportVsomeipInnerEngine {
                         ANY_MAJOR,
                         ANY_MINOR,
                     );
-                    VsomeipOfferedRequested::insert_service_offered(
-                        service_id,
-                        instance_id,
-                        method_id,
-                    )
-                    .await;
+                    transport_storage
+                        .get_vsomeip_offered_requested_write()
+                        .await
+                        .insert_service_offered(service_id, instance_id, method_id);
                 }
 
                 register_message_handler_fn_ptr_safe(
@@ -1870,12 +1840,10 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                if !VsomeipOfferedRequested::is_service_requested(
-                    service_id,
-                    instance_id,
-                    method_id,
-                )
-                .await
+                if !transport_storage
+                    .get_vsomeip_offered_requested_read()
+                    .await
+                    .is_service_requested(service_id, instance_id, method_id)
                 {
                     get_pinned_application(application_wrapper).request_service(
                         service_id,
@@ -1883,12 +1851,10 @@ impl UPTransportVsomeipInnerEngine {
                         ANY_MAJOR,
                         ANY_MINOR,
                     );
-                    VsomeipOfferedRequested::insert_service_requested(
-                        service_id,
-                        instance_id,
-                        method_id,
-                    )
-                    .await;
+                    transport_storage
+                        .get_vsomeip_offered_requested_write()
+                        .await
+                        .insert_service_requested(service_id, instance_id, method_id);
                 }
 
                 trace!(
@@ -2033,6 +1999,7 @@ impl UPTransportVsomeipInnerEngine {
 
     async fn send_internal(
         umsg: UMessage,
+        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -2056,6 +2023,7 @@ impl UPTransportVsomeipInnerEngine {
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
                 let _vsomeip_msg_res = convert_umsg_to_vsomeip_msg_and_send(
                     &umsg,
+                    transport_storage,
                     application_wrapper,
                     runtime_wrapper,
                 )
@@ -2064,6 +2032,7 @@ impl UPTransportVsomeipInnerEngine {
             UMessageType::UMESSAGE_TYPE_REQUEST | UMessageType::UMESSAGE_TYPE_RESPONSE => {
                 let _vsomeip_msg_res = convert_umsg_to_vsomeip_msg_and_send(
                     &umsg,
+                    transport_storage,
                     application_wrapper,
                     runtime_wrapper,
                 )
@@ -2095,18 +2064,6 @@ impl UPTransportVsomeipInnerEngine {
             client_id,
             app_name
         );
-        let found_app_res = Registry::find_app_name(client_id).await;
-
-        if found_app_res.is_ok() {
-            let err = UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
-                format!(
-                    "Application already exists for client_id: {} app_name: {}",
-                    client_id, app_name
-                ),
-            );
-            return Err(err);
-        }
 
         Self::create_app(&app_name, config_path.as_deref())?;
         trace!(

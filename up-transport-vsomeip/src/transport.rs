@@ -14,7 +14,6 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::extern_fn_registry::{get_extern_fn, CloseVsomeipApp, Registry};
 use crate::transport_inner::{TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP};
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
@@ -22,7 +21,9 @@ use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
 };
 use crate::vsomeip_config::extract_applications;
-use crate::{any_uuri, any_uuri_fixed_authority_id, ApplicationName};
+use crate::{
+    any_uuri, any_uuri_fixed_authority_id, ApplicationName, MockableUPTransportVsomeipInner,
+};
 use crate::{InstanceId, UPTransportVsomeip};
 use async_trait::async_trait;
 use futures::executor;
@@ -89,116 +90,7 @@ static RUNTIME: Lazy<Arc<Runtime>> =
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        let attributes = message.attributes.as_ref().ok_or(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
-            "Invalid uAttributes",
-        ))?;
-
-        match attributes
-            .type_
-            .enum_value()
-            .map_err(|_| UStatus::fail_with_code(UCode::INTERNAL, "Unable to parse type"))?
-        {
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
-                UAttributesValidators::Publish
-                    .validator()
-                    .validate(attributes)
-                    .map_err(|e| {
-                        let msg = format!("Wrong Publish UAttributes: {e:?}");
-                        log::error!("{msg}");
-                        UStatus::fail_with_code(UCode::INVALID_ARGUMENT, msg)
-                    })?;
-            }
-            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
-                return Err(UStatus::fail_with_code(
-                    UCode::UNIMPLEMENTED,
-                    "Notification messages not yet supported",
-                ));
-
-                // We will support Notifications in the future
-                // UAttributesValidators::Notification
-                //     .validator()
-                //     .validate(attributes)
-                //     .map_err(|e| {
-                //         let msg = format!("Wrong Notification UAttributes: {e:?}");
-                //         log::error!("{msg}");
-                //         UStatus::fail_with_code(UCode::INVALID_ARGUMENT, msg)
-                //     })?;
-            }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
-                UAttributesValidators::Request
-                    .validator()
-                    .validate(attributes)
-                    .map_err(|e| {
-                        let msg = format!("Wrong Request UAttributes: {e:?}");
-                        log::error!("{msg}");
-                        UStatus::fail_with_code(UCode::INVALID_ARGUMENT, msg)
-                    })?;
-            }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                UAttributesValidators::Response
-                    .validator()
-                    .validate(attributes)
-                    .map_err(|e| {
-                        let msg = format!("Wrong Response UAttributes: {e:?}");
-                        log::error!("{msg}");
-                        UStatus::fail_with_code(UCode::INVALID_ARGUMENT, msg)
-                    })?;
-            }
-            UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
-                let msg = "Wrong Message type in UAttributes".to_string();
-                log::error!("{msg}");
-                return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, msg));
-            }
-        }
-
-        trace!("Sending message: {:?}", message);
-
-        let Some(source_filter) = message.attributes.source.as_ref() else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "UMessage provided with no source",
-            ));
-        };
-
-        source_filter.verify_no_wildcards().map_err(|e| {
-            UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid source: {e:?}"))
-        })?;
-
-        let sink_filter = message.attributes.sink.as_ref();
-
-        if let Some(sink) = sink_filter {
-            sink.verify_no_wildcards().map_err(|e| {
-                UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid sink: {e:?}"))
-            })?;
-        }
-
-        let message_type = determine_send_type(source_filter, &sink_filter.cloned())?;
-        trace!("inside send(), message_type: {message_type:?}");
-        let app_name = Registry::find_app_name(message_type.client_id()).await;
-        trace!("app_name: {app_name:?}");
-
-        self.initialize_vsomeip_app_as_needed(&message_type, app_name)
-            .await?;
-
-        let app_name = format!("{}", message_type.client_id());
-        trace!("app_name: {app_name}");
-
-        self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
-            &message,
-            source_filter,
-            sink_filter,
-            message_type.clone(),
-        )
-        .await?;
-
-        let (tx, rx) = oneshot::channel();
-        send_to_inner_with_status(
-            &self.inner_transport.transport_command_sender,
-            TransportCommand::Send(message, message_type, tx),
-        )
-        .await?;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
+        self.transport_inner.send(message).await
     }
 
     async fn register_listener(
@@ -207,70 +99,9 @@ impl UTransport for UPTransportVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        let registration_type_res =
-            determine_registration_type(source_filter, &sink_filter.cloned(), self.ue_id);
-        let Ok(registration_type) = registration_type_res else {
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
-        };
-
-        trace!("registration_type: {registration_type:?}");
-
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            return self.register_point_to_point_listener(&listener).await;
-        }
-
-        let listener_id = Registry::find_available_listener_id().await?;
-
-        trace!("Obtained listener_id: {}", listener_id);
-
-        let comp_listener = ComparableListener::new(listener.clone());
-        let key = (
-            source_filter.clone(),
-            sink_filter.cloned(),
-            comp_listener.clone(),
-        );
-
-        if let Err(err) = Registry::insert_into_listener_id_map(
-            self.instance_id.clone(),
-            &self.authority_name,
-            &self.remote_authority_name,
-            key,
-            listener_id,
-        )
-        .await
-        {
-            error!("{err:?}");
-            return Err(Registry::free_listener_id(listener_id).await);
-        }
-        trace!("Inserted into LISTENER_ID_MAP within transport");
-
-        let listener_configuration = (
-            source_filter.clone(),
-            sink_filter.cloned(),
-            comp_listener.clone(),
-        );
-        Registry::register_listener_id_with_listener(listener_id, listener_configuration).await?;
-
-        let app_name = Registry::find_app_name(registration_type.client_id()).await;
-        let extern_fn = get_extern_fn(listener_id);
-        let msg_handler = MessageHandlerFnPtr(extern_fn);
-        let src = source_filter.clone();
-        let sink = sink_filter.cloned();
-
-        trace!("Obtained extern_fn");
-
-        self.initialize_vsomeip_app_as_needed(&registration_type, app_name)
-            .await?;
-
-        Registry::map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
-
-        let (tx, rx) = oneshot::channel();
-        send_to_inner_with_status(
-            &self.inner_transport.transport_command_sender,
-            TransportCommand::RegisterListener(src, sink, registration_type, msg_handler, tx),
-        )
-        .await?;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+        self.transport_inner
+            .register_listener(source_filter, sink_filter, listener)
+            .await
     }
 
     async fn unregister_listener(
@@ -279,47 +110,9 @@ impl UTransport for UPTransportVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        let src = source_filter.clone();
-        let sink = sink_filter.cloned();
-
-        let registration_type_res =
-            determine_registration_type(source_filter, &sink_filter.cloned(), self.ue_id);
-        let Ok(registration_type) = registration_type_res else {
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
-        };
-
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
-            return self
-                .unregister_point_to_point_listener(&listener, &registration_type)
-                .await;
-        }
-
-        Registry::find_app_name(registration_type.client_id()).await?;
-
-        let (tx, rx) = oneshot::channel();
-        send_to_inner_with_status(
-            &self.inner_transport.transport_command_sender,
-            TransportCommand::UnregisterListener(src, sink, registration_type.clone(), tx),
-        )
-        .await?;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, rx).await?;
-
-        let comp_listener = ComparableListener::new(listener);
-        let close_vsomeip_app =
-            Registry::release_listener_id(source_filter, &sink_filter, &comp_listener).await?;
-
-        if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
-            trace!("No more remaining listeners for client_id: {client_id} app_name: {app_name}");
-            let (tx, rx) = oneshot::channel();
-            send_to_inner_with_status(
-                &self.inner_transport.transport_command_sender,
-                TransportCommand::StopVsomeipApp(client_id, app_name, tx),
-            )
-            .await?;
-            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
-        }
-
-        Ok(())
+        self.transport_inner
+            .unregister_listener(source_filter, sink_filter, listener)
+            .await
     }
 
     async fn receive(
@@ -334,436 +127,31 @@ impl UTransport for UPTransportVsomeip {
     }
 }
 
-impl UPTransportVsomeip {
-    async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
-        &self,
-        message: &UMessage,
-        source_filter: &UUri,
-        sink_filter: Option<&UUri>,
-        message_type: RegistrationType,
-    ) -> Result<bool, UStatus> {
-        let maybe_point_to_point_listener = {
-            let point_to_point_listener = self.point_to_point_listener.read().await;
-            (*point_to_point_listener).as_ref().cloned()
-        };
-
-        let Some(ref point_to_point_listener) = maybe_point_to_point_listener else {
-            return Ok(false);
-        };
-
-        if message_type != RegistrationType::Request(message_type.client_id()) {
-            trace!("Sending non-Request when we have a point-to-point listener established");
-            return Ok(true);
-        }
-        trace!("Sending a Request and we have a point-to-point listener");
-
-        let listener_id = Registry::find_available_listener_id().await?;
-        let listener = point_to_point_listener.clone();
-        let comp_listener = ComparableListener::new(Arc::clone(&listener));
-        let key = (
-            source_filter.clone(),
-            sink_filter.cloned(),
-            comp_listener.clone(),
-        );
-        if let Err(err) = Registry::insert_into_listener_id_map(
-            self.instance_id.clone(),
-            &self.authority_name,
-            &self.remote_authority_name,
-            key,
-            listener_id,
-        )
-        .await
-        {
-            return if err.code == EnumOrUnknown::from(UCode::ALREADY_EXISTS) {
-                Ok(true)
-            } else {
-                trace!("{:?}", Registry::free_listener_id(listener_id).await);
-                Err(err)
-            };
-        }
-        let listener_configuration = (
-            source_filter.clone(),
-            sink_filter.cloned(),
-            comp_listener.clone(),
-        );
-        Registry::register_listener_id_with_listener(listener_id, listener_configuration).await?;
-
-        let extern_fn = get_extern_fn(listener_id);
-        let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-        let Some(src) = message.attributes.sink.as_ref() else {
-            let err_msg = "Request message doesn't have a sink";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-        };
-        let Some(sink) = message.attributes.source.as_ref() else {
-            let err_msg = "Request message doesn't have a source";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-        };
-
-        trace!("source used when registering:\n{src:?}");
-        trace!("sink used when registering:\n{sink:?}");
-
-        Registry::map_listener_id_to_client_id(message_type.client_id(), listener_id).await?;
-
-        trace!(
-            "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
-            message_type.client_id()
-        );
-
-        let message_type = RegistrationType::Response(message_type.client_id());
-        let (tx, rx) = oneshot::channel();
-        send_to_inner_with_status(
-            &self.inner_transport.transport_command_sender,
-            TransportCommand::RegisterListener(
-                src.clone(),
-                Some(sink.clone()),
-                message_type,
-                msg_handler,
-                tx,
-            ),
-        )
-        .await?;
-        await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await?;
-
-        Ok(true)
-    }
-
-    async fn register_point_to_point_listener(
-        &self,
-        listener: &Arc<dyn UListener>,
-    ) -> Result<(), UStatus> {
-        let Some(config_path) = &self.config_path else {
-            let err_msg = "No path to a vsomeip config file was provided";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
-        };
-
-        let application_configs = extract_applications(config_path)?;
-        trace!("Got vsomeip application_configs: {application_configs:?}");
-
-        {
-            let mut point_to_point_listener = self.point_to_point_listener.write().await;
-            if point_to_point_listener.is_some() {
-                return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
-                    "We already have a point-to-point UListener registered",
-                ));
-            }
-            *point_to_point_listener = Some(listener.clone());
-            trace!("We found a point-to-point listener and set it");
-        }
-
-        for app_config in &application_configs {
-            let (tx, rx) = oneshot::channel();
-            send_to_inner_with_status(
-                &self.inner_transport.transport_command_sender,
-                TransportCommand::StartVsomeipApp(
-                    self.instance_id.clone(),
-                    app_config.id,
-                    app_config.name.clone(),
-                    tx,
-                ),
-            )
-            .await?;
-            await_internal_function(
-                &format!("Initializing point-to-point listener apps. ApplicationConfig: {:?} app_config.id: {} app_config.name: {}",
-                app_config, app_config.id, app_config.name),
-                rx,
-            )
-            .await?;
-
-            let listener_id = Registry::find_available_listener_id().await?;
-            let comp_listener = ComparableListener::new(listener.clone());
-
-            let src = any_uuri();
-            // TODO: How to explicitly handle instance_id?
-            //  I'm not sure it's possible to set within the vsomeip config file
-            let sink = any_uuri_fixed_authority_id(&self.authority_name, app_config.id);
-
-            let key = (src.clone(), Some(sink.clone()), comp_listener.clone());
-            if let Err(err) = Registry::insert_into_listener_id_map(
-                self.instance_id.clone(),
-                &self.authority_name,
-                &self.remote_authority_name,
-                key,
-                listener_id,
-            )
-            .await
-            {
-                error!("{err:?}");
-                return Err(Registry::free_listener_id(listener_id).await);
-            }
-
-            let listener_configuration = (src.clone(), Some(sink.clone()), comp_listener.clone());
-            Registry::register_listener_id_with_listener(listener_id, listener_configuration)
-                .await?;
-
-            Registry::map_listener_id_to_client_id(app_config.id, listener_id).await?;
-
-            let extern_fn = get_extern_fn(listener_id);
-            let msg_handler = MessageHandlerFnPtr(extern_fn);
-
-            let registration_type = RegistrationType::Request(app_config.id);
-
-            let (tx, rx) = oneshot::channel();
-            send_to_inner_with_status(
-                &self.inner_transport.transport_command_sender,
-                TransportCommand::RegisterListener(
-                    src,
-                    Some(sink),
-                    registration_type,
-                    msg_handler,
-                    tx,
-                ),
-            )
-            .await?;
-            await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx)
-                .await?;
-        }
-        Ok(())
-    }
-
-    async fn unregister_point_to_point_listener(
-        &self,
-        listener: &Arc<dyn UListener>,
-        _registration_type: &RegistrationType, // keep this for now as we may stop the application associated
-    ) -> Result<(), UStatus> {
-        let Some(config_path) = &self.config_path else {
-            let err_msg = "No path to a vsomeip config file was provided";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
-        };
-
-        let application_configs = extract_applications(config_path)?;
-        trace!("Got vsomeip application_configs: {application_configs:?}");
-
-        let ptp_comp_listener = {
-            let point_to_point_listener = self.point_to_point_listener.read().await;
-            let Some(ref point_to_point_listener) = *point_to_point_listener else {
-                return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
-                    "No point-to-point listener found, we can't unregister it",
-                ));
-            };
-            ComparableListener::new(point_to_point_listener.clone())
-        };
-        let comp_listener = ComparableListener::new(listener.clone());
-        if ptp_comp_listener != comp_listener {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "listener provided doesn't match registered point_to_point_listener",
-            ));
-        }
-
-        for app_config in &application_configs {
-            let src = any_uuri();
-            let sink = any_uuri_fixed_authority_id(&self.authority_name, app_config.id);
-
-            trace!("Searching for src: {src:?} sink: {sink:?} to find listener_id");
-
-            let close_vsomeip_app =
-                Registry::release_listener_id(&src, &Some(&sink), &comp_listener).await?;
-
-            if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
-                trace!(
-                    "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
-                );
-                let (tx, rx) = oneshot::channel();
-                send_to_inner_with_status(
-                    &self.inner_transport.transport_command_sender,
-                    TransportCommand::StopVsomeipApp(client_id, app_name, tx),
-                )
-                .await?;
-                await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn initialize_vsomeip_app_as_needed(
-        &self,
-        registration_type: &RegistrationType,
-        app_name: Result<ApplicationName, UStatus>,
-    ) -> Result<ApplicationName, UStatus> {
-        {
-            if let Err(err) = app_name {
-                warn!(
-                    "No app found for client_id: {}, err: {err:?}",
-                    registration_type.client_id()
-                );
-
-                let app_name = format!("{}", registration_type.client_id());
-
-                let (tx, rx) = oneshot::channel();
-                trace!(
-                    "{}:{} - Sending TransportCommand for InitializeNewApp",
-                    UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER
-                );
-                send_to_inner_with_status(
-                    &self.inner_transport.transport_command_sender,
-                    TransportCommand::StartVsomeipApp(
-                        self.instance_id.clone(),
-                        registration_type.client_id(),
-                        app_name.clone(),
-                        tx,
-                    ),
-                )
-                .await?;
-                let internal_res = await_internal_function(
-                    UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-                    rx,
-                )
-                .await;
-                if let Err(err) = internal_res {
-                    Err(UStatus::fail_with_code(
-                        UCode::INTERNAL,
-                        format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
-                    ))
-                } else {
-                    Ok(app_name)
-                }
-            } else {
-                Ok(app_name.unwrap())
-            }
-        }
-    }
-
-    pub(crate) async fn delete_registry_items_internal(
-        instance_id: uuid::Uuid,
-        transport_command_sender: Sender<TransportCommand>,
-    ) {
-        let instance_listener_ids = Registry::get_instance_listener_ids(instance_id).await;
-
-        for listener_id in instance_listener_ids {
-            error!("investigating listener_id: {listener_id}");
-
-            let Some(listener_configuration) =
-                Registry::get_listener_configuration(listener_id).await
-            else {
-                error!("Unable to find listener_configuration for listener_id: {listener_id}");
-                continue;
-            };
-            error!(
-                "found listener_configuration: src: {:?} sink: {:?}",
-                listener_configuration.0, listener_configuration.1
-            );
-            let src = listener_configuration.0;
-            let sink = listener_configuration.1;
-            let comp_listener = listener_configuration.2;
-
-            let close_vsomeip_app =
-                Registry::release_listener_id(&src, &sink.as_ref(), &comp_listener).await;
-
-            error!("close_vsomeip_app: {close_vsomeip_app:?}");
-
-            let close_vsomeip_app = {
-                match close_vsomeip_app {
-                    Ok(close_vsomeip_app) => close_vsomeip_app,
-                    Err(err) => {
-                        error!("Attempt to release listener id failed: {err:?}");
-                        continue;
-                    }
-                }
-            };
-            error!("found close_vsomeip_app");
-
-            if let CloseVsomeipApp::True(client_id, app_name) = close_vsomeip_app {
-                error!(
-                    "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
-                );
-                let (tx, rx) = oneshot::channel();
-                let send_res = send_to_inner_with_status(
-                    &transport_command_sender,
-                    TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
-                )
-                .await;
-
-                if let Err(err) = send_res {
-                    error!("Unable to send to inner_transport: {err:?}");
-                    continue;
-                }
-
-                let await_res =
-                    await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
-
-                if let Err(err) = await_res {
-                    error!("Failed to await internal function: {err:?}");
-                    continue;
-                }
-
-                error!("Stopped app with client_id: {client_id} app_name: {app_name}");
-            } else {
-                error!("for some reason we were not told to stop vsomeip app");
-            }
-        }
-
-        let instance_client_ids = Registry::get_instance_client_ids(instance_id).await;
-
-        error!(
-            "we have for instance_id: {} the following client_ids: {:?}",
-            instance_id.hyphenated().to_string(),
-            instance_client_ids
-        );
-
-        for client_id in instance_client_ids {
-            error!("checking for stopping client_id: {client_id}");
-
-            let Ok(app_name) = Registry::find_app_name(client_id).await else {
-                error!("Unable to find app_name for client_id: {client_id}");
-                continue;
-            };
-
-            let (tx, rx) = oneshot::channel();
-            let send_res = send_to_inner_with_status(
-                &transport_command_sender,
-                TransportCommand::StopVsomeipApp(client_id, app_name.clone(), tx),
-            )
-            .await;
-
-            if let Err(err) = send_res {
-                error!("Unable to send to inner_transport: {err:?}");
-                continue;
-            }
-
-            let await_res = await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
-
-            if let Err(err) = await_res {
-                error!("Failed to await internal function: {err:?}");
-                continue;
-            }
-
-            error!("Stopped app with client_id: {client_id} app_name: {app_name}");
-        }
-    }
-}
-
+// TODO: Update this
 impl Drop for UPTransportVsomeip {
     fn drop(&mut self) {
-        let instance_id = self.instance_id.clone();
-        error!(
-            "dropping UPTransportVsomeip with instance_id: {}",
-            instance_id.hyphenated().to_string()
-        );
-        let transport_command_sender = self.inner_transport.transport_command_sender.clone();
-
-        // Create a oneshot channel to wait for task completion
-        let (tx, rx) = oneshot::channel();
-
-        // Get the handle of the current runtime
-        let handle = Handle::current();
-
-        std::thread::spawn(move || {
-            handle.block_on(async move {
-                Self::delete_registry_items_internal(instance_id, transport_command_sender).await;
-                // Notify that the task is complete
-                let _ = tx.send(());
-            });
-        });
-
-        // Wait for the task to complete
-        let _ = executor::block_on(rx);
+        // let instance_id = self.instance_id.clone();
+        // error!(
+        //     "dropping UPTransportVsomeip with instance_id: {}",
+        //     instance_id.hyphenated().to_string()
+        // );
+        // let transport_command_sender = self.inner_transport.transport_command_sender.clone();
+        //
+        // // Create a oneshot channel to wait for task completion
+        // let (tx, rx) = oneshot::channel();
+        //
+        // // Get the handle of the current runtime
+        // let handle = Handle::current();
+        //
+        // std::thread::spawn(move || {
+        //     handle.block_on(async move {
+        //         Self::delete_registry_items_internal(instance_id, transport_command_sender).await;
+        //         // Notify that the task is complete
+        //         let _ = tx.send(());
+        //     });
+        // });
+        //
+        // // Wait for the task to complete
+        // let _ = executor::block_on(rx);
     }
 }

@@ -30,8 +30,8 @@ use crate::determine_message_type::RegistrationType;
 use crate::extern_fn_registry::MockableExternFnRegistry;
 use crate::listener_registry::ListenerRegistry;
 use crate::rpc_correlation::RpcCorrelation2;
-use crate::transport_inner::TransportCommand;
-use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
+use crate::transport_inner::{TransportCommand, UPTransportVsomeipInnerHandle};
+use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
 use transport_inner::UPTransportVsomeipInnerEngine;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 
@@ -152,15 +152,7 @@ pub(crate) trait MockableUPTransportVsomeipInner {
 }
 
 pub struct UPTransportVsomeip {
-    instance_id: uuid::Uuid,
-    listener_registry: Arc<TokioRwLock<ListenerRegistry>>,
-    inner_transport: UPTransportVsomeipInnerEngine,
-    authority_name: AuthorityName,
-    remote_authority_name: AuthorityName,
-    ue_id: UeId,
-    config_path: Option<PathBuf>,
-    // if this is not None, indicates that we are in a dedicated point-to-point mode
-    point_to_point_listener: TokioRwLock<Option<Arc<dyn UListener>>>,
+    transport_inner: Arc<UPTransportVsomeipInnerHandle>,
 }
 
 impl UPTransportVsomeip {
@@ -198,34 +190,38 @@ impl UPTransportVsomeip {
         ue_id: UeId,
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
-        let inner_transport = UPTransportVsomeipInnerEngine::new(config_path);
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        let instance_id = uuid::Uuid::new_v4();
-        error!(
-            "Creating UPTransportVsomeip instance with instance_id: {}",
-            instance_id.hyphenated().to_string()
-        );
-
-        let listener_registry = Arc::new(TokioRwLock::new(ListenerRegistry::new()));
-
-        Ok(Self {
-            instance_id,
-            listener_registry,
-            inner_transport,
-            authority_name: authority_name.to_string(),
-            remote_authority_name: remote_authority_name.to_string(),
-            ue_id,
-            point_to_point_listener: None.into(),
-            config_path,
-        })
-    }
-
-    pub(crate) fn get_authority(&self) -> AuthorityName {
-        self.authority_name.clone()
-    }
-
-    pub(crate) fn get_remote_authority(&self) -> AuthorityName {
-        self.remote_authority_name.clone()
+        let transport_inner = {
+            if let Some(config_path) = config_path {
+                let config_path = config_path.as_path();
+                let transport_inner_res = UPTransportVsomeipInnerHandle::new_with_config(
+                    authority_name,
+                    remote_authority_name,
+                    ue_id,
+                    config_path,
+                );
+                match transport_inner_res {
+                    Ok(transport_inner) => transport_inner,
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            } else {
+                let transport_inner_res = UPTransportVsomeipInnerHandle::new(
+                    authority_name,
+                    remote_authority_name,
+                    ue_id,
+                );
+                match transport_inner_res {
+                    Ok(transport_inner) => transport_inner,
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            }
+        };
+        let transport_inner = Arc::new(transport_inner);
+        Ok(Self { transport_inner })
     }
 }

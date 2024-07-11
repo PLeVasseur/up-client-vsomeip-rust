@@ -88,15 +88,27 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
             // Use the runtime to run the async function within the LocalSet
             local_set.spawn_local(async move {
-                let client_id = Registry::get_client_id_from_listener_id(listener_id).await;
-                let Some(client_id) = client_id else {
-                    error!("There was no client_id found for listener_id: {}", listener_id);
-                    return;
+                let transport_storage_res = ProcMacroTransportStorage::get_listener_id_transport(listener_id).await;
+
+                let transport_storage = {
+                    match transport_storage_res {
+                        Some(transport_storage) => transport_storage.clone(),
+                        None => {
+                            warn!("No transport storage found for listener_id: {listener_id}");
+                            return;
+                        }
+                    }
                 };
 
-                let Ok(app_name) = Registry::find_app_name(client_id).await else {
-                    error!("There was no app_name found for listener_id: {} and client_id: {}", listener_id, client_id);
-                    return;
+                let app_name = {
+                    let registry_read = transport_storage.get_registry_read().await;
+                    match registry_read.get_app_name_for_listener_id(listener_id) {
+                        Some(app_name) => app_name,
+                        None => {
+                            warn!("No vsomeip app_name found for listener_id: {listener_id}");
+                            return;
+                        }
+                    }
                 };
 
                 let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
@@ -114,15 +126,20 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 trace!("Made vsomeip_msg_wrapper");
 
-                let Some(authority_name) = Registry::get_listener_authority(listener_id).await else {
-                    error!("No authority_name found for listener_id: {listener_id}");
-                    return;
-                };
-                let Some(remote_authority_name) = Registry::get_listener_remote_authority(listener_id).await else {
-                    error!("No remote_authority_name found for listener_id: {listener_id}");
-                    return;
-                };
-                let res = convert_vsomeip_msg_to_umsg(&authority_name, &remote_authority_name, &mut vsomeip_msg_wrapper, &application_wrapper, &runtime_wrapper).await;
+                let authority_name = transport_storage.get_local_authority();
+                let remote_authority_name = transport_storage.get_remote_authority();
+
+                // Change: Cloning transport_storage again for the async call
+                let transport_storage_clone = transport_storage.clone();
+                let res = convert_vsomeip_msg_to_umsg(
+                    &authority_name,
+                    &remote_authority_name,
+                    transport_storage_clone,
+                    &mut vsomeip_msg_wrapper,
+                    &application_wrapper,
+                    &runtime_wrapper,
+                )
+                .await;
 
                 trace!("Ran convert_vsomeip_msg_to_umsg");
 
@@ -136,18 +153,17 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 trace!("Was able to convert to UMessage");
 
                 trace!("Calling extern function {}", listener_id);
-                if let Some((_, _, comparable_listener)) = Registry::get_listener_configuration(listener_id).await {
-                    trace!("Retrieved listener");
-                    let listener = comparable_listener.into_inner();
-
-                    // Send the listener and umsg back to the main thread
-                    if tx.send((listener, umsg)).is_err() {
-                        error!("Failed to send listener and umsg to main thread");
+                // Change: Using a separate block to handle the registry read for listener to control the borrow scope
+                let listener = {
+                    let registry_read = transport_storage.get_registry_read().await;
+                    match registry_read.get_listener_for_listener_id(listener_id) {
+                        Some(listener) => listener,
+                        None => {
+                            error!("Listener not found for ID {}", listener_id);
+                            return;
+                        }
                     }
-
-                } else {
-                    error!("Listener not found for ID {}", listener_id);
-                }
+                };
             });
             runtime.block_on(local_set);
 
