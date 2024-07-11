@@ -64,6 +64,12 @@ lazy_static! {
 
 #[async_trait]
 pub(crate) trait MockableExternFnRegistry: Send + Sync {
+    async fn get_extern_fn(
+        &self,
+        listener_id: usize,
+    ) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
+        get_extern_fn(listener_id)
+    }
     async fn insert_listener_id_transport(
         &self,
         listener_id: usize,

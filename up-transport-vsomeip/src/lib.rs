@@ -146,9 +146,9 @@ pub(crate) trait MockableUPTransportVsomeipInner {
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
-    );
+    ) -> Result<(), UStatus>;
 
-    async fn send(&self, msg: UMessage) -> Result<(), UStatus>;
+    async fn send(&self, message: UMessage) -> Result<(), UStatus>;
 }
 
 pub struct UPTransportVsomeip {

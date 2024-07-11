@@ -11,7 +11,9 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determine_message_type::{determine_registration_type, RegistrationType};
+use crate::determine_message_type::{
+    determine_registration_type, determine_send_type, RegistrationType,
+};
 use crate::extern_fn_registry::{ExternFnRegistry, MockableExternFnRegistry, Registry};
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
@@ -23,7 +25,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use cxx::{let_cxx_string, UniquePtr};
-use log::{error, info, trace};
+use log::{error, info, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
@@ -31,7 +33,11 @@ use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
-use up_rust::{ComparableListener, UCode, UListener, UMessage, UMessageType, UStatus, UUri};
+use tokio::time::timeout;
+use up_rust::{
+    ComparableListener, UAttributesValidators, UCode, UListener, UMessage, UMessageType, UStatus,
+    UUri,
+};
 use uuid::Uuid;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
@@ -54,6 +60,8 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
     "initialize_new_app_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
+
+const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 
 pub(crate) struct UPTransportVsomeipInnerHandleStorage {
     ue_id: UeId,
@@ -162,6 +170,44 @@ impl UPTransportVsomeipInnerHandle {
         application_name: ApplicationName,
     ) -> Result<(), UStatus> {
         todo!()
+    }
+
+    async fn await_internal_function(
+        function_id: &str,
+        rx: oneshot::Receiver<Result<(), UStatus>>,
+    ) -> Result<(), UStatus> {
+        match timeout(Duration::from_secs(INTERNAL_FUNCTION_TIMEOUT), rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                format!(
+                    "Unable to receive status back from internal function: {}",
+                    function_id
+                ),
+            )),
+            Err(_) => Err(UStatus::fail_with_code(
+                UCode::DEADLINE_EXCEEDED,
+                format!(
+                    "Unable to receive status back from internal function: {} within {} second window.",
+                    function_id, INTERNAL_FUNCTION_TIMEOUT
+                ),
+            )),
+        }
+    }
+
+    async fn send_to_inner_with_status(
+        tx: &Sender<TransportCommand>,
+        transport_command: TransportCommand,
+    ) -> Result<(), UStatus> {
+        tx.send(transport_command).await.map_err(|e| {
+            UStatus::fail_with_code(
+                UCode::INTERNAL,
+                format!(
+                    "Unable to transmit request to internal vsomeip application handler, err: {:?}",
+                    e
+                ),
+            )
+        })
     }
 
     async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
@@ -346,6 +392,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         };
 
         let Ok(app_name) = app_name_res else {
+            // we failed to start the vsomeip application
             let _ = self
                 .get_storage()
                 .get_extern_fn_registry_write()
@@ -353,32 +400,89 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
+            let _ = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_listener_id_and_listener_config_based_on_listener_id(listener_id);
+
             return Err(app_name_res.err().unwrap());
         };
 
-        //
-        // let app_name = Registry::find_app_name(registration_type.client_id()).await;
-        // let extern_fn = get_extern_fn(listener_id);
-        // let msg_handler = MessageHandlerFnPtr(extern_fn);
-        // let src = source_filter.clone();
-        // let sink = sink_filter.cloned();
-        //
-        // trace!("Obtained extern_fn");
-        //
-        // self.initialize_vsomeip_app_as_needed(&registration_type, app_name)
-        //     .await?;
-        //
-        // Registry::map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
-        //
-        // let (tx, rx) = oneshot::channel();
-        // send_to_inner_with_status(
-        //     &self.inner_transport.transport_command_sender,
-        //     TransportCommand::RegisterListener(src, sink, registration_type, msg_handler, tx),
-        // )
-        //     .await?;
-        // await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+        let insert_res = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .set_client_and_app_name(registration_type.client_id(), app_name);
+        if let Err(err) = insert_res {
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .free_listener_id(listener_id)
+                .await;
 
-        Ok(())
+            let _ = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_listener_id_and_listener_config_based_on_listener_id(listener_id);
+
+            let Some(app_name) = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_app_name_for_client_id(registration_type.client_id())
+            else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    format!("Unable to find app_name for listener_id: {listener_id}"),
+                ));
+            };
+            trace!(
+                "No more remaining listeners for client_id: {} app_name: {app_name}",
+                registration_type.client_id()
+            );
+
+            let (tx, rx) = oneshot::channel();
+            let send_to_inner_res = Self::send_to_inner_with_status(
+                &self.engine.transport_command_sender,
+                TransportCommand::StopVsomeipApp(registration_type.client_id(), app_name, tx),
+            )
+            .await;
+            if let Err(err) = send_to_inner_res {
+                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                panic!("engine has stopped! unable to proceed! with err: {err:?}");
+            }
+            Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
+        }
+
+        let (tx, rx) = oneshot::channel();
+        let extern_fn = self
+            .get_storage()
+            .get_extern_fn_registry_read()
+            .await
+            .get_extern_fn(listener_id)
+            .await;
+        let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+        let send_to_inner_res = Self::send_to_inner_with_status(
+            &self.engine.transport_command_sender,
+            TransportCommand::RegisterListener(
+                source_filter.clone(),
+                sink_filter.cloned(),
+                registration_type,
+                msg_handler,
+                tx,
+            ),
+        )
+        .await;
+        if let Err(err) = send_to_inner_res {
+            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            panic!("engine has stopped! unable to proceed!");
+        }
+
+        Self::await_internal_function("register", rx).await
     }
 
     async fn unregister_listener(
@@ -386,12 +490,204 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
-    ) {
-        todo!()
+    ) -> Result<(), UStatus> {
+        let src = source_filter.clone();
+        let sink = sink_filter.cloned();
+
+        let registration_type_res = determine_registration_type(
+            source_filter,
+            &sink_filter.cloned(),
+            self.get_storage().get_ue_id(),
+        );
+        let Ok(registration_type) = registration_type_res else {
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
+        };
+
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+            return self
+                .unregister_point_to_point_listener(&listener, &registration_type)
+                .await;
+        }
+
+        self.get_storage()
+            .get_registry_read()
+            .await
+            .get_app_name_for_client_id(registration_type.client_id())
+            .ok_or(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!(
+                    "No application found for client_id: {}",
+                    registration_type.client_id()
+                ),
+            ))?;
+
+        let (tx, rx) = oneshot::channel();
+        let send_to_inner_res = Self::send_to_inner_with_status(
+            &self.engine.transport_command_sender,
+            TransportCommand::UnregisterListener(src, sink, registration_type.clone(), tx),
+        )
+        .await;
+        if let Err(err) = send_to_inner_res {
+            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            panic!("engine has stopped! unable to proceed! with err: {err:?}");
+        }
+        Self::await_internal_function("unregister", rx).await?;
+
+        let comp_listener = ComparableListener::new(listener);
+        let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
+
+        let Some(listener_id) = self
+            .get_storage()
+            .get_registry_read()
+            .await
+            .get_listener_id_for_listener_config(listener_config)
+        else {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                "Unable to find listener_id for listener_config",
+            ));
+        };
+
+        let Some(client_id) = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .remove_client_id_based_on_listener_id(listener_id)
+        else {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!("Unable to find client_id for listener_id: {listener_id}"),
+            ));
+        };
+
+        if let Err(err) = self
+            .get_storage()
+            .get_extern_fn_registry_write()
+            .await
+            .free_listener_id(listener_id)
+            .await
+        {
+            warn!("Unable to free listener_id: {listener_id} with err: {err:?}");
+        }
+
+        if let Err(err) = self
+            .get_storage()
+            .get_extern_fn_registry_write()
+            .await
+            .remove_listener_id_transport(listener_id)
+            .await
+        {
+            warn!("Unable to remove storage for listener_id: {listener_id} with err: {err:?}");
+        }
+
+        if self
+            .get_storage()
+            .get_registry_read()
+            .await
+            .listener_count_for_client_id(client_id)
+            == 0
+        {
+            let Some(app_name) = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_app_name_for_client_id(client_id)
+            else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    format!("Unable to find app_name for listener_id: {listener_id}"),
+                ));
+            };
+            trace!("No more remaining listeners for client_id: {client_id} app_name: {app_name}");
+
+            let (tx, rx) = oneshot::channel();
+            let send_to_inner_res = Self::send_to_inner_with_status(
+                &self.engine.transport_command_sender,
+                TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+            )
+            .await;
+            if let Err(err) = send_to_inner_res {
+                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                panic!("engine has stopped! unable to proceed! with err: {err:?}");
+            }
+            Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
+        }
+
+        Ok(())
     }
 
-    async fn send(&self, msg: UMessage) -> Result<(), UStatus> {
-        todo!()
+    async fn send(&self, message: UMessage) -> Result<(), UStatus> {
+        let attributes = message.attributes.as_ref().ok_or(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "Missing uAttributes",
+        ))?;
+
+        // Validate UAttributes before conversion.
+        UAttributesValidators::get_validator_for_attributes(attributes)
+            .validate(attributes)
+            .map_err(|e| {
+                UStatus::fail_with_code(UCode::INTERNAL, format!("Invalid uAttributes, err: {e:?}"))
+            })?;
+
+        trace!("Sending message: {:?}", message);
+
+        let Some(source_filter) = message.attributes.source.as_ref() else {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "UMessage provided with no source",
+            ));
+        };
+
+        source_filter.verify_no_wildcards().map_err(|e| {
+            UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid source: {e:?}"))
+        })?;
+
+        let sink_filter = message.attributes.sink.as_ref();
+
+        if let Some(sink) = sink_filter {
+            sink.verify_no_wildcards().map_err(|e| {
+                UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid sink: {e:?}"))
+            })?;
+        }
+
+        let message_type = determine_send_type(source_filter, &sink_filter.cloned())?;
+        trace!("inside send(), message_type: {message_type:?}");
+        let app_name_res = {
+            if let Some(app_name) = self
+                .get_storage()
+                .get_registry_read()
+                .await
+                .get_app_name_for_client_id(message_type.client_id())
+            {
+                Ok(app_name)
+            } else {
+                self.initialize_vsomeip_app(&message_type).await
+            }
+        };
+
+        let Ok(app_name) = app_name_res else {
+            return Err(app_name_res.err().unwrap());
+        };
+
+        self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
+            &message,
+            source_filter,
+            sink_filter,
+            message_type.clone(),
+        )
+        .await?;
+
+        let (tx, rx) = oneshot::channel();
+        let send_to_inner_res = Self::send_to_inner_with_status(
+            &self.engine.transport_command_sender,
+            TransportCommand::Send(message, message_type, tx),
+        )
+        .await;
+        if let Err(err) = send_to_inner_res {
+            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            panic!("engine has stopped! unable to proceed! with err: {err:?}");
+        }
+        Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 }
 
