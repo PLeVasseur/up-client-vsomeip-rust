@@ -88,7 +88,7 @@ impl ListenerRegistry {
         0
     }
 
-    pub fn set_listener_id_and_listener_config(
+    pub fn insert_listener_id_and_listener_config(
         &mut self,
         listener_id: usize,
         listener_config: (UUri, Option<UUri>, ComparableListener),
@@ -107,7 +107,7 @@ impl ListenerRegistry {
         Ok(())
     }
 
-    pub fn set_client_and_app_name(
+    pub fn insert_client_and_app_name(
         &mut self,
         client_id: ClientId,
         app_name: ApplicationName,

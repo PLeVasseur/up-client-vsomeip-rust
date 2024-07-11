@@ -14,23 +14,26 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::extern_fn_registry::{ExternFnRegistry, MockableExternFnRegistry, Registry};
+use crate::extern_fn_registry::{
+    get_extern_fn, ExternFnRegistry, MockableExternFnRegistry, Registry,
+};
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 use crate::rpc_correlation::RpcCorrelation2;
+use crate::vsomeip_config::extract_applications;
 use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
 use crate::{
-    split_u32_to_u16, ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner,
-    UPTransportVsomeipStorage, UeId,
+    any_uuri, any_uuri_fixed_authority_id, split_u32_to_u16, ApplicationName, AuthorityName,
+    ClientId, MockableUPTransportVsomeipInner, UPTransportVsomeipStorage, UeId,
 };
 use async_trait::async_trait;
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace, warn};
+use protobuf::EnumOrUnknown;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use protobuf::EnumOrUnknown;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -98,6 +101,7 @@ pub(crate) struct UPTransportVsomeipInnerHandle {
     storage: Arc<dyn UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipInnerEngine,
     point_to_point_listener: TokioRwLock<Option<Arc<dyn UListener>>>,
+    config_path: Option<PathBuf>,
 }
 
 impl UPTransportVsomeipInnerHandle {
@@ -117,8 +121,14 @@ impl UPTransportVsomeipInnerHandle {
 
         let engine = UPTransportVsomeipInnerEngine::new(None);
         let point_to_point_listener = TokioRwLock::new(None);
+        let config_path = None;
 
-        Ok(Self { engine, storage, point_to_point_listener })
+        Ok(Self {
+            engine,
+            storage,
+            point_to_point_listener,
+            config_path,
+        })
     }
 
     pub async fn new_with_config(
@@ -138,8 +148,14 @@ impl UPTransportVsomeipInnerHandle {
 
         let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
         let point_to_point_listener = TokioRwLock::new(None);
+        let config_path = Some(config_path.to_path_buf());
 
-        Ok(Self { engine, storage, point_to_point_listener })
+        Ok(Self {
+            engine,
+            storage,
+            point_to_point_listener,
+            config_path,
+        })
     }
 
     pub(crate) async fn new_supply_storage(
@@ -147,8 +163,14 @@ impl UPTransportVsomeipInnerHandle {
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(None);
         let point_to_point_listener = TokioRwLock::new(None);
+        let config_path = None;
 
-        Ok(Self { engine, storage, point_to_point_listener })
+        Ok(Self {
+            engine,
+            storage,
+            point_to_point_listener,
+            config_path,
+        })
     }
 
     pub(crate) async fn new_with_config_supply_storage(
@@ -157,8 +179,14 @@ impl UPTransportVsomeipInnerHandle {
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
         let point_to_point_listener = TokioRwLock::new(None);
+        let config_path = Some(config_path.to_path_buf());
 
-        Ok(Self { engine, storage, point_to_point_listener })
+        Ok(Self {
+            engine,
+            storage,
+            point_to_point_listener,
+            config_path,
+        })
     }
 
     fn start_vsomeip_app(
@@ -238,8 +266,17 @@ impl UPTransportVsomeipInnerHandle {
         }
         trace!("Sending a Request and we have a point-to-point listener");
 
-        let Ok(listener_id) = self.get_storage().get_extern_fn_registry_write().await.find_available_listener_id().await else {
-            return Err(UStatus::fail_with_code(UCode::RESOURCE_EXHAUSTED, "Exhausted all extern 'C' fns"));
+        let Ok(listener_id) = self
+            .get_storage()
+            .get_extern_fn_registry_write()
+            .await
+            .find_available_listener_id()
+            .await
+        else {
+            return Err(UStatus::fail_with_code(
+                UCode::RESOURCE_EXHAUSTED,
+                "Exhausted all extern 'C' fns",
+            ));
         };
 
         let insert_res = self
@@ -259,7 +296,11 @@ impl UPTransportVsomeipInnerHandle {
             return Err(err);
         }
 
-        let insert_res = self.get_storage().get_registry_write().await.insert_listener_id_client_id(listener_id, message_type.client_id());
+        let insert_res = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .insert_listener_id_client_id(listener_id, message_type.client_id());
         if let Some(previous_entry) = insert_res {
             let listener_id = previous_entry.0;
             let client_id = previous_entry.1;
@@ -271,7 +312,11 @@ impl UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
         }
@@ -288,7 +333,7 @@ impl UPTransportVsomeipInnerHandle {
             .get_storage()
             .get_registry_write()
             .await
-            .set_listener_id_and_listener_config(listener_id, listener_config);
+            .insert_listener_id_and_listener_config(listener_id, listener_config);
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
@@ -300,7 +345,11 @@ impl UPTransportVsomeipInnerHandle {
             return Err(err);
         }
 
-        let insert_res = self.get_storage().get_registry_write().await.insert_listener_id_client_id(listener_id, message_type.client_id());
+        let insert_res = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .insert_listener_id_client_id(listener_id, message_type.client_id());
         if let Some(previous_entry) = insert_res {
             let listener_id = previous_entry.0;
             let client_id = previous_entry.1;
@@ -312,12 +361,22 @@ impl UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
         }
 
-        if self.get_storage().get_registry_read().await.get_app_name_for_client_id(message_type.client_id()).is_none() {
+        if self
+            .get_storage()
+            .get_registry_read()
+            .await
+            .get_app_name_for_client_id(message_type.client_id())
+            .is_none()
+        {
             panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
         }
 
@@ -381,7 +440,212 @@ impl UPTransportVsomeipInnerHandle {
         &self,
         listener: &Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        todo!()
+        let Some(config_path) = &self.config_path else {
+            let err_msg = "No path to a vsomeip config file was provided";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+        };
+
+        let application_configs = extract_applications(config_path)?;
+        trace!("Got vsomeip application_configs: {application_configs:?}");
+
+        {
+            let mut point_to_point_listener = self.point_to_point_listener.write().await;
+            if point_to_point_listener.is_some() {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "We already have a point-to-point UListener registered",
+                ));
+            }
+            *point_to_point_listener = Some(listener.clone());
+            trace!("We found a point-to-point listener and set it");
+        }
+
+        for app_config in &application_configs {
+            let (tx, rx) = oneshot::channel();
+            // TODO: Reconsider if we leave this here or use the initialize_vsomeip_app function
+            let send_to_inner_res = Self::send_to_inner_with_status(
+                &self.engine.transport_command_sender,
+                TransportCommand::StartVsomeipApp2(app_config.id, app_config.name.clone(), tx),
+            )
+            .await;
+            if let Err(err) = send_to_inner_res {
+                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                panic!("engine has stopped! unable to proceed! with err: {err:?}");
+            }
+
+            let await_res = Self::await_internal_function(
+                &format!("Initializing point-to-point listener apps. ApplicationConfig: {:?} app_config.id: {} app_config.name: {}",
+                         app_config, app_config.id, app_config.name),
+                rx,
+            )
+            .await;
+
+            if let Err(err) = await_res {
+                return Err(err);
+            }
+
+            let registration_type = RegistrationType::Request(app_config.id);
+
+            let insert_res = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .insert_client_and_app_name(registration_type.client_id(), app_config.name.clone());
+
+            if let Err(err) = insert_res {
+                let Some(app_name) = self
+                    .get_storage()
+                    .get_registry_write()
+                    .await
+                    .remove_app_name_for_client_id(registration_type.client_id())
+                else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::NOT_FOUND,
+                        format!("Unable to find app_name for point-to-point app: app.id: {} app.name: {}", app_config.id, app_config.name),
+                    ));
+                };
+
+                let (tx, rx) = oneshot::channel();
+                let send_to_inner_res = Self::send_to_inner_with_status(
+                    &self.engine.transport_command_sender,
+                    TransportCommand::StopVsomeipApp(registration_type.client_id(), app_name, tx),
+                )
+                .await;
+                if let Err(err) = send_to_inner_res {
+                    // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                    panic!("engine has stopped! unable to proceed! with err: {err:?}");
+                }
+                Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
+            }
+
+            let Ok(listener_id) = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .find_available_listener_id()
+                .await
+            else {
+                return Err(UStatus::fail_with_code(
+                    UCode::RESOURCE_EXHAUSTED,
+                    "Exhausted all extern 'C' fns",
+                ));
+            };
+
+            let comp_listener = ComparableListener::new(listener.clone());
+
+            let source_filter = any_uuri();
+            // TODO: How to explicitly handle instance_id?
+            //  I'm not sure it's possible to set within the vsomeip config file
+            let sink_filter = any_uuri_fixed_authority_id(
+                &self.get_storage().get_local_authority(),
+                app_config.id,
+            );
+
+            let insert_res = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .insert_listener_id_transport(listener_id, self.get_storage())
+                .await;
+            if let Err(err) = insert_res {
+                let _ = self
+                    .get_storage()
+                    .get_extern_fn_registry_write()
+                    .await
+                    .free_listener_id(listener_id)
+                    .await;
+
+                return Err(err);
+            }
+
+            let insert_res = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .insert_listener_id_client_id(listener_id, registration_type.client_id());
+            if let Some(previous_entry) = insert_res {
+                let listener_id = previous_entry.0;
+                let client_id = previous_entry.1;
+
+                let _ = self
+                    .get_storage()
+                    .get_extern_fn_registry_write()
+                    .await
+                    .free_listener_id(listener_id)
+                    .await;
+
+                let _ = self
+                    .get_storage()
+                    .get_extern_fn_registry_write()
+                    .await
+                    .remove_listener_id_transport(listener_id);
+
+                return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
+            }
+
+            let listener_config = (
+                source_filter.clone(),
+                Some(sink_filter.clone()),
+                comp_listener.clone(),
+            );
+
+            let insert_res = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .insert_listener_id_and_listener_config(listener_id, listener_config);
+            if let Err(err) = insert_res {
+                let _ = self
+                    .get_storage()
+                    .get_extern_fn_registry_write()
+                    .await
+                    .free_listener_id(listener_id)
+                    .await;
+
+                let _ = self
+                    .get_storage()
+                    .get_extern_fn_registry_write()
+                    .await
+                    .remove_listener_id_transport(listener_id);
+
+                let _ = self
+                    .get_storage()
+                    .get_registry_write()
+                    .await
+                    .remove_client_id_based_on_listener_id(listener_id);
+
+                return Err(err);
+            }
+
+            let (tx, rx) = oneshot::channel();
+            let extern_fn = self
+                .get_storage()
+                .get_extern_fn_registry_read()
+                .await
+                .get_extern_fn(listener_id)
+                .await;
+            let msg_handler = MessageHandlerFnPtr(extern_fn);
+
+            let send_to_inner_res = Self::send_to_inner_with_status(
+                &self.engine.transport_command_sender,
+                TransportCommand::RegisterListener(
+                    source_filter.clone(),
+                    Some(sink_filter.clone()),
+                    registration_type,
+                    msg_handler,
+                    tx,
+                ),
+            )
+            .await;
+            if let Err(err) = send_to_inner_res {
+                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                panic!("engine has stopped! unable to proceed!");
+            }
+
+            Self::await_internal_function("register", rx).await?;
+        }
+        Ok(())
     }
 
     async fn unregister_point_to_point_listener(
@@ -399,11 +663,15 @@ impl UPTransportVsomeipInnerHandle {
         todo!()
     }
 
-    pub async fn get_point_to_point_listener_read(&self) -> RwLockReadGuard<'_, Option<Arc<dyn UListener>>> {
+    pub async fn get_point_to_point_listener_read(
+        &self,
+    ) -> RwLockReadGuard<'_, Option<Arc<dyn UListener>>> {
         self.point_to_point_listener.read().await
     }
 
-    pub async fn get_point_to_point_listener_write(&self) -> RwLockWriteGuard<'_, Option<Arc<dyn UListener>>> {
+    pub async fn get_point_to_point_listener_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, Option<Arc<dyn UListener>>> {
         self.point_to_point_listener.write().await
     }
 }
@@ -520,7 +788,11 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             return Err(err);
         }
 
-        let insert_res = self.get_storage().get_registry_write().await.insert_listener_id_client_id(listener_id, registration_type.client_id());
+        let insert_res = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .insert_listener_id_client_id(listener_id, registration_type.client_id());
         if let Some(previous_entry) = insert_res {
             let listener_id = previous_entry.0;
             let client_id = previous_entry.1;
@@ -532,7 +804,11 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
         }
@@ -548,7 +824,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             .get_storage()
             .get_registry_write()
             .await
-            .set_listener_id_and_listener_config(listener_id, listener_config);
+            .insert_listener_id_and_listener_config(listener_id, listener_config);
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
@@ -557,9 +833,17 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
-            let _ = self.get_storage().get_registry_write().await.remove_client_id_based_on_listener_id(listener_id);
+            let _ = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_client_id_based_on_listener_id(listener_id);
 
             return Err(err);
         }
@@ -586,9 +870,17 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .free_listener_id(listener_id)
                 .await;
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
-            let _ = self.get_storage().get_registry_write().await.remove_client_id_based_on_listener_id(listener_id);
+            let _ = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_client_id_based_on_listener_id(listener_id);
 
             let _ = self
                 .get_storage()
@@ -603,7 +895,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             .get_storage()
             .get_registry_write()
             .await
-            .set_client_and_app_name(registration_type.client_id(), app_name);
+            .insert_client_and_app_name(registration_type.client_id(), app_name);
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
@@ -618,9 +910,17 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 .await
                 .remove_listener_id_and_listener_config_based_on_listener_id(listener_id);
 
-            let _ = self.get_storage().get_extern_fn_registry_write().await.remove_listener_id_transport(listener_id);
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id);
 
-            let _ = self.get_storage().get_registry_write().await.remove_client_id_based_on_listener_id(listener_id);
+            let _ = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_client_id_based_on_listener_id(listener_id);
 
             let Some(app_name) = self
                 .get_storage()
@@ -917,6 +1217,11 @@ pub enum TransportCommand {
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
     ),
+    StartVsomeipApp2(
+        ClientId,
+        ApplicationName,
+        oneshot::Sender<Result<(), UStatus>>,
+    ),
 }
 
 pub(crate) struct UPTransportVsomeipInnerEngine {
@@ -1185,6 +1490,42 @@ impl UPTransportVsomeipInnerEngine {
                     error!("after insertion into instance_client_ids: {instance_id_client_ids:?}");
 
                     Self::return_oneshot_result(add_res, return_channel).await;
+                }
+                TransportCommand::StartVsomeipApp2(client_id, app_name, return_channel) => {
+                    // TODO: Implement based on StartVsomeipApp but w/o using Registry::
+                    trace!(
+                        "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                        client_id,
+                        app_name
+                    );
+                    let new_app_res = Self::start_vsomeip_app_internal(
+                        client_id,
+                        app_name.clone(),
+                        config_path.clone(),
+                        &runtime_wrapper,
+                    )
+                    .await;
+                    trace!(
+                        "{}:{} - After attempt to create new app for client_id: {} app_name: {}",
+                        UP_CLIENT_VSOMEIP_TAG,
+                        UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
+                        client_id,
+                        app_name
+                    );
+
+                    if let Err(err) = new_app_res {
+                        error!("Unable to create new app: {:?}", err);
+                        Self::return_oneshot_result(Err(err), return_channel).await;
+                        continue;
+                    }
+
+                    // TODO: Need to find a way to confirm that we brought up the vsomeip app here
+                    //  and use that for the result.
+                    //
+                    //  For now we assume success
+                    Self::return_oneshot_result(Ok(()), return_channel).await;
                 }
                 TransportCommand::StopVsomeipApp(_client_id, app_name, return_channel) => {
                     let stop_res =
