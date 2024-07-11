@@ -653,7 +653,173 @@ impl UPTransportVsomeipInnerHandle {
         listener: &Arc<dyn UListener>,
         _registration_type: &RegistrationType,
     ) -> Result<(), UStatus> {
-        todo!()
+        // TODO: Unregister all listener instances we established for handling responses
+
+        let Some(config_path) = &self.config_path else {
+            let err_msg = "No path to a vsomeip config file was provided";
+            error!("{err_msg}");
+            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+        };
+
+        let application_configs = extract_applications(config_path)?;
+        trace!("Got vsomeip application_configs: {application_configs:?}");
+
+        let ptp_comp_listener = {
+            let point_to_point_listener = self.point_to_point_listener.read().await;
+            let Some(ref point_to_point_listener) = *point_to_point_listener else {
+                return Err(UStatus::fail_with_code(
+                    UCode::ALREADY_EXISTS,
+                    "No point-to-point listener found, we can't unregister it",
+                ));
+            };
+            ComparableListener::new(point_to_point_listener.clone())
+        };
+        let comp_listener = ComparableListener::new(listener.clone());
+        if ptp_comp_listener != comp_listener {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "listener provided doesn't match registered point_to_point_listener",
+            ));
+        }
+
+        for app_config in &application_configs {
+            let source_filter = any_uuri();
+            let sink_filter = any_uuri_fixed_authority_id(
+                &self.get_storage().get_local_authority(),
+                app_config.id,
+            );
+
+            trace!(
+                "Searching for src: {source_filter:?} sink: {sink_filter:?} to find listener_id"
+            );
+
+            self.get_storage()
+                .get_registry_read()
+                .await
+                .get_app_name_for_client_id(app_config.id)
+                .ok_or(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    format!("No application found for client_id: {}", app_config.id),
+                ))?;
+
+            let (tx, rx) = oneshot::channel();
+            let registration_type = {
+                let reg_type_res = determine_registration_type(
+                    &source_filter.clone(),
+                    &Some(sink_filter.clone()),
+                    self.get_storage().get_ue_id(),
+                );
+                match reg_type_res {
+                    Ok(registration_type) => registration_type,
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            };
+
+            let send_to_inner_res = Self::send_to_inner_with_status(
+                &self.engine.transport_command_sender,
+                TransportCommand::UnregisterListener(
+                    source_filter.clone(),
+                    Some(sink_filter.clone()),
+                    registration_type,
+                    tx,
+                ),
+            )
+            .await;
+            if let Err(err) = send_to_inner_res {
+                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                panic!("engine has stopped! unable to proceed! with err: {err:?}");
+            }
+            Self::await_internal_function("unregister", rx).await?;
+
+            let comp_listener = ComparableListener::new(listener.clone());
+            let listener_config = (
+                source_filter.clone(),
+                Some(sink_filter.clone()),
+                comp_listener,
+            );
+
+            let Some(listener_id) = self
+                .get_storage()
+                .get_registry_read()
+                .await
+                .get_listener_id_for_listener_config(listener_config)
+            else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    "Unable to find listener_id for listener_config",
+                ));
+            };
+
+            let Some(client_id) = self
+                .get_storage()
+                .get_registry_write()
+                .await
+                .remove_client_id_based_on_listener_id(listener_id)
+            else {
+                return Err(UStatus::fail_with_code(
+                    UCode::NOT_FOUND,
+                    format!("Unable to find client_id for listener_id: {listener_id}"),
+                ));
+            };
+
+            if let Err(err) = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .free_listener_id(listener_id)
+                .await
+            {
+                warn!("Unable to free listener_id: {listener_id} with err: {err:?}");
+            }
+
+            if let Err(err) = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("Unable to remove storage for listener_id: {listener_id} with err: {err:?}");
+            }
+
+            if self
+                .get_storage()
+                .get_registry_read()
+                .await
+                .listener_count_for_client_id(client_id)
+                == 0
+            {
+                let Some(app_name) = self
+                    .get_storage()
+                    .get_registry_write()
+                    .await
+                    .remove_app_name_for_client_id(client_id)
+                else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::NOT_FOUND,
+                        format!("Unable to find app_name for listener_id: {listener_id}"),
+                    ));
+                };
+                trace!(
+                    "No more remaining listeners for client_id: {client_id} app_name: {app_name}"
+                );
+
+                let (tx, rx) = oneshot::channel();
+                let send_to_inner_res = Self::send_to_inner_with_status(
+                    &self.engine.transport_command_sender,
+                    TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+                )
+                .await;
+                if let Err(err) = send_to_inner_res {
+                    // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                    panic!("engine has stopped! unable to proceed! with err: {err:?}");
+                }
+                Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
+            }
+        }
+        Ok(())
     }
 
     async fn initialize_vsomeip_app(
