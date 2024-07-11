@@ -152,12 +152,17 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 trace!("Was able to convert to UMessage");
 
-                trace!("Calling extern function {}", listener_id);
+                trace!("Calling listener registered under {}", listener_id);
                 // Change: Using a separate block to handle the registry read for listener to control the borrow scope
                 let listener = {
                     let registry_read = transport_storage.get_registry_read().await;
                     match registry_read.get_listener_for_listener_id(listener_id) {
-                        Some(listener) => listener,
+                        Some(listener) => {
+                            // Send the listener and umsg back to the main thread
+                            if tx.send((listener, umsg)).is_err() {
+                                error!("Failed to send listener and umsg to main thread");
+                            }
+                        },
                         None => {
                             error!("Listener not found for ID {}", listener_id);
                             return;

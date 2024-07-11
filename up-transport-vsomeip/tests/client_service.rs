@@ -23,6 +23,8 @@ use up_rust::{
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
+const TEST_DURATION: u64 = 3;
+
 pub struct ResponseListener {
     received_response: AtomicUsize,
 }
@@ -164,7 +166,7 @@ async fn client_service() {
 
     let client_res = UPTransportVsomeip::new_with_config(
         &client_authority_name.to_string(),
-        &"me_authority".to_string(),
+        &service_authority_name.to_string(),
         streamer_ue_id,
         &client_config.unwrap(),
     );
@@ -213,7 +215,7 @@ async fn client_service() {
 
     let service_res = UPTransportVsomeip::new_with_config(
         &service_authority_name.to_string(),
-        &"me_authority".to_string(),
+        &client_authority_name.to_string(),
         streamer_ue_id,
         &service_config.unwrap(),
     );
@@ -248,7 +250,7 @@ async fn client_service() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Track the start time and set the duration for the loop
-    let duration = Duration::from_millis(1000);
+    let duration = Duration::from_millis(TEST_DURATION);
     let start_time = Instant::now();
 
     let mut iterations = 0;
@@ -281,6 +283,7 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
 
+    println!("iterations: {}", iterations);
     println!(
         "request_listener_check.received_request(): {}",
         request_listener_check.received_request()

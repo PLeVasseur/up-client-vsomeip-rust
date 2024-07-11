@@ -1723,7 +1723,7 @@ impl UPTransportVsomeipInnerEngine {
                 if !transport_storage
                     .get_vsomeip_offered_requested_write()
                     .await
-                    .insert_event_offered(service_id, instance_id, event_id)
+                    .is_event_requested(service_id, instance_id, event_id)
                 {
                     get_pinned_application(application_wrapper).request_service(
                         service_id,

@@ -147,6 +147,8 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
+    println!("iterations: {}", iterations);
+
     println!(
         "subscriber_listener_check.received_publish(): {}",
         subscriber_listener_check.received_publish()
