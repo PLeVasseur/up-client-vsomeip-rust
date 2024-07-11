@@ -14,7 +14,10 @@
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::UPTransportVsomeip;
-use crate::{ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner};
+use crate::{
+    ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner,
+    UPTransportVsomeipStorage,
+};
 use async_trait::async_trait;
 use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
@@ -55,7 +58,7 @@ fn get_runtime() -> Arc<Runtime> {
 generate_message_handler_extern_c_fns!(10000);
 
 lazy_static! {
-    static ref LISTENER_ID_TRANSPORT_SHIM: TokioRwLock<HashMap<usize, Weak<dyn MockableUPTransportVsomeipInner + Send + Sync>>> =
+    static ref LISTENER_ID_TRANSPORT_SHIM: TokioRwLock<HashMap<usize, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>> =
         TokioRwLock::new(HashMap::new());
 }
 
@@ -64,13 +67,13 @@ pub(crate) trait MockableExternFnRegistry: Send + Sync {
     async fn insert_listener_id_transport(
         &self,
         listener_id: usize,
-        transport: Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>,
+        transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
     ) -> Result<(), UStatus>;
     async fn remove_listener_id_transport(&self, listener_id: usize) -> Result<(), UStatus>;
     async fn get_listener_id_transport(
         &self,
         listener_id: usize,
-    ) -> Option<Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>>;
+    ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>>;
     async fn free_listener_id(&self, listener_id: usize) -> Result<(), UStatus>;
     async fn find_available_listener_id(&self) -> Result<usize, UStatus>;
 }
@@ -82,7 +85,7 @@ impl MockableExternFnRegistry for ExternFnRegistry {
     async fn insert_listener_id_transport(
         &self,
         listener_id: usize,
-        transport: Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>,
+        transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
     ) -> Result<(), UStatus> {
         let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
         if !listener_id_transport_shim.contains_key(&listener_id) {
@@ -118,7 +121,7 @@ impl MockableExternFnRegistry for ExternFnRegistry {
     async fn get_listener_id_transport(
         &self,
         listener_id: usize,
-    ) -> Option<Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>> {
+    ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
         let listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.read().await;
         let Some(transport) = listener_id_transport_shim.get(&listener_id) else {
             return None;

@@ -11,11 +11,17 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determine_message_type::RegistrationType;
-use crate::extern_fn_registry::Registry;
+use crate::determine_message_type::{determine_registration_type, RegistrationType};
+use crate::extern_fn_registry::{ExternFnRegistry, MockableExternFnRegistry, Registry};
+use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
-use crate::vsomeip_offered_requested::VsomeipOfferedRequested;
-use crate::{split_u32_to_u16, ApplicationName, ClientId, MockableUPTransportVsomeipInner};
+use crate::rpc_correlation::RpcCorrelation2;
+use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
+use crate::{
+    split_u32_to_u16, ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner,
+    UPTransportVsomeipStorage, UeId,
+};
+use async_trait::async_trait;
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace};
 use std::path::{Path, PathBuf};
@@ -24,8 +30,8 @@ use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::oneshot;
-use up_rust::{UCode, UListener, UMessage, UMessageType, UStatus, UUri};
+use tokio::sync::{oneshot, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
+use up_rust::{ComparableListener, UCode, UListener, UMessage, UMessageType, UStatus, UUri};
 use uuid::Uuid;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
@@ -49,11 +55,345 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
 pub const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
 
-pub(crate) struct UPTransportVsomeipInnerHandle;
+pub(crate) struct UPTransportVsomeipInnerHandleStorage {
+    ue_id: UeId,
+    local_authority: AuthorityName,
+    remote_authority: AuthorityName,
+    extern_fn_registry: TokioRwLock<Arc<dyn MockableExternFnRegistry>>,
+    listener_registry: TokioRwLock<ListenerRegistry>,
+    rpc_correlation: TokioRwLock<RpcCorrelation2>,
+    vsomeip_offered_requested: TokioRwLock<VsomeipOfferedRequested2>,
+}
 
-// impl MockableUPTransportVsomeip for UPTransportVsomeipInnerHandle {
-//
-// }
+impl UPTransportVsomeipInnerHandleStorage {
+    pub async fn new(
+        local_authority: AuthorityName,
+        remote_authority: AuthorityName,
+        ue_id: UeId,
+    ) -> Self {
+        let extern_fn_registry: Arc<dyn MockableExternFnRegistry> = Arc::new(ExternFnRegistry);
+
+        Self {
+            ue_id,
+            local_authority,
+            remote_authority,
+            extern_fn_registry: TokioRwLock::new(extern_fn_registry),
+            listener_registry: TokioRwLock::new(ListenerRegistry::new()),
+            rpc_correlation: TokioRwLock::new(RpcCorrelation2::new()),
+            vsomeip_offered_requested: TokioRwLock::new(VsomeipOfferedRequested2::new()),
+        }
+    }
+}
+
+pub(crate) struct UPTransportVsomeipInnerHandle {
+    storage: Arc<dyn UPTransportVsomeipStorage>,
+    engine: UPTransportVsomeipInnerEngine,
+}
+
+impl UPTransportVsomeipInnerHandle {
+    pub async fn new(
+        local_authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+    ) -> Result<Self, UStatus> {
+        let storage = Arc::new(
+            UPTransportVsomeipInnerHandleStorage::new(
+                local_authority_name.clone(),
+                remote_authority_name.clone(),
+                ue_id,
+            )
+            .await,
+        );
+
+        let engine = UPTransportVsomeipInnerEngine::new(None);
+
+        Ok(Self { engine, storage })
+    }
+
+    pub async fn new_with_config(
+        local_authority_name: &AuthorityName,
+        remote_authority_name: &AuthorityName,
+        ue_id: UeId,
+        config_path: &Path,
+    ) -> Result<Self, UStatus> {
+        let storage = Arc::new(
+            UPTransportVsomeipInnerHandleStorage::new(
+                local_authority_name.clone(),
+                remote_authority_name.clone(),
+                ue_id,
+            )
+            .await,
+        );
+
+        let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
+
+        Ok(Self { engine, storage })
+    }
+
+    pub(crate) async fn new_supply_storage(
+        storage: Arc<dyn UPTransportVsomeipStorage>,
+    ) -> Result<Self, UStatus> {
+        let engine = UPTransportVsomeipInnerEngine::new(None);
+
+        Ok(Self { engine, storage })
+    }
+
+    pub(crate) async fn new_with_config_supply_storage(
+        config_path: &Path,
+        storage: Arc<dyn UPTransportVsomeipStorage>,
+    ) -> Result<Self, UStatus> {
+        let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
+
+        Ok(Self { engine, storage })
+    }
+
+    fn start_vsomeip_app(
+        &self,
+        transport_instance_id: uuid::Uuid,
+        client_id: ClientId,
+        application_name: ApplicationName,
+    ) -> Result<(), UStatus> {
+        todo!()
+    }
+
+    fn stop_vsomeip_app(
+        &self,
+        client_id: ClientId,
+        application_name: ApplicationName,
+    ) -> Result<(), UStatus> {
+        todo!()
+    }
+
+    async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
+        &self,
+        message: &UMessage,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        message_type: RegistrationType,
+    ) -> Result<bool, UStatus> {
+        todo!()
+    }
+
+    async fn register_point_to_point_listener(
+        &self,
+        listener: &Arc<dyn UListener>,
+    ) -> Result<(), UStatus> {
+        todo!()
+    }
+
+    async fn unregister_point_to_point_listener(
+        &self,
+        listener: &Arc<dyn UListener>,
+        _registration_type: &RegistrationType,
+    ) -> Result<(), UStatus> {
+        todo!()
+    }
+
+    async fn initialize_vsomeip_app(
+        &self,
+        registration_type: &RegistrationType,
+    ) -> Result<ApplicationName, UStatus> {
+        todo!()
+    }
+}
+
+#[async_trait]
+impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
+    fn get_local_authority(&self) -> AuthorityName {
+        self.local_authority.clone()
+    }
+
+    fn get_remote_authority(&self) -> AuthorityName {
+        self.remote_authority.clone()
+    }
+
+    fn get_ue_id(&self) -> UeId {
+        todo!()
+    }
+
+    async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry> {
+        self.listener_registry.read().await
+    }
+
+    async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry> {
+        self.listener_registry.write().await
+    }
+
+    async fn get_extern_fn_registry_read(
+        &self,
+    ) -> RwLockReadGuard<'_, Arc<dyn MockableExternFnRegistry>> {
+        self.extern_fn_registry.read().await
+    }
+
+    async fn get_extern_fn_registry_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, Arc<dyn MockableExternFnRegistry>> {
+        self.extern_fn_registry.write().await
+    }
+
+    async fn get_rpc_correlation_read(&self) -> RwLockReadGuard<'_, RpcCorrelation2> {
+        self.rpc_correlation.read().await
+    }
+
+    async fn get_rpc_correlation_write(&self) -> RwLockWriteGuard<'_, RpcCorrelation2> {
+        self.rpc_correlation.write().await
+    }
+
+    async fn get_vsomeip_offered_requested_read(
+        &self,
+    ) -> RwLockReadGuard<'_, VsomeipOfferedRequested2> {
+        self.vsomeip_offered_requested.read().await
+    }
+
+    async fn get_vsomeip_offered_requested_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, VsomeipOfferedRequested2> {
+        self.vsomeip_offered_requested.write().await
+    }
+}
+
+#[async_trait]
+impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
+    fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage> {
+        self.storage.clone()
+    }
+
+    async fn register_listener(
+        &self,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
+    ) -> Result<(), UStatus> {
+        let registration_type_res = determine_registration_type(
+            source_filter,
+            &sink_filter.cloned(),
+            self.get_storage().get_ue_id(),
+        );
+        let Ok(registration_type) = registration_type_res else {
+            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
+        };
+
+        trace!("registration_type: {registration_type:?}");
+
+        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+            return self.register_point_to_point_listener(&listener).await;
+        }
+
+        let Ok(listener_id) = self
+            .get_storage()
+            .get_extern_fn_registry_write()
+            .await
+            .find_available_listener_id()
+            .await
+        else {
+            return Err(UStatus::fail_with_code(
+                UCode::RESOURCE_EXHAUSTED,
+                "No more available extern fns",
+            ));
+        };
+
+        let insert_res = self
+            .get_storage()
+            .get_extern_fn_registry_write()
+            .await
+            .insert_listener_id_transport(listener_id, self.get_storage())
+            .await;
+        if let Err(err) = insert_res {
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .free_listener_id(listener_id)
+                .await;
+
+            return Err(err);
+        }
+
+        let comp_listener = ComparableListener::new(listener);
+        let listener_config = (
+            source_filter.clone(),
+            sink_filter.cloned(),
+            comp_listener.clone(),
+        );
+
+        let insert_res = self
+            .get_storage()
+            .get_registry_write()
+            .await
+            .set_listener_id_and_listener_config(listener_id, listener_config);
+        if let Err(err) = insert_res {
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .free_listener_id(listener_id)
+                .await;
+
+            return Err(err);
+        }
+
+        let app_name_res = {
+            if let Some(app_name) = self
+                .get_storage()
+                .get_registry_read()
+                .await
+                .get_app_name_for_client_id(registration_type.client_id())
+            {
+                Ok(app_name)
+            } else {
+                self.initialize_vsomeip_app(&registration_type).await
+            }
+        };
+
+        let Ok(app_name) = app_name_res else {
+            let _ = self
+                .get_storage()
+                .get_extern_fn_registry_write()
+                .await
+                .free_listener_id(listener_id)
+                .await;
+
+            return Err(app_name_res.err().unwrap());
+        };
+
+        //
+        // let app_name = Registry::find_app_name(registration_type.client_id()).await;
+        // let extern_fn = get_extern_fn(listener_id);
+        // let msg_handler = MessageHandlerFnPtr(extern_fn);
+        // let src = source_filter.clone();
+        // let sink = sink_filter.cloned();
+        //
+        // trace!("Obtained extern_fn");
+        //
+        // self.initialize_vsomeip_app_as_needed(&registration_type, app_name)
+        //     .await?;
+        //
+        // Registry::map_listener_id_to_client_id(registration_type.client_id(), listener_id).await?;
+        //
+        // let (tx, rx) = oneshot::channel();
+        // send_to_inner_with_status(
+        //     &self.inner_transport.transport_command_sender,
+        //     TransportCommand::RegisterListener(src, sink, registration_type, msg_handler, tx),
+        // )
+        //     .await?;
+        // await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await
+
+        Ok(())
+    }
+
+    async fn unregister_listener(
+        &self,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
+    ) {
+        todo!()
+    }
+
+    async fn send(&self, msg: UMessage) -> Result<(), UStatus> {
+        todo!()
+    }
+}
 
 pub enum TransportCommand {
     // Primary purpose of a UTransport
@@ -89,11 +429,11 @@ pub enum TransportCommand {
     ),
 }
 
-pub(crate) struct UPTransportVsomeipInner {
+pub(crate) struct UPTransportVsomeipInnerEngine {
     pub(crate) transport_command_sender: Sender<TransportCommand>,
 }
 
-impl UPTransportVsomeipInner {
+impl UPTransportVsomeipInnerEngine {
     pub fn new(config_path: Option<&Path>) -> Self {
         let (tx, rx) = channel(10000);
 

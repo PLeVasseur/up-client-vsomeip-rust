@@ -121,6 +121,14 @@ pub(crate) struct RpcCorrelation2 {
 }
 
 impl RpcCorrelation2 {
+    pub fn new() -> Self {
+        Self {
+            ue_request_correlation: HashMap::new(),
+            me_request_correlation: HashMap::new(),
+            client_id_session_id_tracking: HashMap::new(),
+        }
+    }
+
     pub(crate) fn retrieve_session_id(&mut self, client_id: ClientId) -> SessionId {
         let current_sesion_id = self
             .client_id_session_id_tracking

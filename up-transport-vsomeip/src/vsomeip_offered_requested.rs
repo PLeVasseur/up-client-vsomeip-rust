@@ -111,6 +111,15 @@ pub(crate) struct VsomeipOfferedRequested2 {
 }
 
 impl VsomeipOfferedRequested2 {
+    pub fn new() -> Self {
+        Self {
+            offered_services: HashSet::new(),
+            requested_services: HashSet::new(),
+            offered_events: HashSet::new(),
+            requested_events: HashSet::new(),
+        }
+    }
+
     pub(crate) async fn is_service_offered(
         &self,
         service_id: ServiceId,

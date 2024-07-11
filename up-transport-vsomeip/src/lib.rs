@@ -17,6 +17,7 @@ use log::error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
 use up_rust::{UCode, UListener, UMessage, UStatus, UUri, UUID};
 
@@ -29,8 +30,9 @@ use crate::determine_message_type::RegistrationType;
 use crate::extern_fn_registry::MockableExternFnRegistry;
 use crate::listener_registry::ListenerRegistry;
 use crate::rpc_correlation::RpcCorrelation2;
+use crate::transport_inner::TransportCommand;
 use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
-use transport_inner::UPTransportVsomeipInner;
+use transport_inner::UPTransportVsomeipInnerEngine;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 
 mod vsomeip_config;
@@ -95,35 +97,12 @@ type InstanceId = u16;
 type MethodId = u16;
 
 #[async_trait]
-pub(crate) trait MockableUPTransportVsomeipInner {
-    fn register_listener(
-        &self,
-        source_filter: UUri,
-        sink_filter: Option<UUri>,
-        listener: Arc<dyn UListener>,
-    ) -> Result<(), UStatus>;
+pub(crate) trait UPTransportVsomeipStorage: Send + Sync {
+    fn get_local_authority(&self) -> AuthorityName;
 
-    fn unregister_listener(
-        &self,
-        source_filter: UUri,
-        sink_filter: Option<UUri>,
-        listener: Arc<dyn UListener>,
-    );
+    fn get_remote_authority(&self) -> AuthorityName;
 
-    fn send(&self, msg: UMessage) -> Result<(), UStatus>;
-
-    fn start_vsomeip_app(
-        &self,
-        transport_instance_id: uuid::Uuid,
-        client_id: ClientId,
-        application_name: ApplicationName,
-    ) -> Result<(), UStatus>;
-
-    fn stop_vsomeip_app(
-        &self,
-        client_id: ClientId,
-        application_name: ApplicationName,
-    ) -> Result<(), UStatus>;
+    fn get_ue_id(&self) -> UeId;
 
     async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry>;
 
@@ -131,11 +110,11 @@ pub(crate) trait MockableUPTransportVsomeipInner {
 
     async fn get_extern_fn_registry_read(
         &self,
-    ) -> RwLockReadGuard<'_, dyn MockableExternFnRegistry>;
+    ) -> RwLockReadGuard<'_, Arc<dyn MockableExternFnRegistry>>;
 
     async fn get_extern_fn_registry_write(
         &self,
-    ) -> RwLockWriteGuard<'_, dyn MockableExternFnRegistry>;
+    ) -> RwLockWriteGuard<'_, Arc<dyn MockableExternFnRegistry>>;
 
     async fn get_rpc_correlation_read(&self) -> RwLockReadGuard<'_, RpcCorrelation2>;
 
@@ -148,20 +127,34 @@ pub(crate) trait MockableUPTransportVsomeipInner {
     async fn get_vsomeip_offered_requested_write(
         &self,
     ) -> RwLockWriteGuard<'_, VsomeipOfferedRequested2>;
+}
 
-    // pub(crate) async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry> {
-    //     self.listener_registry.read().await
-    // }
-    //
-    // pub(crate) async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry> {
-    //     self.listener_registry.write().await
-    // }
+#[async_trait]
+pub(crate) trait MockableUPTransportVsomeipInner {
+    // the below are commands we can send to the inner engine
+    fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage>;
+
+    async fn register_listener(
+        &self,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
+    ) -> Result<(), UStatus>;
+
+    async fn unregister_listener(
+        &self,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
+    );
+
+    async fn send(&self, msg: UMessage) -> Result<(), UStatus>;
 }
 
 pub struct UPTransportVsomeip {
     instance_id: uuid::Uuid,
     listener_registry: Arc<TokioRwLock<ListenerRegistry>>,
-    inner_transport: UPTransportVsomeipInner,
+    inner_transport: UPTransportVsomeipInnerEngine,
     authority_name: AuthorityName,
     remote_authority_name: AuthorityName,
     ue_id: UeId,
@@ -205,7 +198,7 @@ impl UPTransportVsomeip {
         ue_id: UeId,
         config_path: Option<&Path>,
     ) -> Result<Self, UStatus> {
-        let inner_transport = UPTransportVsomeipInner::new(config_path);
+        let inner_transport = UPTransportVsomeipInnerEngine::new(config_path);
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
         let instance_id = uuid::Uuid::new_v4();
