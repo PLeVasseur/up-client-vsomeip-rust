@@ -826,7 +826,34 @@ impl UPTransportVsomeipInnerHandle {
         &self,
         registration_type: &RegistrationType,
     ) -> Result<ApplicationName, UStatus> {
-        todo!()
+        let app_name = format!("{}", registration_type.client_id());
+
+        let (tx, rx) = oneshot::channel();
+        trace!(
+            "{}:{} - Sending TransportCommand for InitializeNewApp",
+            UP_CLIENT_VSOMEIP_TAG,
+            UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+        );
+        let send_to_inner_res = Self::send_to_inner_with_status(
+            &self.engine.transport_command_sender,
+            TransportCommand::StartVsomeipApp2(registration_type.client_id(), app_name.clone(), tx),
+        )
+        .await;
+        if let Err(err) = send_to_inner_res {
+            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            panic!("engine has stopped! unable to proceed! with err: {err:?}");
+        }
+        let internal_res =
+            Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx)
+                .await;
+        if let Err(err) = internal_res {
+            Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
+            ))
+        } else {
+            Ok(app_name)
+        }
     }
 
     pub async fn get_point_to_point_listener_read(
