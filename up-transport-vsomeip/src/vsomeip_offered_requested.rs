@@ -103,4 +103,93 @@ impl VsomeipOfferedRequested {
     }
 }
 
+pub(crate) struct VsomeipOfferedRequested2 {
+    offered_services: HashSet<(ServiceId, InstanceId, MethodId)>,
+    requested_services: HashSet<(ServiceId, InstanceId, MethodId)>,
+    offered_events: HashSet<(ServiceId, InstanceId, EventId)>,
+    requested_events: HashSet<(ServiceId, InstanceId, MethodId)>,
+}
+
+impl VsomeipOfferedRequested2 {
+    pub(crate) async fn is_service_offered(
+        &self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        method_id: MethodId,
+    ) -> bool {
+        self.offered_services
+            .contains(&(service_id, instance_id, method_id))
+    }
+
+    pub(crate) async fn insert_service_offered(
+        &mut self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        method_id: MethodId,
+    ) {
+        self.offered_services
+            .insert((service_id, instance_id, method_id));
+    }
+
+    pub(crate) async fn is_service_requested(
+        &self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        method_id: MethodId,
+    ) -> bool {
+        self.requested_services
+            .contains(&(service_id, instance_id, method_id))
+    }
+
+    pub(crate) async fn insert_service_requested(
+        &mut self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        method_id: MethodId,
+    ) {
+        self.requested_services
+            .insert((service_id, instance_id, method_id));
+    }
+
+    pub(crate) async fn is_event_offered(
+        &self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        event_id: EventId,
+    ) -> bool {
+        self.offered_events
+            .contains(&(service_id, instance_id, event_id))
+    }
+
+    pub(crate) async fn insert_event_offered(
+        &mut self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        event_id: EventId,
+    ) {
+        self.offered_events
+            .insert((service_id, instance_id, event_id));
+    }
+
+    pub(crate) async fn is_event_requested(
+        &self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        event_id: EventId,
+    ) -> bool {
+        self.requested_events
+            .contains(&(service_id, instance_id, event_id))
+    }
+
+    pub(crate) async fn insert_event_requested(
+        &mut self,
+        service_id: ServiceId,
+        instance_id: InstanceId,
+        event_id: EventId,
+    ) {
+        self.requested_events
+            .insert((service_id, instance_id, event_id));
+    }
+}
+
 // TODO: Add unit tests

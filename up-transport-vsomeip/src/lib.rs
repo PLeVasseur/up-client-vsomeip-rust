@@ -11,23 +11,32 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use async_trait::async_trait;
 use futures::executor;
 use log::error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use tokio::sync::{oneshot, RwLock};
-use up_rust::{UCode, UListener, UStatus, UUri, UUID};
+use tokio::sync::{oneshot, Mutex, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
+use up_rust::{UCode, UListener, UMessage, UStatus, UUri, UUID};
 
 mod determine_message_type;
+mod extern_fn_registry;
 mod message_conversions;
-mod registry;
 mod rpc_correlation;
 mod transport_inner;
+use crate::determine_message_type::RegistrationType;
+use crate::extern_fn_registry::MockableExternFnRegistry;
+use crate::listener_registry::ListenerRegistry;
+use crate::rpc_correlation::RpcCorrelation2;
+use crate::vsomeip_offered_requested::{VsomeipOfferedRequested, VsomeipOfferedRequested2};
 use transport_inner::UPTransportVsomeipInner;
+use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
+
 mod vsomeip_config;
 mod vsomeip_offered_requested;
 
+pub(crate) mod listener_registry;
 pub mod transport;
 
 // TODO: use function from up-rust when merged
@@ -85,15 +94,80 @@ type ServiceId = u16;
 type InstanceId = u16;
 type MethodId = u16;
 
+#[async_trait]
+pub(crate) trait MockableUPTransportVsomeipInner {
+    fn register_listener(
+        &self,
+        source_filter: UUri,
+        sink_filter: Option<UUri>,
+        listener: Arc<dyn UListener>,
+    ) -> Result<(), UStatus>;
+
+    fn unregister_listener(
+        &self,
+        source_filter: UUri,
+        sink_filter: Option<UUri>,
+        listener: Arc<dyn UListener>,
+    );
+
+    fn send(&self, msg: UMessage) -> Result<(), UStatus>;
+
+    fn start_vsomeip_app(
+        &self,
+        transport_instance_id: uuid::Uuid,
+        client_id: ClientId,
+        application_name: ApplicationName,
+    ) -> Result<(), UStatus>;
+
+    fn stop_vsomeip_app(
+        &self,
+        client_id: ClientId,
+        application_name: ApplicationName,
+    ) -> Result<(), UStatus>;
+
+    async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry>;
+
+    async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry>;
+
+    async fn get_extern_fn_registry_read(
+        &self,
+    ) -> RwLockReadGuard<'_, dyn MockableExternFnRegistry>;
+
+    async fn get_extern_fn_registry_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, dyn MockableExternFnRegistry>;
+
+    async fn get_rpc_correlation_read(&self) -> RwLockReadGuard<'_, RpcCorrelation2>;
+
+    async fn get_rpc_correlation_write(&self) -> RwLockWriteGuard<'_, RpcCorrelation2>;
+
+    async fn get_vsomeip_offered_requested_read(
+        &self,
+    ) -> RwLockReadGuard<'_, VsomeipOfferedRequested2>;
+
+    async fn get_vsomeip_offered_requested_write(
+        &self,
+    ) -> RwLockWriteGuard<'_, VsomeipOfferedRequested2>;
+
+    // pub(crate) async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry> {
+    //     self.listener_registry.read().await
+    // }
+    //
+    // pub(crate) async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry> {
+    //     self.listener_registry.write().await
+    // }
+}
+
 pub struct UPTransportVsomeip {
     instance_id: uuid::Uuid,
+    listener_registry: Arc<TokioRwLock<ListenerRegistry>>,
     inner_transport: UPTransportVsomeipInner,
     authority_name: AuthorityName,
     remote_authority_name: AuthorityName,
     ue_id: UeId,
     config_path: Option<PathBuf>,
     // if this is not None, indicates that we are in a dedicated point-to-point mode
-    point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
+    point_to_point_listener: TokioRwLock<Option<Arc<dyn UListener>>>,
 }
 
 impl UPTransportVsomeip {
@@ -140,8 +214,11 @@ impl UPTransportVsomeip {
             instance_id.hyphenated().to_string()
         );
 
+        let listener_registry = Arc::new(TokioRwLock::new(ListenerRegistry::new()));
+
         Ok(Self {
             instance_id,
+            listener_registry,
             inner_transport,
             authority_name: authority_name.to_string(),
             remote_authority_name: remote_authority_name.to_string(),
@@ -149,5 +226,13 @@ impl UPTransportVsomeip {
             point_to_point_listener: None.into(),
             config_path,
         })
+    }
+
+    pub(crate) fn get_authority(&self) -> AuthorityName {
+        self.authority_name.clone()
+    }
+
+    pub(crate) fn get_remote_authority(&self) -> AuthorityName {
+        self.remote_authority_name.clone()
     }
 }

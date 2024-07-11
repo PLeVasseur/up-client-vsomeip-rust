@@ -14,7 +14,7 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::registry::{get_extern_fn, CloseVsomeipApp, Registry};
+use crate::extern_fn_registry::{get_extern_fn, CloseVsomeipApp, Registry};
 use crate::transport_inner::{TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP};
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,

@@ -11,17 +11,20 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
-use crate::{ApplicationName, AuthorityName, ClientId};
+use crate::UPTransportVsomeip;
+use crate::{ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner};
+use async_trait::async_trait;
 use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
 use log::{error, info, trace};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, RwLock, Weak};
 use tokio::runtime::Runtime;
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as TokioRwLock;
 use tokio::task::LocalSet;
 use tokio::time::Instant;
 use up_rust::{ComparableListener, UListener, UUri};
@@ -51,25 +54,126 @@ fn get_runtime() -> Arc<Runtime> {
 
 generate_message_handler_extern_c_fns!(10000);
 
-type ListenerIdMap = RwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
 lazy_static! {
-    static ref LISTENER_ID_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
-        RwLock::new(HashMap::new());
-    static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: RwLock<HashMap<usize, AuthorityName>> =
-        RwLock::new(HashMap::new());
-    static ref LISTENER_REGISTRY: RwLock<HashMap<usize, (UUri, Option<UUri>, ComparableListener)>> =
-        RwLock::new(HashMap::new());
-    static ref LISTENER_ID_MAP: ListenerIdMap = RwLock::new(HashMap::new());
-    static ref LISTENER_ID_CLIENT_ID_MAPPING: RwLock<HashMap<usize, ClientId>> =
-        RwLock::new(HashMap::new());
-    static ref CLIENT_ID_TO_LISTENER_ID_MAPPING: RwLock<HashMap<ClientId, HashSet<usize>>> =
-        RwLock::new(HashMap::new());
-    static ref CLIENT_ID_APP_MAPPING: RwLock<HashMap<ClientId, String>> =
-        RwLock::new(HashMap::new());
-    static ref TRANSPORT_INSTANCE_TO_LISTENER_ID: RwLock<HashMap<uuid::Uuid, HashSet<usize>>> =
-        RwLock::new(HashMap::new());
-    static ref TRANSPORT_INSTANCE_TO_CLIENT_ID: RwLock<HashMap<uuid::Uuid, HashSet<ClientId>>> =
-        RwLock::new(HashMap::new());
+    static ref LISTENER_ID_TRANSPORT_SHIM: TokioRwLock<HashMap<usize, Weak<dyn MockableUPTransportVsomeipInner + Send + Sync>>> =
+        TokioRwLock::new(HashMap::new());
+}
+
+#[async_trait]
+pub(crate) trait MockableExternFnRegistry: Send + Sync {
+    async fn insert_listener_id_transport(
+        &self,
+        listener_id: usize,
+        transport: Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>,
+    ) -> Result<(), UStatus>;
+    async fn remove_listener_id_transport(&self, listener_id: usize) -> Result<(), UStatus>;
+    async fn get_listener_id_transport(
+        &self,
+        listener_id: usize,
+    ) -> Option<Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>>;
+    async fn free_listener_id(&self, listener_id: usize) -> Result<(), UStatus>;
+    async fn find_available_listener_id(&self) -> Result<usize, UStatus>;
+}
+
+pub(crate) struct ExternFnRegistry;
+
+#[async_trait]
+impl MockableExternFnRegistry for ExternFnRegistry {
+    async fn insert_listener_id_transport(
+        &self,
+        listener_id: usize,
+        transport: Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>,
+    ) -> Result<(), UStatus> {
+        let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
+        if !listener_id_transport_shim.contains_key(&listener_id) {
+            listener_id_transport_shim.insert(listener_id, Arc::downgrade(&transport));
+        } else {
+            return Err(UStatus::fail_with_code(
+                UCode::ALREADY_EXISTS,
+                format!(
+                    "LISTENER_ID_TRANSPORT_MAPPING already contains listener_id: {listener_id}"
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn remove_listener_id_transport(&self, listener_id: usize) -> Result<(), UStatus> {
+        let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
+        if listener_id_transport_shim.contains_key(&listener_id) {
+            listener_id_transport_shim.remove(&listener_id);
+        } else {
+            return Err(UStatus::fail_with_code(
+                UCode::NOT_FOUND,
+                format!(
+                    "LISTENER_ID_TRANSPORT_MAPPING does not contain listener_id: {listener_id}"
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn get_listener_id_transport(
+        &self,
+        listener_id: usize,
+    ) -> Option<Arc<dyn MockableUPTransportVsomeipInner + Send + Sync>> {
+        let listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.read().await;
+        let Some(transport) = listener_id_transport_shim.get(&listener_id) else {
+            return None;
+        };
+
+        transport.upgrade()
+    }
+
+    async fn free_listener_id(&self, listener_id: usize) -> Result<(), UStatus> {
+        let mut free_ids = FREE_LISTENER_IDS.write().await;
+        free_ids.insert(listener_id);
+
+        Ok(())
+    }
+
+    async fn find_available_listener_id(&self) -> Result<usize, UStatus> {
+        let mut free_ids = FREE_LISTENER_IDS.write().await;
+        if let Some(&id) = free_ids.iter().next() {
+            free_ids.remove(&id);
+            trace!("find_available_listener_id: {id}");
+            Ok(id)
+        } else {
+            Err(UStatus::fail_with_code(
+                UCode::RESOURCE_EXHAUSTED,
+                "No more extern C fns available",
+            ))
+        }
+    }
+}
+
+impl ExternFnRegistry {
+    pub fn new() -> Arc<dyn MockableExternFnRegistry> {
+        Arc::new(ExternFnRegistry)
+    }
+}
+
+type ListenerIdMap = TokioRwLock<HashMap<(UUri, Option<UUri>, ComparableListener), usize>>;
+lazy_static! {
+    static ref LISTENER_ID_AUTHORITY_NAME: TokioRwLock<HashMap<usize, AuthorityName>> =
+        TokioRwLock::new(HashMap::new());
+    static ref LISTENER_ID_REMOTE_AUTHORITY_NAME: TokioRwLock<HashMap<usize, AuthorityName>> =
+        TokioRwLock::new(HashMap::new());
+    static ref LISTENER_REGISTRY: TokioRwLock<HashMap<usize, (UUri, Option<UUri>, ComparableListener)>> =
+        TokioRwLock::new(HashMap::new());
+    static ref LISTENER_ID_MAP: ListenerIdMap = TokioRwLock::new(HashMap::new());
+    static ref LISTENER_ID_CLIENT_ID_MAPPING: TokioRwLock<HashMap<usize, ClientId>> =
+        TokioRwLock::new(HashMap::new());
+    static ref CLIENT_ID_TO_LISTENER_ID_MAPPING: TokioRwLock<HashMap<ClientId, HashSet<usize>>> =
+        TokioRwLock::new(HashMap::new());
+    static ref CLIENT_ID_APP_MAPPING: TokioRwLock<HashMap<ClientId, String>> =
+        TokioRwLock::new(HashMap::new());
+    static ref TRANSPORT_INSTANCE_TO_LISTENER_ID: TokioRwLock<HashMap<uuid::Uuid, HashSet<usize>>> =
+        TokioRwLock::new(HashMap::new());
+    static ref TRANSPORT_INSTANCE_TO_CLIENT_ID: TokioRwLock<HashMap<uuid::Uuid, HashSet<ClientId>>> =
+        TokioRwLock::new(HashMap::new());
 }
 
 #[derive(Debug)]

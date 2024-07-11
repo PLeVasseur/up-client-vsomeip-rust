@@ -38,6 +38,7 @@ version = "0.1.0"
 
 [workspace.dependencies]
 async-trait = { version = "0.1" }
+bimap = { version = "0.6.3" }
 bytes = { version = "1.5" }
 cxx = { version = "1.0" }
 rand = { version = "0.8" }

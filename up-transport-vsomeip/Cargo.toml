@@ -25,6 +25,7 @@ readme = "README.md"
 
 [dependencies]
 async-trait = { workspace = true }
+bimap = { workspace = true }
 bytes = { workspace = true }
 cxx = { workspace = true }
 rand = { workspace = true }

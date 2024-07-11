@@ -12,19 +12,21 @@
  ********************************************************************************/
 
 use crate::determine_message_type::RegistrationType;
+use crate::extern_fn_registry::Registry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
-use crate::registry::Registry;
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested;
-use crate::{split_u32_to_u16, ApplicationName, ClientId};
+use crate::{split_u32_to_u16, ApplicationName, ClientId, MockableUPTransportVsomeipInner};
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
-use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
+use up_rust::{UCode, UListener, UMessage, UMessageType, UStatus, UUri};
+use uuid::Uuid;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
@@ -46,6 +48,12 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
     "initialize_new_app_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
+
+pub(crate) struct UPTransportVsomeipInnerHandle;
+
+// impl MockableUPTransportVsomeip for UPTransportVsomeipInnerHandle {
+//
+// }
 
 pub enum TransportCommand {
     // Primary purpose of a UTransport
