@@ -189,23 +189,6 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
-    fn start_vsomeip_app(
-        &self,
-        transport_instance_id: uuid::Uuid,
-        client_id: ClientId,
-        application_name: ApplicationName,
-    ) -> Result<(), UStatus> {
-        todo!()
-    }
-
-    fn stop_vsomeip_app(
-        &self,
-        client_id: ClientId,
-        application_name: ApplicationName,
-    ) -> Result<(), UStatus> {
-        todo!()
-    }
-
     async fn await_internal_function(
         function_id: &str,
         rx: oneshot::Receiver<Result<(), UStatus>>,
@@ -880,7 +863,7 @@ impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
     }
 
     fn get_ue_id(&self) -> UeId {
-        todo!()
+        self.ue_id
     }
 
     async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry> {
