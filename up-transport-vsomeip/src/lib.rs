@@ -32,6 +32,7 @@ use crate::listener_registry::ListenerRegistry;
 use crate::rpc_correlation::RpcCorrelation2;
 use crate::transport_inner::{TransportCommand, UPTransportVsomeipInnerHandle};
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
+use console_subscriber;
 use transport_inner::UPTransportVsomeipInnerEngine;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 
@@ -104,13 +105,13 @@ pub(crate) trait UPTransportVsomeipStorage: Send + Sync {
 
     fn get_ue_id(&self) -> UeId;
 
-    async fn get_registry(&self) -> Arc<TokioRwLock<ListenerRegistry>>;
+    async fn get_registry(&self) -> Arc<ListenerRegistry>;
 
-    async fn get_extern_fn_registry(&self) -> Arc<TokioRwLock<Arc<dyn MockableExternFnRegistry>>>;
+    async fn get_extern_fn_registry(&self) -> Arc<dyn MockableExternFnRegistry>;
 
-    async fn get_rpc_correlation(&self) -> Arc<TokioRwLock<RpcCorrelation2>>;
+    async fn get_rpc_correlation(&self) -> Arc<RpcCorrelation2>;
 
-    async fn get_vsomeip_offered_requested(&self) -> Arc<TokioRwLock<VsomeipOfferedRequested2>>;
+    async fn get_vsomeip_offered_requested(&self) -> Arc<VsomeipOfferedRequested2>;
 }
 
 #[async_trait]

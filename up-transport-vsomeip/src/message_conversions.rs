@@ -91,9 +91,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             if !transport_storage
                 .get_vsomeip_offered_requested()
                 .await
-                .read()
-                .await
                 .is_event_offered(service_id, instance_id, event_id)
+                .await
             {
                 get_pinned_application(application_wrapper).offer_service(
                     service_id,
@@ -113,9 +112,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 transport_storage
                     .get_vsomeip_offered_requested()
                     .await
-                    .write()
-                    .await
-                    .insert_event_offered(service_id, instance_id, event_id);
+                    .insert_event_offered(service_id, instance_id, event_id)
+                    .await;
             }
 
             trace!("Immediately after request_service");
@@ -167,9 +165,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             let app_session_id = transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
+                .retrieve_session_id(app_client_id)
+                .await; // only rewritten by vsomeip for REQUESTs
             let request_id = create_request_id(app_client_id, app_session_id);
             trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
@@ -184,9 +181,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .insert_ue_request_correlation(app_request_id, req_id)?;
+                .insert_ue_request_correlation(app_request_id, req_id)
+                .await?;
 
             get_pinned_message_base(&vsomeip_msg).set_return_code(vsomeip::return_code_e::E_OK);
             let payload = {
@@ -262,9 +258,8 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             let request_id = transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .remove_me_request_correlation(req_id)?;
+                .remove_me_request_correlation(req_id)
+                .await?;
 
             trace!(
                 "{} - Found correlated request_id: {}",
@@ -407,9 +402,8 @@ pub async fn convert_vsomeip_msg_to_umsg(
             transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .insert_me_request_correlation(req_id.clone(), request_id)?;
+                .insert_me_request_correlation(req_id.clone(), request_id)
+                .await?;
 
             Ok(umsg)
         }
@@ -468,9 +462,8 @@ pub async fn convert_vsomeip_msg_to_umsg(
             let req_id = transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .remove_ue_request_correlation(request_id)?;
+                .remove_ue_request_correlation(request_id)
+                .await?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::OK.value())
@@ -511,9 +504,8 @@ pub async fn convert_vsomeip_msg_to_umsg(
             let req_id = transport_storage
                 .get_rpc_correlation()
                 .await
-                .write()
-                .await
-                .remove_ue_request_correlation(request_id)?;
+                .remove_ue_request_correlation(request_id)
+                .await?;
 
             let umsg_res = UMessageBuilder::response(sink, req_id, source)
                 .with_comm_status(UCode::INTERNAL.value())

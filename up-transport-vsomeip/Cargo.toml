@@ -27,6 +27,7 @@ readme = "README.md"
 async-trait = { workspace = true }
 bimap = { workspace = true }
 bytes = { workspace = true }
+console-subscriber = { workspace = true }
 cxx = { workspace = true }
 rand = { workspace = true }
 regex = { workspace = true }

@@ -11,6 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use console_subscriber;
 use log::{error, info};
 use protobuf::Enum;
 use std::fs::canonicalize;
@@ -147,6 +148,7 @@ fn any_uuri() -> UUri {
 #[tokio::test]
 async fn client_service() {
     env_logger::init();
+    console_subscriber::init();
 
     let service_authority_name = "foo";
     let streamer_ue_id = 0x7878;

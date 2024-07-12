@@ -14,102 +14,118 @@
 use crate::{EventId, InstanceId, MethodId, ServiceId};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
-use tokio::sync::RwLock;
+use tokio::sync::RwLock as TokioRwLock;
 
 pub(crate) struct VsomeipOfferedRequested2 {
-    offered_services: HashSet<(ServiceId, InstanceId, MethodId)>,
-    requested_services: HashSet<(ServiceId, InstanceId, MethodId)>,
-    offered_events: HashSet<(ServiceId, InstanceId, EventId)>,
-    requested_events: HashSet<(ServiceId, InstanceId, MethodId)>,
+    offered_services: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    requested_services: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    offered_events: TokioRwLock<HashSet<(ServiceId, InstanceId, EventId)>>,
+    requested_events: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
 }
 
 impl VsomeipOfferedRequested2 {
     pub fn new() -> Self {
         Self {
-            offered_services: HashSet::new(),
-            requested_services: HashSet::new(),
-            offered_events: HashSet::new(),
-            requested_events: HashSet::new(),
+            offered_services: TokioRwLock::new(HashSet::new()),
+            requested_services: TokioRwLock::new(HashSet::new()),
+            offered_events: TokioRwLock::new(HashSet::new()),
+            requested_events: TokioRwLock::new(HashSet::new()),
         }
     }
 
-    pub(crate) fn is_service_offered(
+    pub(crate) async fn is_service_offered(
         &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         method_id: MethodId,
     ) -> bool {
         self.offered_services
+            .read()
+            .await
             .contains(&(service_id, instance_id, method_id))
     }
 
-    pub(crate) fn insert_service_offered(
-        &mut self,
+    pub(crate) async fn insert_service_offered(
+        &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         method_id: MethodId,
     ) -> bool {
         self.offered_services
+            .write()
+            .await
             .insert((service_id, instance_id, method_id))
     }
 
-    pub(crate) fn is_service_requested(
+    pub(crate) async fn is_service_requested(
         &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         method_id: MethodId,
     ) -> bool {
         self.requested_services
+            .read()
+            .await
             .contains(&(service_id, instance_id, method_id))
     }
 
-    pub(crate) fn insert_service_requested(
-        &mut self,
+    pub(crate) async fn insert_service_requested(
+        &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         method_id: MethodId,
     ) -> bool {
         self.requested_services
+            .write()
+            .await
             .insert((service_id, instance_id, method_id))
     }
 
-    pub(crate) fn is_event_offered(
+    pub(crate) async fn is_event_offered(
         &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         event_id: EventId,
     ) -> bool {
         self.offered_events
+            .read()
+            .await
             .contains(&(service_id, instance_id, event_id))
     }
 
-    pub(crate) fn insert_event_offered(
-        &mut self,
+    pub(crate) async fn insert_event_offered(
+        &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         event_id: EventId,
     ) -> bool {
         self.offered_events
+            .write()
+            .await
             .insert((service_id, instance_id, event_id))
     }
 
-    pub(crate) fn is_event_requested(
+    pub(crate) async fn is_event_requested(
         &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         event_id: EventId,
     ) -> bool {
         self.requested_events
+            .read()
+            .await
             .contains(&(service_id, instance_id, event_id))
     }
 
-    pub(crate) fn insert_event_requested(
-        &mut self,
+    pub(crate) async fn insert_event_requested(
+        &self,
         service_id: ServiceId,
         instance_id: InstanceId,
         event_id: EventId,
     ) -> bool {
         self.requested_events
+            .write()
+            .await
             .insert((service_id, instance_id, event_id))
     }
 }

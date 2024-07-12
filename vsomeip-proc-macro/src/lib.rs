@@ -102,9 +102,8 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 // Separate the scope for accessing the registry
                 let app_name = {
-                    let registry_read = transport_storage.get_registry().await.clone();
-                    let registry_read_guard = registry_read.read().await;
-                    match registry_read_guard.get_app_name_for_listener_id(listener_id) {
+                    let registry = transport_storage.get_registry().await.clone();
+                    match registry.get_app_name_for_listener_id(listener_id).await {
                         Some(app_name) => app_name,
                         None => {
                             warn!("No vsomeip app_name found for listener_id: {listener_id}");
@@ -158,9 +157,8 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 // Separate the scope for accessing the registry for listener
                 let listener = {
-                    let registry_read = transport_storage.get_registry().await.clone();
-                    let registry_write_guard = registry_read.write().await;
-                    match registry_write_guard.get_listener_for_listener_id(listener_id) {
+                    let registry = transport_storage.get_registry().await.clone();
+                    match registry.get_listener_for_listener_id(listener_id).await {
                         Some(listener) => {
                             // Send the listener and umsg back to the main thread
                             if tx.send((listener, umsg)).is_err() {
