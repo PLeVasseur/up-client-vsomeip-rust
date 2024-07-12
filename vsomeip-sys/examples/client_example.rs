@@ -60,12 +60,16 @@ fn main() {
     let app_wrapper =
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
 
-    get_pinned_application(&app_wrapper).request_service(
-        SAMPLE_SERVICE_ID,
-        SAMPLE_INSTANCE_ID,
-        vsomeip_sys::vsomeip::ANY_MAJOR,
-        vsomeip_sys::vsomeip::ANY_MINOR,
-    );
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.request_service(
+            SAMPLE_SERVICE_ID,
+            SAMPLE_INSTANCE_ID,
+            vsomeip_sys::vsomeip::ANY_MAJOR,
+            vsomeip_sys::vsomeip::ANY_MINOR,
+        );
+    } else {
+        panic!("No application in wrapper");
+    }
 
     loop {
         sleep(Duration::from_millis(1000));
@@ -87,6 +91,11 @@ fn main() {
 
         let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();
         println!("attempting send...");
-        get_pinned_application(&app_wrapper).send(shared_ptr_message);
+
+        if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+            pinned_app.send(shared_ptr_message);
+        } else {
+            panic!("No application in wrapper");
+        }
     }
 }

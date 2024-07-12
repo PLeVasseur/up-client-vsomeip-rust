@@ -15,13 +15,13 @@ const SAMPLE_INSTANCE_ID: u16 = 1;
 
 const SAMPLE_EVENTGROUP_ID: u16 = 0x4465;
 const SAMPLE_EVENT_ID: u16 = 0x4465;
+const APP_NAME: &str = "Publisher";
 
 fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-    let app_name = "Publisher";
-    let_cxx_string!(my_app_str = app_name);
+    let_cxx_string!(my_app_str = APP_NAME);
     let app_wrapper = make_application_wrapper(
         get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
     );
@@ -29,13 +29,13 @@ fn start_app() {
     if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
         pinned_app.init();
     } else {
-        panic!("No app found for app_name: {app_name}");
+        panic!("No app found for app_name: {APP_NAME}");
     }
 
     if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
         pinned_app.start();
     } else {
-        panic!("No app found for app_name: {app_name}");
+        panic!("No app found for app_name: {APP_NAME}");
     }
 }
 
@@ -55,17 +55,21 @@ fn main() {
 
     println!("after we get the runtime");
 
-    let_cxx_string!(my_app_str = "Publisher");
+    let_cxx_string!(my_app_str = APP_NAME);
 
     let mut app_wrapper =
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
 
-    get_pinned_application(&app_wrapper).offer_service(
-        SAMPLE_SERVICE_ID,
-        SAMPLE_INSTANCE_ID,
-        vsomeip::ANY_MAJOR,
-        vsomeip::ANY_MINOR,
-    );
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.offer_service(
+            SAMPLE_SERVICE_ID,
+            SAMPLE_INSTANCE_ID,
+            vsomeip::ANY_MAJOR,
+            vsomeip::ANY_MINOR,
+        );
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
 
     offer_single_event_safe(
         &mut app_wrapper,
@@ -90,13 +94,17 @@ fn main() {
 
         println!("attempting notify...");
 
-        get_pinned_application(&app_wrapper).notify(
-            SAMPLE_SERVICE_ID,
-            SAMPLE_INSTANCE_ID,
-            SAMPLE_EVENT_ID,
-            payload_wrapper.get_shared_ptr(),
-            true,
-        );
+        if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+            pinned_app.notify(
+                SAMPLE_SERVICE_ID,
+                SAMPLE_INSTANCE_ID,
+                SAMPLE_EVENT_ID,
+                payload_wrapper.get_shared_ptr(),
+                true,
+            );
+        } else {
+            panic!("No app found for app_name: {APP_NAME}");
+        }
 
         sleep(Duration::from_millis(2000));
     }

@@ -64,7 +64,7 @@ fn main() {
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
 
     let client_id = {
-        let Some(pinned_app) = get_pinned_application(app_wrapper) else {
+        let Some(pinned_app) = get_pinned_application(&app_wrapper) else {
             panic!("Application does not exist app_name: {APP_NAME}");
         };
 
@@ -72,12 +72,12 @@ fn main() {
     };
     println!("client_id: {client_id}");
 
-    get_pinned_application(&app_wrapper).request_service(
-        SAMPLE_SERVICE_ID,
-        SAMPLE_INSTANCE_ID,
-        ANY_MAJOR,
-        ANY_MINOR,
-    );
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.request_service(SAMPLE_SERVICE_ID, SAMPLE_INSTANCE_ID, ANY_MAJOR, ANY_MINOR);
+    } else {
+        panic!("Application does not exist app_name: {APP_NAME}");
+    }
+
     request_single_event_safe(
         &mut app_wrapper,
         SAMPLE_SERVICE_ID,
@@ -110,13 +110,17 @@ fn main() {
         true,
     );
 
-    get_pinned_application(&app_wrapper).subscribe(
-        SAMPLE_SERVICE_ID,
-        SAMPLE_INSTANCE_ID,
-        SAMPLE_EVENTGROUP_ID,
-        ANY_MAJOR,
-        SAMPLE_EVENT_ID,
-    );
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.subscribe(
+            SAMPLE_SERVICE_ID,
+            SAMPLE_INSTANCE_ID,
+            SAMPLE_EVENTGROUP_ID,
+            ANY_MAJOR,
+            SAMPLE_EVENT_ID,
+        );
+    } else {
+        panic!("Application does not exist app_name: {APP_NAME}");
+    }
 
     extern "C" fn my_msg_handler(_msg: &SharedPtr<message>) {
         println!("received event!");
