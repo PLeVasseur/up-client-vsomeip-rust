@@ -104,29 +104,13 @@ pub(crate) trait UPTransportVsomeipStorage: Send + Sync {
 
     fn get_ue_id(&self) -> UeId;
 
-    async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry>;
+    async fn get_registry(&self) -> Arc<TokioRwLock<ListenerRegistry>>;
 
-    async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry>;
+    async fn get_extern_fn_registry(&self) -> Arc<TokioRwLock<Arc<dyn MockableExternFnRegistry>>>;
 
-    async fn get_extern_fn_registry_read(
-        &self,
-    ) -> RwLockReadGuard<'_, Arc<dyn MockableExternFnRegistry>>;
+    async fn get_rpc_correlation(&self) -> Arc<TokioRwLock<RpcCorrelation2>>;
 
-    async fn get_extern_fn_registry_write(
-        &self,
-    ) -> RwLockWriteGuard<'_, Arc<dyn MockableExternFnRegistry>>;
-
-    async fn get_rpc_correlation_read(&self) -> RwLockReadGuard<'_, RpcCorrelation2>;
-
-    async fn get_rpc_correlation_write(&self) -> RwLockWriteGuard<'_, RpcCorrelation2>;
-
-    async fn get_vsomeip_offered_requested_read(
-        &self,
-    ) -> RwLockReadGuard<'_, VsomeipOfferedRequested2>;
-
-    async fn get_vsomeip_offered_requested_write(
-        &self,
-    ) -> RwLockWriteGuard<'_, VsomeipOfferedRequested2>;
+    async fn get_vsomeip_offered_requested(&self) -> Arc<TokioRwLock<VsomeipOfferedRequested2>>;
 }
 
 #[async_trait]

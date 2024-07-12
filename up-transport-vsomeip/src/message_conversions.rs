@@ -89,7 +89,9 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
             //  the UPClientVsomeip?
             if !transport_storage
-                .get_vsomeip_offered_requested_read()
+                .get_vsomeip_offered_requested()
+                .await
+                .read()
                 .await
                 .is_event_offered(service_id, instance_id, event_id)
             {
@@ -109,7 +111,9 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 );
                 tokio::time::sleep(Duration::from_nanos(1)).await;
                 transport_storage
-                    .get_vsomeip_offered_requested_write()
+                    .get_vsomeip_offered_requested()
+                    .await
+                    .write()
                     .await
                     .insert_event_offered(service_id, instance_id, event_id);
             }
@@ -161,7 +165,9 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             })?;
             let app_client_id = get_pinned_application(application_wrapper).get_client();
             let app_session_id = transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .retrieve_session_id(app_client_id); // only rewritten by vsomeip for REQUESTs
             let request_id = create_request_id(app_client_id, app_session_id);
@@ -176,7 +182,9 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             );
 
             transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .insert_ue_request_correlation(app_request_id, req_id)?;
 
@@ -252,7 +260,9 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             );
 
             let request_id = transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .remove_me_request_correlation(req_id)?;
 
@@ -395,7 +405,9 @@ pub async fn convert_vsomeip_msg_to_umsg(
             );
 
             transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .insert_me_request_correlation(req_id.clone(), request_id)?;
 
@@ -454,7 +466,9 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 request_id
             );
             let req_id = transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .remove_ue_request_correlation(request_id)?;
 
@@ -495,7 +509,9 @@ pub async fn convert_vsomeip_msg_to_umsg(
                 request_id
             );
             let req_id = transport_storage
-                .get_rpc_correlation_write()
+                .get_rpc_correlation()
+                .await
+                .write()
                 .await
                 .remove_ue_request_correlation(request_id)?;
 

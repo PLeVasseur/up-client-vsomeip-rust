@@ -100,9 +100,11 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                     }
                 };
 
+                // Separate the scope for accessing the registry
                 let app_name = {
-                    let registry_read = transport_storage.get_registry_read().await;
-                    match registry_read.get_app_name_for_listener_id(listener_id) {
+                    let registry_read = transport_storage.get_registry().await.clone();
+                    let registry_read_guard = registry_read.read().await;
+                    match registry_read_guard.get_app_name_for_listener_id(listener_id) {
                         Some(app_name) => app_name,
                         None => {
                             warn!("No vsomeip app_name found for listener_id: {listener_id}");
@@ -153,10 +155,12 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 trace!("Was able to convert to UMessage");
 
                 trace!("Calling listener registered under {}", listener_id);
-                // Change: Using a separate block to handle the registry read for listener to control the borrow scope
+
+                // Separate the scope for accessing the registry for listener
                 let listener = {
-                    let registry_read = transport_storage.get_registry_read().await;
-                    match registry_read.get_listener_for_listener_id(listener_id) {
+                    let registry_read = transport_storage.get_registry().await.clone();
+                    let registry_write_guard = registry_read.write().await;
+                    match registry_write_guard.get_listener_for_listener_id(listener_id) {
                         Some(listener) => {
                             // Send the listener and umsg back to the main thread
                             if tx.send((listener, umsg)).is_err() {

@@ -69,10 +69,10 @@ pub(crate) struct UPTransportVsomeipInnerHandleStorage {
     ue_id: UeId,
     local_authority: AuthorityName,
     remote_authority: AuthorityName,
-    extern_fn_registry: TokioRwLock<Arc<dyn MockableExternFnRegistry>>,
-    listener_registry: TokioRwLock<ListenerRegistry>,
-    rpc_correlation: TokioRwLock<RpcCorrelation2>,
-    vsomeip_offered_requested: TokioRwLock<VsomeipOfferedRequested2>,
+    extern_fn_registry: Arc<TokioRwLock<Arc<dyn MockableExternFnRegistry>>>,
+    listener_registry: Arc<TokioRwLock<ListenerRegistry>>,
+    rpc_correlation: Arc<TokioRwLock<RpcCorrelation2>>,
+    vsomeip_offered_requested: Arc<TokioRwLock<VsomeipOfferedRequested2>>,
 }
 
 impl UPTransportVsomeipInnerHandleStorage {
@@ -87,10 +87,10 @@ impl UPTransportVsomeipInnerHandleStorage {
             ue_id,
             local_authority,
             remote_authority,
-            extern_fn_registry: TokioRwLock::new(extern_fn_registry),
-            listener_registry: TokioRwLock::new(ListenerRegistry::new()),
-            rpc_correlation: TokioRwLock::new(RpcCorrelation2::new()),
-            vsomeip_offered_requested: TokioRwLock::new(VsomeipOfferedRequested2::new()),
+            extern_fn_registry: Arc::new(TokioRwLock::new(extern_fn_registry)),
+            listener_registry: Arc::new(TokioRwLock::new(ListenerRegistry::new())),
+            rpc_correlation: Arc::new(TokioRwLock::new(RpcCorrelation2::new())),
+            vsomeip_offered_requested: Arc::new(TokioRwLock::new(VsomeipOfferedRequested2::new())),
         }
     }
 }
@@ -243,7 +243,9 @@ impl UPTransportVsomeipInnerHandle {
 
         let Ok(listener_id) = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .find_available_listener_id()
             .await
@@ -256,14 +258,18 @@ impl UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_transport(listener_id, self.get_storage())
             .await;
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
@@ -273,7 +279,9 @@ impl UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_client_id(listener_id, message_type.client_id());
         if let Some(previous_entry) = insert_res {
@@ -282,14 +290,18 @@ impl UPTransportVsomeipInnerHandle {
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
@@ -306,13 +318,17 @@ impl UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_and_listener_config(listener_id, listener_config);
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
@@ -322,7 +338,9 @@ impl UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_client_id(listener_id, message_type.client_id());
         if let Some(previous_entry) = insert_res {
@@ -331,14 +349,18 @@ impl UPTransportVsomeipInnerHandle {
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
@@ -347,7 +369,9 @@ impl UPTransportVsomeipInnerHandle {
 
         if self
             .get_storage()
-            .get_registry_read()
+            .get_registry()
+            .await
+            .read()
             .await
             .get_app_name_for_client_id(message_type.client_id())
             .is_none()
@@ -374,7 +398,9 @@ impl UPTransportVsomeipInnerHandle {
         let (tx, rx) = oneshot::channel();
         let extern_fn = self
             .get_storage()
-            .get_extern_fn_registry_read()
+            .get_extern_fn_registry()
+            .await
+            .read()
             .await
             .get_extern_fn(listener_id)
             .await;
@@ -383,7 +409,9 @@ impl UPTransportVsomeipInnerHandle {
 
         let Some(app_name) = self
             .get_storage()
-            .get_registry_read()
+            .get_registry()
+            .await
+            .read()
             .await
             .get_app_name_for_client_id(message_type.client_id())
         else {
@@ -476,14 +504,18 @@ impl UPTransportVsomeipInnerHandle {
 
             let insert_res = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .insert_client_and_app_name(registration_type.client_id(), app_config.name.clone());
 
             if let Err(err) = insert_res {
                 let Some(app_name) = self
                     .get_storage()
-                    .get_registry_write()
+                    .get_registry()
+                    .await
+                    .write()
                     .await
                     .remove_app_name_for_client_id(registration_type.client_id())
                 else {
@@ -508,7 +540,9 @@ impl UPTransportVsomeipInnerHandle {
 
             let Ok(listener_id) = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .find_available_listener_id()
                 .await
@@ -531,14 +565,18 @@ impl UPTransportVsomeipInnerHandle {
 
             let insert_res = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .insert_listener_id_transport(listener_id, self.get_storage())
                 .await;
             if let Err(err) = insert_res {
                 let _ = self
                     .get_storage()
-                    .get_extern_fn_registry_write()
+                    .get_extern_fn_registry()
+                    .await
+                    .write()
                     .await
                     .free_listener_id(listener_id)
                     .await;
@@ -548,7 +586,9 @@ impl UPTransportVsomeipInnerHandle {
 
             let insert_res = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .insert_listener_id_client_id(listener_id, registration_type.client_id());
             if let Some(previous_entry) = insert_res {
@@ -557,14 +597,18 @@ impl UPTransportVsomeipInnerHandle {
 
                 let _ = self
                     .get_storage()
-                    .get_extern_fn_registry_write()
+                    .get_extern_fn_registry()
+                    .await
+                    .write()
                     .await
                     .free_listener_id(listener_id)
                     .await;
 
                 let _ = self
                     .get_storage()
-                    .get_extern_fn_registry_write()
+                    .get_extern_fn_registry()
+                    .await
+                    .write()
                     .await
                     .remove_listener_id_transport(listener_id);
 
@@ -579,26 +623,34 @@ impl UPTransportVsomeipInnerHandle {
 
             let insert_res = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .insert_listener_id_and_listener_config(listener_id, listener_config);
             if let Err(err) = insert_res {
                 let _ = self
                     .get_storage()
-                    .get_extern_fn_registry_write()
+                    .get_extern_fn_registry()
+                    .await
+                    .write()
                     .await
                     .free_listener_id(listener_id)
                     .await;
 
                 let _ = self
                     .get_storage()
-                    .get_extern_fn_registry_write()
+                    .get_extern_fn_registry()
+                    .await
+                    .write()
                     .await
                     .remove_listener_id_transport(listener_id);
 
                 let _ = self
                     .get_storage()
-                    .get_registry_write()
+                    .get_registry()
+                    .await
+                    .write()
                     .await
                     .remove_client_id_based_on_listener_id(listener_id);
 
@@ -608,7 +660,9 @@ impl UPTransportVsomeipInnerHandle {
             let (tx, rx) = oneshot::channel();
             let extern_fn = self
                 .get_storage()
-                .get_extern_fn_registry_read()
+                .get_extern_fn_registry()
+                .await
+                .read()
                 .await
                 .get_extern_fn(listener_id)
                 .await;
@@ -684,7 +738,9 @@ impl UPTransportVsomeipInnerHandle {
 
             let app_name_res = self
                 .get_storage()
-                .get_registry_read()
+                .get_registry()
+                .await
+                .read()
                 .await
                 .get_app_name_for_client_id(app_config.id);
             let Some(app_name) = app_name_res else {
@@ -735,7 +791,9 @@ impl UPTransportVsomeipInnerHandle {
 
             let Some(listener_id) = self
                 .get_storage()
-                .get_registry_read()
+                .get_registry()
+                .await
+                .read()
                 .await
                 .get_listener_id_for_listener_config(listener_config)
             else {
@@ -747,7 +805,9 @@ impl UPTransportVsomeipInnerHandle {
 
             let Some(client_id) = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id)
             else {
@@ -759,7 +819,9 @@ impl UPTransportVsomeipInnerHandle {
 
             if let Err(err) = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await
@@ -769,7 +831,9 @@ impl UPTransportVsomeipInnerHandle {
 
             if let Err(err) = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id)
                 .await
@@ -779,14 +843,18 @@ impl UPTransportVsomeipInnerHandle {
 
             if self
                 .get_storage()
-                .get_registry_read()
+                .get_registry()
+                .await
+                .read()
                 .await
                 .listener_count_for_client_id(client_id)
                 == 0
             {
                 let Some(app_name) = self
                     .get_storage()
-                    .get_registry_write()
+                    .get_registry()
+                    .await
+                    .write()
                     .await
                     .remove_app_name_for_client_id(client_id)
                 else {
@@ -876,44 +944,20 @@ impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
         self.ue_id
     }
 
-    async fn get_registry_read(&self) -> RwLockReadGuard<'_, ListenerRegistry> {
-        self.listener_registry.read().await
+    async fn get_registry(&self) -> Arc<TokioRwLock<ListenerRegistry>> {
+        self.listener_registry.clone()
     }
 
-    async fn get_registry_write(&self) -> RwLockWriteGuard<'_, ListenerRegistry> {
-        self.listener_registry.write().await
+    async fn get_extern_fn_registry(&self) -> Arc<TokioRwLock<Arc<dyn MockableExternFnRegistry>>> {
+        self.extern_fn_registry.clone()
     }
 
-    async fn get_extern_fn_registry_read(
-        &self,
-    ) -> RwLockReadGuard<'_, Arc<dyn MockableExternFnRegistry>> {
-        self.extern_fn_registry.read().await
+    async fn get_rpc_correlation(&self) -> Arc<TokioRwLock<RpcCorrelation2>> {
+        self.rpc_correlation.clone()
     }
 
-    async fn get_extern_fn_registry_write(
-        &self,
-    ) -> RwLockWriteGuard<'_, Arc<dyn MockableExternFnRegistry>> {
-        self.extern_fn_registry.write().await
-    }
-
-    async fn get_rpc_correlation_read(&self) -> RwLockReadGuard<'_, RpcCorrelation2> {
-        self.rpc_correlation.read().await
-    }
-
-    async fn get_rpc_correlation_write(&self) -> RwLockWriteGuard<'_, RpcCorrelation2> {
-        self.rpc_correlation.write().await
-    }
-
-    async fn get_vsomeip_offered_requested_read(
-        &self,
-    ) -> RwLockReadGuard<'_, VsomeipOfferedRequested2> {
-        self.vsomeip_offered_requested.read().await
-    }
-
-    async fn get_vsomeip_offered_requested_write(
-        &self,
-    ) -> RwLockWriteGuard<'_, VsomeipOfferedRequested2> {
-        self.vsomeip_offered_requested.write().await
+    async fn get_vsomeip_offered_requested(&self) -> Arc<TokioRwLock<VsomeipOfferedRequested2>> {
+        self.vsomeip_offered_requested.clone()
     }
 }
 
@@ -946,7 +990,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let Ok(listener_id) = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .find_available_listener_id()
             .await
@@ -959,14 +1005,18 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_transport(listener_id, self.get_storage())
             .await;
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
@@ -976,7 +1026,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_client_id(listener_id, registration_type.client_id());
         if let Some(previous_entry) = insert_res {
@@ -985,14 +1037,18 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
@@ -1008,26 +1064,34 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_listener_id_and_listener_config(listener_id, listener_config);
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
             let _ = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id);
 
@@ -1037,7 +1101,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         let app_name_res = {
             if let Some(app_name) = self
                 .get_storage()
-                .get_registry_read()
+                .get_registry()
+                .await
+                .read()
                 .await
                 .get_app_name_for_client_id(registration_type.client_id())
             {
@@ -1051,26 +1117,34 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             // we failed to start the vsomeip application
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
             let _ = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id);
 
             let _ = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_and_listener_config_based_on_listener_id(listener_id);
 
@@ -1079,38 +1153,50 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let insert_res = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .insert_client_and_app_name(registration_type.client_id(), app_name.clone());
         if let Err(err) = insert_res {
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .free_listener_id(listener_id)
                 .await;
 
             let _ = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_and_listener_config_based_on_listener_id(listener_id);
 
             let _ = self
                 .get_storage()
-                .get_extern_fn_registry_write()
+                .get_extern_fn_registry()
+                .await
+                .write()
                 .await
                 .remove_listener_id_transport(listener_id);
 
             let _ = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id);
 
             let Some(app_name) = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_app_name_for_client_id(registration_type.client_id())
             else {
@@ -1145,7 +1231,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         let (tx, rx) = oneshot::channel();
         let extern_fn = self
             .get_storage()
-            .get_extern_fn_registry_read()
+            .get_extern_fn_registry()
+            .await
+            .read()
             .await
             .get_extern_fn(listener_id)
             .await;
@@ -1198,7 +1286,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let app_name_res = self
             .get_storage()
-            .get_registry_read()
+            .get_registry()
+            .await
+            .read()
             .await
             .get_app_name_for_client_id(registration_type.client_id());
         let Some(app_name) = app_name_res else {
@@ -1234,7 +1324,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let Some(listener_id) = self
             .get_storage()
-            .get_registry_read()
+            .get_registry()
+            .await
+            .read()
             .await
             .get_listener_id_for_listener_config(listener_config)
         else {
@@ -1246,7 +1338,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let Some(client_id) = self
             .get_storage()
-            .get_registry_write()
+            .get_registry()
+            .await
+            .write()
             .await
             .remove_client_id_based_on_listener_id(listener_id)
         else {
@@ -1258,7 +1352,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         if let Err(err) = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .free_listener_id(listener_id)
             .await
@@ -1268,7 +1364,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         if let Err(err) = self
             .get_storage()
-            .get_extern_fn_registry_write()
+            .get_extern_fn_registry()
+            .await
+            .write()
             .await
             .remove_listener_id_transport(listener_id)
             .await
@@ -1278,14 +1376,18 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         if self
             .get_storage()
-            .get_registry_read()
+            .get_registry()
+            .await
+            .read()
             .await
             .listener_count_for_client_id(client_id)
             == 0
         {
             let Some(app_name) = self
                 .get_storage()
-                .get_registry_write()
+                .get_registry()
+                .await
+                .write()
                 .await
                 .remove_app_name_for_client_id(client_id)
             else {
@@ -1351,7 +1453,9 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         let app_name_res = {
             if let Some(app_name) = self
                 .get_storage()
-                .get_registry_read()
+                .get_registry()
+                .await
+                .read()
                 .await
                 .get_app_name_for_client_id(message_type.client_id())
             {
@@ -1721,7 +1825,9 @@ impl UPTransportVsomeipInnerEngine {
                 );
 
                 if !transport_storage
-                    .get_vsomeip_offered_requested_write()
+                    .get_vsomeip_offered_requested()
+                    .await
+                    .write()
                     .await
                     .is_event_requested(service_id, instance_id, event_id)
                 {
@@ -1746,7 +1852,9 @@ impl UPTransportVsomeipInnerEngine {
                         event_id,
                     );
                     transport_storage
-                        .get_vsomeip_offered_requested_write()
+                        .get_vsomeip_offered_requested()
+                        .await
+                        .write()
                         .await
                         .insert_event_requested(service_id, instance_id, event_id);
                 }
@@ -1797,7 +1905,9 @@ impl UPTransportVsomeipInnerEngine {
                 );
 
                 if !transport_storage
-                    .get_vsomeip_offered_requested_read()
+                    .get_vsomeip_offered_requested()
+                    .await
+                    .read()
                     .await
                     .is_service_offered(service_id, instance_id, method_id)
                 {
@@ -1808,7 +1918,9 @@ impl UPTransportVsomeipInnerEngine {
                         ANY_MINOR,
                     );
                     transport_storage
-                        .get_vsomeip_offered_requested_write()
+                        .get_vsomeip_offered_requested()
+                        .await
+                        .write()
                         .await
                         .insert_service_offered(service_id, instance_id, method_id);
                 }
@@ -1841,7 +1953,9 @@ impl UPTransportVsomeipInnerEngine {
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
                 if !transport_storage
-                    .get_vsomeip_offered_requested_read()
+                    .get_vsomeip_offered_requested()
+                    .await
+                    .read()
                     .await
                     .is_service_requested(service_id, instance_id, method_id)
                 {
@@ -1852,7 +1966,9 @@ impl UPTransportVsomeipInnerEngine {
                         ANY_MINOR,
                     );
                     transport_storage
-                        .get_vsomeip_offered_requested_write()
+                        .get_vsomeip_offered_requested()
+                        .await
+                        .write()
                         .await
                         .insert_service_requested(service_id, instance_id, method_id);
                 }
