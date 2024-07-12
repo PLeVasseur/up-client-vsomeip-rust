@@ -156,6 +156,8 @@ impl MockableExternFnRegistry for ExternFnRegistry {
         let mut free_ids = FREE_LISTENER_IDS.write().await;
         free_ids.insert(listener_id);
 
+        trace!("free_listener_id: {listener_id}");
+
         Ok(())
     }
 

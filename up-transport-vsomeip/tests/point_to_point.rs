@@ -26,6 +26,7 @@ use up_rust::{
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
+const TEST_DURATION: u64 = 1000;
 const TEST_SLACK: usize = 1;
 
 pub struct PointToPointListener {
@@ -365,7 +366,7 @@ async fn point_to_point() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Track the start time and set the duration for the loop
-    let duration = Duration::from_millis(1000);
+    let duration = Duration::from_millis(TEST_DURATION);
     let start_time = Instant::now();
 
     let mut iterations = 0;
@@ -403,23 +404,6 @@ async fn point_to_point() {
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     println!("iterations: {}", iterations);
-
-    println!(
-        "request_listener_check.received_request(): {}",
-        request_listener_check.received_request()
-    );
-    println!(
-        "point_to_point_listener_check.received_request(): {}",
-        point_to_point_listener_check.received_request()
-    );
-    println!(
-        "point_to_point_listener_check.received_response(): {}",
-        point_to_point_listener_check.received_response()
-    );
-    println!(
-        "response_listener_check.received_response(): {}",
-        response_listener_check.received_response()
-    );
 
     println!(
         "request_listener_check.received_request(): {}",

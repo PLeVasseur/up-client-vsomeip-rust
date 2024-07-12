@@ -1,6 +1,7 @@
 use crate::TimedRwLock;
 use crate::{ApplicationName, AuthorityName, ClientId};
 use bimap::BiMap;
+use log::{debug, info};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock as TokioRwLock;
@@ -51,21 +52,33 @@ impl ListenerRegistry {
         let mut listener_id_to_client_id = self.listener_id_to_client_id.write().await;
         let mut client_id_to_listener_id = self.client_id_to_listener_id.write().await;
 
+        debug!("before listener_id_to_client_id: {listener_id_to_client_id:?}");
+
         if listener_id_to_client_id.contains_key(&listener_id) {
+            info!("We already used listener_id: {listener_id}");
+            debug!("listener_id_to_client_id: {listener_id_to_client_id:?}");
+
             let client_id = listener_id_to_client_id.get(&listener_id).unwrap();
             return Some((listener_id, client_id.clone()));
         }
 
         let insert_res = listener_id_to_client_id.insert(listener_id, client_id);
         if let Some(client_id) = insert_res {
+            info!("We already inserted listener_id: {listener_id} with client_id: {client_id}");
+
             return Some((listener_id, client_id));
         }
 
         let listener_ids = client_id_to_listener_id.entry(client_id).or_default();
         let newly_added = listener_ids.insert(listener_id);
         if !newly_added {
+            info!("Attempted to inserted already existing listener_id: {listener_id} into client_id: {client_id}");
+
             return Some((listener_id, client_id));
         }
+
+        info!("Newly added listener_id: {listener_id} client_id: {client_id}");
+        debug!("after listener_id_to_client_id: {listener_id_to_client_id:?}");
 
         None
     }

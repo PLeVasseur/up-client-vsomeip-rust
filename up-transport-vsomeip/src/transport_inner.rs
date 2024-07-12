@@ -223,8 +223,8 @@ impl UPTransportVsomeipInnerHandle {
     async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
         &self,
         message: &UMessage,
-        source_filter: &UUri,
-        sink_filter: Option<&UUri>,
+        msg_src: &UUri,
+        msg_sink: Option<&UUri>,
         message_type: RegistrationType,
     ) -> Result<bool, UStatus> {
         let maybe_point_to_point_listener = {
@@ -241,6 +241,38 @@ impl UPTransportVsomeipInnerHandle {
             return Ok(true);
         }
         trace!("Sending a Request and we have a point-to-point listener");
+
+        let Some(msg_sink) = msg_sink else {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "Missing sink for message",
+            ));
+        };
+
+        // swap source and sink here since this is nominally representing a message and not a source
+        // and sink filter
+        let source_filter = msg_sink.clone();
+        let sink_filter = Some(msg_src.clone());
+
+        let listener = point_to_point_listener.clone();
+        let comp_listener = ComparableListener::new(Arc::clone(&listener));
+        let listener_config = (
+            source_filter.clone(),
+            sink_filter.clone(),
+            comp_listener.clone(),
+        );
+
+        // TODO: We should check here first on whether this has already been registered
+        if let Some(existing_listener_id) = self
+            .get_storage()
+            .get_registry()
+            .await
+            .get_listener_id_for_listener_config(listener_config)
+            .await
+        {
+            info!("Already have registered this response handler with existing_listener_id: {existing_listener_id}");
+            return Ok(true);
+        }
 
         let Ok(listener_id) = self
             .get_storage()
@@ -262,47 +294,32 @@ impl UPTransportVsomeipInnerHandle {
             .insert_listener_id_transport(listener_id, self.get_storage())
             .await;
         if let Err(err) = insert_res {
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
+
+            if let Err(warn) = self
+                .get_storage()
+                .get_extern_fn_registry()
+                .await
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(err);
         }
 
-        let insert_res = self
-            .get_storage()
-            .get_registry()
-            .await
-            .insert_listener_id_client_id(listener_id, message_type.client_id())
-            .await;
-        if let Some(previous_entry) = insert_res {
-            let listener_id = previous_entry.0;
-            let client_id = previous_entry.1;
-
-            let _ = self
-                .get_storage()
-                .get_extern_fn_registry()
-                .await
-                .free_listener_id(listener_id)
-                .await;
-
-            let _ = self
-                .get_storage()
-                .get_extern_fn_registry()
-                .await
-                .remove_listener_id_transport(listener_id);
-
-            return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
-        }
-
-        let listener = point_to_point_listener.clone();
-        let comp_listener = ComparableListener::new(Arc::clone(&listener));
         let listener_config = (
             source_filter.clone(),
-            sink_filter.cloned(),
+            sink_filter.clone(),
             comp_listener.clone(),
         );
 
@@ -313,12 +330,15 @@ impl UPTransportVsomeipInnerHandle {
             .insert_listener_id_and_listener_config(listener_id, listener_config)
             .await;
         if let Err(err) = insert_res {
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(err);
         }
@@ -333,18 +353,25 @@ impl UPTransportVsomeipInnerHandle {
             let listener_id = previous_entry.0;
             let client_id = previous_entry.1;
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
-                .remove_listener_id_transport(listener_id);
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
         }
@@ -402,11 +429,12 @@ impl UPTransportVsomeipInnerHandle {
             ));
         };
 
+        // we set sink_filter's resource id to wildcard so that we have
         let send_to_inner_res = Self::send_to_inner_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::RegisterListener(
                 source_filter.clone(),
-                sink_filter.cloned(),
+                sink_filter.clone(),
                 message_type,
                 msg_handler,
                 app_name,
@@ -425,6 +453,8 @@ impl UPTransportVsomeipInnerHandle {
         if let Err(err) = await_res {
             return Err(err);
         }
+
+        trace!("Registered returning response listener for source_filter: {source_filter:?} sink_filter: {sink_filter:?}");
 
         Ok(true)
     }
@@ -544,12 +574,15 @@ impl UPTransportVsomeipInnerHandle {
                 .insert_listener_id_transport(listener_id, self.get_storage())
                 .await;
             if let Err(err) = insert_res {
-                let _ = self
+                if let Err(warn) = self
                     .get_storage()
                     .get_extern_fn_registry()
                     .await
                     .free_listener_id(listener_id)
-                    .await;
+                    .await
+                {
+                    warn!("{warn}");
+                }
 
                 return Err(err);
             }
@@ -564,18 +597,25 @@ impl UPTransportVsomeipInnerHandle {
                 let listener_id = previous_entry.0;
                 let client_id = previous_entry.1;
 
-                let _ = self
+                if let Err(warn) = self
                     .get_storage()
                     .get_extern_fn_registry()
                     .await
                     .free_listener_id(listener_id)
-                    .await;
+                    .await
+                {
+                    warn! {"{warn}"};
+                }
 
-                let _ = self
+                if let Err(warn) = self
                     .get_storage()
                     .get_extern_fn_registry()
                     .await
-                    .remove_listener_id_transport(listener_id);
+                    .remove_listener_id_transport(listener_id)
+                    .await
+                {
+                    warn!("{warn}");
+                }
 
                 return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
             }
@@ -593,25 +633,35 @@ impl UPTransportVsomeipInnerHandle {
                 .insert_listener_id_and_listener_config(listener_id, listener_config)
                 .await;
             if let Err(err) = insert_res {
-                let _ = self
+                if let Err(warn) = self
                     .get_storage()
                     .get_extern_fn_registry()
                     .await
                     .free_listener_id(listener_id)
-                    .await;
+                    .await
+                {
+                    warn!("{warn}");
+                }
 
-                let _ = self
+                if let Err(warn) = self
                     .get_storage()
                     .get_extern_fn_registry()
                     .await
-                    .remove_listener_id_transport(listener_id);
+                    .remove_listener_id_transport(listener_id)
+                    .await
+                {
+                    warn!("{warn}");
+                }
 
-                let _ = self
+                if let None = self
                     .get_storage()
                     .get_registry()
                     .await
                     .remove_client_id_based_on_listener_id(listener_id)
-                    .await;
+                    .await
+                {
+                    warn!("No client_id found to remove for listener_id: {listener_id}");
+                }
 
                 return Err(err);
             }
@@ -985,12 +1035,15 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             .insert_listener_id_transport(listener_id, self.get_storage())
             .await;
         if let Err(err) = insert_res {
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(err);
         }
@@ -1005,18 +1058,25 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             let listener_id = previous_entry.0;
             let client_id = previous_entry.1;
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
-                .remove_listener_id_transport(listener_id);
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("We already had used that listener_id with a client_id. listener_id: {} client_id: {}", listener_id, client_id)));
         }
@@ -1035,25 +1095,35 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             .insert_listener_id_and_listener_config(listener_id, listener_config)
             .await;
         if let Err(err) = insert_res {
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
-                .remove_listener_id_transport(listener_id);
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let None = self
                 .get_storage()
                 .get_registry()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("No client_id found to remove for listener_id: {listener_id}");
+            }
 
             return Err(err);
         }
@@ -1074,32 +1144,45 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
         let Ok(app_name) = app_name_res else {
             // we failed to start the vsomeip application
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
                 .free_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_extern_fn_registry()
                 .await
-                .remove_listener_id_transport(listener_id);
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
 
-            let _ = self
+            if let None = self
                 .get_storage()
                 .get_registry()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("No client_id found to remove for listener_id: {listener_id}");
+            }
 
-            let _ = self
+            if let Err(warn) = self
                 .get_storage()
                 .get_registry()
                 .await
                 .remove_listener_id_and_listener_config_based_on_listener_id(listener_id)
-                .await;
+                .await
+            {
+                warn!("{warn}");
+            }
 
             return Err(app_name_res.err().unwrap());
         };
