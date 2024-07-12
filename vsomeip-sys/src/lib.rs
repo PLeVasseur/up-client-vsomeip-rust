@@ -133,7 +133,9 @@ mod tests {
 
         println!("set_message_payload");
 
-        let loaded_payload = get_message_payload(&mut request);
+        let Some(loaded_payload) = get_message_payload(&mut request) else {
+            panic!("Unable to get PayloadWrapper from MessageWrapper");
+        };
 
         println!("get_message_payload");
 

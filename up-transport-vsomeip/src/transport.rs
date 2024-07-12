@@ -16,9 +16,6 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri};
 
-// TODO: Decide whether to keep
-// const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
-
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {

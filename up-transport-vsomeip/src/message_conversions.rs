@@ -15,8 +15,7 @@ use crate::{
     create_request_id, split_u32_to_u16, split_u32_to_u8, AuthorityName, UPTransportVsomeipStorage,
 };
 use cxx::UniquePtr;
-use log::Level::Trace;
-use log::{log_enabled, trace};
+use log::trace;
 use protobuf::Enum;
 use std::sync::Arc;
 use std::time::Duration;
@@ -219,13 +218,6 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
             set_message_payload(&mut vsomeip_msg, &mut vsomeip_payload);
 
-            // TODO: Remove -- For debugging
-            if log_enabled!(Trace) {
-                let vsomeip_payload_read = get_message_payload(&mut vsomeip_msg);
-                let payload_bytes = get_data_safe(&vsomeip_payload_read);
-                trace!("After setting vsomeip payload and retrieving, it is: {payload_bytes:?}");
-            }
-
             let request_id = get_pinned_message_base(&vsomeip_msg).get_request();
             let service_id = get_pinned_message_base(&vsomeip_msg).get_service();
             let client_id = get_pinned_message_base(&vsomeip_msg).get_client();
@@ -240,7 +232,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             );
 
             let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-            if let Some(mut pinned_app) = get_pinned_application(application_wrapper) {
+            if let Some(pinned_app) = get_pinned_application(application_wrapper) {
                 pinned_app.send(shared_ptr_message);
             } else {
                 return Err(UStatus::fail_with_code(
@@ -375,8 +367,15 @@ pub async fn convert_vsomeip_msg_to_umsg(
     let method_id = get_pinned_message_base(vsomeip_message).get_method();
     let instance_id = get_pinned_message_base(vsomeip_message).get_instance();
     let interface_version = get_pinned_message_base(vsomeip_message).get_interface_version();
-    let payload = get_message_payload(vsomeip_message);
-    let payload_bytes = get_data_safe(&payload);
+    let payload_bytes = {
+        let Some(payload) = get_message_payload(vsomeip_message) else {
+            return Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "Unable to extract PayloadWrapper from MessageWrapper",
+            ));
+        };
+        get_data_safe(&payload)
+    };
 
     trace!("{} - : request_id: {} client_id: {} session_id: {} service_id: {} instance_id: {} method_id: {} interface_version: {} payload_bytes: {:?}",
         UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
@@ -397,7 +396,7 @@ pub async fn convert_vsomeip_msg_to_umsg(
             };
 
             let source = UUri {
-                authority_name: mechatronics_authority_name.to_string(), // TODO: Should we set this to anything specific?
+                authority_name: mechatronics_authority_name.to_string(),
                 ue_id: client_id as u32,
                 ue_version_major: 1, // TODO: I don't see a way to get this
                 resource_id: 0,      // set to 0 as this is the resource_id of "me"

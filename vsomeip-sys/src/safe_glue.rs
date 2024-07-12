@@ -206,7 +206,6 @@ pub fn get_data_safe(payload_wrapper: &PayloadWrapper) -> Vec<u8> {
     trace!("Before slice::from_raw_parts");
 
     // Convert the raw pointer and length to a slice
-    // TODO: May be crashing here? Would be good to check this
     let data_slice: &[u8] = unsafe { slice::from_raw_parts(data_ptr, length as usize) };
 
     trace!("After slice::from_raw_parts");
@@ -258,44 +257,43 @@ pub fn set_message_payload(
 /// Add some runtime safety checks on the pointers
 pub fn get_message_payload(
     message_wrapper: &mut UniquePtr<MessageWrapper>,
-) -> UniquePtr<PayloadWrapper> {
+) -> Option<UniquePtr<PayloadWrapper>> {
     if message_wrapper.is_null() {
         eprintln!("message_wrapper is null");
-        return cxx::UniquePtr::null();
+        return None;
     }
 
     // let message_pin = Pin::new_unchecked(message_wrapper.as_mut().unwrap());
     let message_wrapper = message_wrapper.as_mut();
     let Some(message_wrapper_pin) = message_wrapper else {
         error!("Unable to get pinned message wrapper");
-        return UniquePtr::null();
+        return None;
     };
     let message_pin = unsafe { Pin::new_unchecked(message_wrapper_pin) };
     let message_ptr = MessageWrapper::get_mut(&message_pin) as *const message;
 
-    // TODO: Should handle by returning None instead of a null pointer
     if (message_ptr as *const ()).is_null() {
-        eprintln!("message_ptr is null");
-        return UniquePtr::null();
+        error!("message_ptr is null");
+        return None;
     }
 
     let payload_ptr = unsafe { get_payload_raw(message_ptr) };
 
     if (payload_ptr as *const ()).is_null() {
-        eprintln!("payload_ptr is null");
-        return UniquePtr::null();
+        error!("payload_ptr is null");
+        return None;
     }
 
     // Use the intermediate function to create a UniquePtr<PayloadWrapper>
     let payload_wrapper = unsafe { create_payload_wrapper(payload_ptr) };
 
     if payload_wrapper.is_null() {
-        eprintln!("Failed to create UniquePtr<PayloadWrapper>");
+        error!("Failed to create UniquePtr<PayloadWrapper>");
     } else {
         trace!("Successfully created UniquePtr<PayloadWrapper>");
     }
 
-    payload_wrapper
+    Some(payload_wrapper)
 }
 
 /// Requests a single [eventgroup_t][crate::vsomeip::eventgroup_t] for the application

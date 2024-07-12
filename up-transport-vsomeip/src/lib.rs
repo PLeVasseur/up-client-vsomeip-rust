@@ -138,7 +138,6 @@ pub(crate) fn any_uuri() -> UUri {
     }
 }
 
-// TODO: upstream into up-rust
 pub(crate) fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id: UeId) -> UUri {
     UUri {
         authority_name: authority_name.to_string(),
@@ -149,14 +148,12 @@ pub(crate) fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id:
     }
 }
 
-// TODO: upstream this into up-rust
 pub(crate) fn split_u32_to_u16(value: u32) -> (u16, u16) {
     let most_significant_bits = (value >> 16) as u16;
     let least_significant_bits = (value & 0xFFFF) as u16;
     (most_significant_bits, least_significant_bits)
 }
 
-// TODO: upstream this into up-rust
 pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     let byte1 = (value >> 24) as u8;
     let byte2 = (value >> 16 & 0xFF) as u8;
@@ -165,7 +162,7 @@ pub(crate) fn split_u32_to_u8(value: u32) -> (u8, u8, u8, u8) {
     (byte1, byte2, byte3, byte4)
 }
 
-// TODO: upstream this into up-rust
+// TODO: upstream this into up-rust?
 pub(crate) fn create_request_id(client_id: ClientId, session_id: SessionId) -> RequestId {
     ((client_id as u32) << 16) | (session_id as u32)
 }

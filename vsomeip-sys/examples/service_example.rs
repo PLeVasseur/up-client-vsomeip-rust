@@ -80,7 +80,9 @@ fn main() {
         let msg_type = get_pinned_message_base(&msg_wrapper).get_message_type();
         println!("message_type_e: {msg_type:?}");
 
-        let payload_wrapper = get_message_payload(&mut msg_wrapper);
+        let Some(payload_wrapper) = get_message_payload(&mut msg_wrapper) else {
+            panic!("Unable to get PayloadWrapper from MessageWrapper");
+        };
         let payload = get_data_safe(&payload_wrapper);
 
         println!("payload:\n{payload:?}");

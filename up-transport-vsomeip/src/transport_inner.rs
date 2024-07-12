@@ -31,7 +31,6 @@ use futures::executor;
 use log::{error, info, trace, warn};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::pin::pin;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -57,9 +56,6 @@ use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 pub const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeipInner";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
-// TODO: Decide whether to keep
-// pub const UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL: &str =
-//     "unregister_listener_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
     "initialize_new_app_internal";
@@ -265,7 +261,6 @@ impl UPTransportVsomeipInnerHandle {
             comp_listener.clone(),
         );
 
-        // TODO: We should check here first on whether this has already been registered
         if let Some(existing_listener_id) = self
             .get_storage()
             .get_registry()
@@ -456,7 +451,7 @@ impl UPTransportVsomeipInnerHandle {
         )
         .await;
         if let Err(err) = send_to_inner_res {
-            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            // TODO: Consider if we'd like to try to get back to a sane state or just panic
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
@@ -539,14 +534,13 @@ impl UPTransportVsomeipInnerHandle {
 
         for app_config in &application_configs {
             let (tx, rx) = oneshot::channel();
-            // TODO: Reconsider if we leave this here or use the initialize_vsomeip_app function
             let send_to_inner_res = Self::send_to_inner_with_status(
                 &self.engine.transport_command_sender,
-                TransportCommand::StartVsomeipApp2(app_config.id, app_config.name.clone(), tx),
+                TransportCommand::StartVsomeipApp(app_config.id, app_config.name.clone(), tx),
             )
             .await;
             if let Err(err) = send_to_inner_res {
-                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                // TODO: Consider if we'd like to try to get back to a sane state or just panic
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
 
@@ -591,7 +585,7 @@ impl UPTransportVsomeipInnerHandle {
                 )
                 .await;
                 if let Err(err) = send_to_inner_res {
-                    // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                    // TODO: Consider if we'd like to try to get back to a sane state or just panic
                     panic!("engine has stopped! unable to proceed! with err: {err:?}");
                 }
 
@@ -750,7 +744,7 @@ impl UPTransportVsomeipInnerHandle {
             )
             .await;
             if let Err(err) = send_to_inner_res {
-                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                // TODO: Consider if we'd like to try to get back to a sane state or just panic
                 panic!("engine has stopped! unable to proceed! err: {err}");
             }
 
@@ -844,7 +838,7 @@ impl UPTransportVsomeipInnerHandle {
             )
             .await;
             if let Err(err) = send_to_inner_res {
-                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                // TODO: Consider if we'd like to try to get back to a sane state or just panic
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
             Self::await_internal_function("unregister", rx).await?;
@@ -933,7 +927,7 @@ impl UPTransportVsomeipInnerHandle {
                 )
                 .await;
                 if let Err(err) = send_to_inner_res {
-                    // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                    // TODO: Consider if we'd like to try to get back to a sane state or just panic
                     panic!("engine has stopped! unable to proceed! with err: {err:?}");
                 }
                 Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
@@ -956,11 +950,11 @@ impl UPTransportVsomeipInnerHandle {
         );
         let send_to_inner_res = Self::send_to_inner_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::StartVsomeipApp2(registration_type.client_id(), app_name.clone(), tx),
+            TransportCommand::StartVsomeipApp(registration_type.client_id(), app_name.clone(), tx),
         )
         .await;
         if let Err(err) = send_to_inner_res {
-            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            // TODO: Consider if we'd like to try to get back to a sane state or just panic
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
         let internal_res =
@@ -1077,7 +1071,7 @@ impl Drop for UPTransportVsomeipInnerHandle {
                     )
                     .await;
                     if let Err(err) = send_to_inner_res {
-                        // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                        // TODO: Consider if we'd like to try to get back to a sane state or just panic
                         panic!("engine has stopped! unable to proceed! with err: {err:?}");
                     }
                     let stop_res =
@@ -1341,7 +1335,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         )
         .await;
         if let Err(err) = send_to_inner_res {
-            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            // TODO: Consider if we'd like to try to get back to a sane state or just panic
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
@@ -1401,7 +1395,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         )
         .await;
         if let Err(err) = send_to_inner_res {
-            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            // TODO: Consider if we'd like to try to get back to a sane state or just panic
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
         Self::await_internal_function("unregister", rx).await?;
@@ -1484,7 +1478,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
             )
             .await;
             if let Err(err) = send_to_inner_res {
-                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                // TODO: Consider if we'd like to try to get back to a sane state or just panic
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
             Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
@@ -1561,7 +1555,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         )
         .await;
         if let Err(err) = send_to_inner_res {
-            // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+            // TODO: Consider if we'd like to try to get back to a sane state or just panic
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
         Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
@@ -1619,7 +1613,7 @@ pub enum TransportCommand {
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
-    StartVsomeipApp2(
+    StartVsomeipApp(
         ClientId,
         ApplicationName,
         oneshot::Sender<Result<(), UStatus>>,
@@ -1879,7 +1873,7 @@ impl UPTransportVsomeipInnerEngine {
                     .await;
                     Self::return_oneshot_result(res, return_channel).await;
                 }
-                TransportCommand::StartVsomeipApp2(client_id, app_name, return_channel) => {
+                TransportCommand::StartVsomeipApp(client_id, app_name, return_channel) => {
                     trace!(
                         "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
                         UP_CLIENT_VSOMEIP_TAG,
@@ -1908,11 +1902,27 @@ impl UPTransportVsomeipInnerEngine {
                         continue;
                     }
 
-                    // TODO: Need to find a way to confirm that we brought up the vsomeip app here
-                    //  and use that for the result.
-                    //
-                    //  For now we assume success
-                    Self::return_oneshot_result(Ok(()), return_channel).await;
+                    let_cxx_string!(cxx_app_name = app_name.clone());
+
+                    let start_res = {
+                        if let Some(_pinned_app) =
+                            get_pinned_application(&make_application_wrapper(
+                                get_pinned_runtime(&runtime_wrapper).get_application(&cxx_app_name),
+                            ))
+                        {
+                            Ok(())
+                        } else {
+                            Err(UStatus::fail_with_code(
+                                UCode::INTERNAL,
+                                format!(
+                                    "No application exists for client_id: {} app_name: {}",
+                                    client_id, app_name
+                                ),
+                            ))
+                        }
+                    };
+
+                    Self::return_oneshot_result(start_res, return_channel).await;
                 }
                 TransportCommand::StopVsomeipApp(_client_id, app_name, return_channel) => {
                     let stop_res =
