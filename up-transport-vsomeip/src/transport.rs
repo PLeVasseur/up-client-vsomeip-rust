@@ -11,81 +11,14 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determine_message_type::{
-    determine_registration_type, determine_send_type, RegistrationType,
-};
-use crate::transport_inner::{TransportCommand, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP};
-use crate::transport_inner::{
-    UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
-    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
-};
-use crate::vsomeip_config::extract_applications;
-use crate::{
-    any_uuri, any_uuri_fixed_authority_id, ApplicationName, MockableUPTransportVsomeipInner,
-};
-use crate::{InstanceId, UPTransportVsomeip};
+use crate::MockableUPTransportVsomeipInner;
+use crate::UPTransportVsomeip;
 use async_trait::async_trait;
-use futures::executor;
-use log::{error, trace, warn};
-use once_cell::sync::Lazy;
-use protobuf::EnumOrUnknown;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::runtime::{Handle, Runtime};
-use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot;
-use tokio::time::timeout;
-use up_rust::{
-    ComparableListener, UAttributesValidators, UCode, UListener, UMessage, UMessageType, UStatus,
-    UTransport, UUri,
-};
-use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
+use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri};
 
-const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
-
-const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
-
-async fn await_internal_function(
-    function_id: &str,
-    rx: oneshot::Receiver<Result<(), UStatus>>,
-) -> Result<(), UStatus> {
-    match timeout(Duration::from_secs(INTERNAL_FUNCTION_TIMEOUT), rx).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err(UStatus::fail_with_code(
-            UCode::INTERNAL,
-            format!(
-                "Unable to receive status back from internal function: {}",
-                function_id
-            ),
-        )),
-        Err(_) => Err(UStatus::fail_with_code(
-            UCode::DEADLINE_EXCEEDED,
-            format!(
-                "Unable to receive status back from internal function: {} within {} second window.",
-                function_id, INTERNAL_FUNCTION_TIMEOUT
-            ),
-        )),
-    }
-}
-
-async fn send_to_inner_with_status(
-    tx: &tokio::sync::mpsc::Sender<TransportCommand>,
-    transport_command: TransportCommand,
-) -> Result<(), UStatus> {
-    tx.send(transport_command).await.map_err(|e| {
-        UStatus::fail_with_code(
-            UCode::INTERNAL,
-            format!(
-                "Unable to transmit request to internal vsomeip application handler, err: {:?}",
-                e
-            ),
-        )
-    })
-}
-
-static RUNTIME: Lazy<Arc<Runtime>> =
-    Lazy::new(|| Arc::new(Runtime::new().expect("Failed to create Tokio runtime")));
+// TODO: Decide whether to keep
+// const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER: &str = "register_listener";
 
 #[async_trait]
 impl UTransport for UPTransportVsomeip {

@@ -11,27 +11,21 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
 use crate::TimedRwLock;
-use crate::UPTransportVsomeip;
-use crate::{
-    ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner,
-    UPTransportVsomeipStorage,
-};
+use crate::UPTransportVsomeipStorage;
 use async_trait::async_trait;
 use cxx::{let_cxx_string, SharedPtr};
 use lazy_static::lazy_static;
-use log::{error, info, trace, warn};
+use log::{error, trace, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::{mpsc, Arc, RwLock, Weak};
+use std::sync::{mpsc, Arc, Weak};
 use tokio::runtime::Runtime;
-use tokio::sync::RwLock as TokioRwLock;
 use tokio::task::LocalSet;
 use tokio::time::Instant;
-use up_rust::{ComparableListener, UListener, UUri};
+use up_rust::UListener;
 use up_rust::{UCode, UMessage, UStatus};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
 use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
@@ -92,10 +86,6 @@ pub(crate) trait MockableExternFnRegistry: Send + Sync {
         transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
     ) -> Result<(), UStatus>;
     async fn remove_listener_id_transport(&self, listener_id: usize) -> Result<(), UStatus>;
-    async fn get_listener_id_transport(
-        &self,
-        listener_id: usize,
-    ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>>;
     async fn free_listener_id(&self, listener_id: usize) -> Result<(), UStatus>;
     async fn find_available_listener_id(&self) -> Result<usize, UStatus>;
 }
@@ -140,18 +130,6 @@ impl MockableExternFnRegistry for ExternFnRegistry {
         Ok(())
     }
 
-    async fn get_listener_id_transport(
-        &self,
-        listener_id: usize,
-    ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
-        let listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.read().await;
-        let Some(transport) = listener_id_transport_shim.get(&listener_id) else {
-            return None;
-        };
-
-        transport.upgrade()
-    }
-
     async fn free_listener_id(&self, listener_id: usize) -> Result<(), UStatus> {
         let mut free_ids = FREE_LISTENER_IDS.write().await;
         free_ids.insert(listener_id);
@@ -193,7 +171,7 @@ pub async fn print_extern_fn_registry_rwlock_times() {
 }
 
 impl ExternFnRegistry {
-    pub fn new() -> Arc<dyn MockableExternFnRegistry> {
+    pub fn new_trait_obj() -> Arc<dyn MockableExternFnRegistry> {
         Arc::new(ExternFnRegistry)
     }
 }

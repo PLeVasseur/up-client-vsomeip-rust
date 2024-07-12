@@ -12,15 +12,11 @@
  ********************************************************************************/
 
 use async_trait::async_trait;
-use futures::executor;
-use log::error;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::runtime::Handle;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::{oneshot, Mutex, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::{Mutex, RwLock as TokioRwLock};
 use up_rust::{UCode, UListener, UMessage, UStatus, UUri, UUID};
 
 mod determine_message_type;
@@ -31,16 +27,12 @@ pub use extern_fn_registry::print_extern_fn_registry_rwlock_times;
 mod message_conversions;
 mod rpc_correlation;
 mod transport_inner;
-use crate::determine_message_type::RegistrationType;
 use crate::extern_fn_registry::MockableExternFnRegistry;
 use crate::listener_registry::ListenerRegistry;
 use crate::rpc_correlation::RpcCorrelation2;
-use crate::transport_inner::{TransportCommand, UPTransportVsomeipInnerHandle};
+use crate::transport_inner::UPTransportVsomeipInnerHandle;
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
-use console_subscriber;
 use tokio::time::Instant;
-use transport_inner::UPTransportVsomeipInnerEngine;
-use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 
 mod vsomeip_config;
 mod vsomeip_offered_requested;

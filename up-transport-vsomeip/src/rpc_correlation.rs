@@ -13,10 +13,8 @@
 
 use crate::TimedRwLock;
 use crate::{ClientId, ReqId, RequestId, SessionId};
-use lazy_static::lazy_static;
 use log::trace;
 use std::collections::HashMap;
-use tokio::sync::RwLock as TokioRwLock;
 use up_rust::{UCode, UStatus};
 
 pub(crate) struct RpcCorrelation2 {

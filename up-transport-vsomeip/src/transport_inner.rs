@@ -14,7 +14,7 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::extern_fn_registry::{get_extern_fn, ExternFnRegistry, MockableExternFnRegistry};
+use crate::extern_fn_registry::{ExternFnRegistry, MockableExternFnRegistry};
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 use crate::rpc_correlation::RpcCorrelation2;
@@ -28,20 +28,18 @@ use crate::{
 use async_trait::async_trait;
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace, warn};
-use protobuf::EnumOrUnknown;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::{oneshot, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use up_rust::{
     ComparableListener, UAttributesValidators, UCode, UListener, UMessage, UMessageType, UStatus,
     UUri,
 };
-use uuid::Uuid;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_runtime_wrapper, ApplicationWrapper, RuntimeWrapper,
@@ -56,8 +54,9 @@ use vsomeip_sys::vsomeip::{ANY_MAJOR, ANY_MINOR};
 pub const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeipInner";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL: &str = "register_listener_internal";
-pub const UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL: &str =
-    "unregister_listener_internal";
+// TODO: Decide whether to keep
+// pub const UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL: &str =
+//     "unregister_listener_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL: &str = "send_internal";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
     "initialize_new_app_internal";
@@ -82,7 +81,7 @@ impl UPTransportVsomeipInnerHandleStorage {
         remote_authority: AuthorityName,
         ue_id: UeId,
     ) -> Self {
-        let extern_fn_registry: Arc<dyn MockableExternFnRegistry> = Arc::new(ExternFnRegistry);
+        let extern_fn_registry = ExternFnRegistry::new_trait_obj();
 
         Self {
             ue_id,
@@ -151,6 +150,7 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn new_supply_storage(
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
@@ -166,6 +166,7 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_config_supply_storage(
         config_path: &Path,
         storage: Arc<dyn UPTransportVsomeipStorage>,
@@ -222,7 +223,6 @@ impl UPTransportVsomeipInnerHandle {
 
     async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
         &self,
-        message: &UMessage,
         msg_src: &UUri,
         msg_sink: Option<&UUri>,
         message_type: RegistrationType,
@@ -387,17 +387,6 @@ impl UPTransportVsomeipInnerHandle {
             panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
         }
 
-        let Some(src) = message.attributes.sink.as_ref() else {
-            let err_msg = "Request message doesn't have a sink";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-        };
-        let Some(sink) = message.attributes.source.as_ref() else {
-            let err_msg = "Request message doesn't have a source";
-            error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg));
-        };
-
         trace!(
             "listener_id mapped to client_id: listener_id: {listener_id} client_id: {}",
             message_type.client_id()
@@ -445,7 +434,7 @@ impl UPTransportVsomeipInnerHandle {
         .await;
         if let Err(err) = send_to_inner_res {
             // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
-            panic!("engine has stopped! unable to proceed!");
+            panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
         let await_res = Self::await_internal_function("register", rx).await;
@@ -541,7 +530,14 @@ impl UPTransportVsomeipInnerHandle {
                     // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
                     panic!("engine has stopped! unable to proceed! with err: {err:?}");
                 }
-                Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
+
+                if let Err(warn) =
+                    Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await
+                {
+                    warn!("{warn}");
+                }
+
+                return Err(err);
             }
 
             let Ok(listener_id) = self
@@ -690,7 +686,7 @@ impl UPTransportVsomeipInnerHandle {
             .await;
             if let Err(err) = send_to_inner_res {
                 // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
-                panic!("engine has stopped! unable to proceed!");
+                panic!("engine has stopped! unable to proceed! err: {err}");
             }
 
             Self::await_internal_function("register", rx).await?;
@@ -919,18 +915,6 @@ impl UPTransportVsomeipInnerHandle {
 
             Ok(app_name)
         }
-    }
-
-    pub async fn get_point_to_point_listener_read(
-        &self,
-    ) -> RwLockReadGuard<'_, Option<Arc<dyn UListener>>> {
-        self.point_to_point_listener.read().await
-    }
-
-    pub async fn get_point_to_point_listener_write(
-        &self,
-    ) -> RwLockWriteGuard<'_, Option<Arc<dyn UListener>>> {
-        self.point_to_point_listener.write().await
     }
 
     pub async fn print_rwlock_times(&self) {
@@ -1211,7 +1195,7 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         .await;
         if let Err(err) = send_to_inner_res {
             // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
-            panic!("engine has stopped! unable to proceed!");
+            panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
         Self::await_internal_function("register", rx).await
@@ -1417,7 +1401,6 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         };
 
         self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
-            &message,
             source_filter,
             sink_filter,
             message_type.clone(),
@@ -2160,3 +2143,27 @@ impl UPTransportVsomeipInnerEngine {
 }
 
 // TODO: Add unit tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_new_supply_storage() {
+        let mockable_storage =
+            UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
+
+        let _ = UPTransportVsomeipInnerHandle::new_supply_storage(Arc::new(mockable_storage));
+    }
+
+    #[test]
+    fn test_new_with_config_supply_storage() {
+        let mockable_storage =
+            UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
+
+        let _ = UPTransportVsomeipInnerHandle::new_with_config_supply_storage(
+            Path::new("/does/not/exist"),
+            Arc::new(mockable_storage),
+        );
+    }
+}

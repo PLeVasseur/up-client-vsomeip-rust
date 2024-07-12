@@ -13,9 +13,7 @@
 
 use crate::TimedRwLock;
 use crate::{EventId, InstanceId, MethodId, ServiceId};
-use lazy_static::lazy_static;
 use std::collections::HashSet;
-use tokio::sync::RwLock as TokioRwLock;
 
 pub(crate) struct VsomeipOfferedRequested2 {
     offered_services: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,

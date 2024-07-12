@@ -11,7 +11,6 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use console_subscriber;
 use log::{error, info};
 use protobuf::Enum;
 use std::fs::canonicalize;

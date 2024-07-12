@@ -1,10 +1,22 @@
+/********************************************************************************
+ * Copyright (c) 2023 Contributors to the Eclipse Foundation
+ *
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ *
+ * This program and the accompanying materials are made available under the
+ * terms of the Apache License Version 2.0 which is available at
+ * https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ ********************************************************************************/
+
 use crate::TimedRwLock;
-use crate::{ApplicationName, AuthorityName, ClientId};
+use crate::{ApplicationName, ClientId};
 use bimap::BiMap;
 use log::{debug, info};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock as TokioRwLock;
 use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri};
 
 pub(crate) struct ListenerRegistry {
@@ -140,8 +152,12 @@ impl ListenerRegistry {
         app_name: ApplicationName,
     ) -> Result<(), UStatus> {
         let mut client_and_app_name = self.client_and_app_name.write().await;
-        if let Err(err) = client_and_app_name.insert_no_overwrite(client_id, app_name.clone()) {
-            return Err(UStatus::fail_with_code(UCode::ALREADY_EXISTS, format!("Already exists that pair of client_id and app_name: client_id: {client_id}, app_name: {app_name}")));
+        if let Err(existing) = client_and_app_name.insert_no_overwrite(client_id, app_name.clone())
+        {
+            return Err(UStatus::fail_with_code(
+                UCode::ALREADY_EXISTS,
+                format!("Already exists that pair of client_id and app_name: {existing:?}"),
+            ));
         }
 
         Ok(())

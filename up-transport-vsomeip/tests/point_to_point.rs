@@ -11,7 +11,6 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use futures::SinkExt;
 use log::{error, info, trace};
 use protobuf::Enum;
 use std::env::current_dir;

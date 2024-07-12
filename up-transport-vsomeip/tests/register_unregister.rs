@@ -21,7 +21,6 @@ mod tests {
     use log::error;
     use std::path::Path;
     use std::sync::Arc;
-    use std::thread;
     use std::time::Duration;
     use up_rust::{UListener, UTransport, UUri};
 
