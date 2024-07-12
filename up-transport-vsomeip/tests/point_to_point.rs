@@ -402,19 +402,21 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    trace!(
+    println!("iterations: {}", iterations);
+
+    println!(
         "request_listener_check.received_request(): {}",
         request_listener_check.received_request()
     );
-    trace!(
+    println!(
         "point_to_point_listener_check.received_request(): {}",
         point_to_point_listener_check.received_request()
     );
-    trace!(
+    println!(
         "point_to_point_listener_check.received_response(): {}",
         point_to_point_listener_check.received_response()
     );
-    trace!(
+    println!(
         "response_listener_check.received_response(): {}",
         response_listener_check.received_response()
     );

@@ -20,6 +20,7 @@ use crate::message_conversions::convert_umsg_to_vsomeip_msg_and_send;
 use crate::rpc_correlation::RpcCorrelation2;
 use crate::vsomeip_config::extract_applications;
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
+use crate::TimedRwLock;
 use crate::{
     any_uuri, any_uuri_fixed_authority_id, split_u32_to_u16, ApplicationName, AuthorityName,
     ClientId, MockableUPTransportVsomeipInner, UPTransportVsomeipStorage, UeId,
@@ -98,7 +99,7 @@ impl UPTransportVsomeipInnerHandleStorage {
 pub(crate) struct UPTransportVsomeipInnerHandle {
     storage: Arc<dyn UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipInnerEngine,
-    point_to_point_listener: TokioRwLock<Option<Arc<dyn UListener>>>,
+    point_to_point_listener: TimedRwLock<Option<Arc<dyn UListener>>>,
     config_path: Option<PathBuf>,
 }
 
@@ -115,7 +116,7 @@ impl UPTransportVsomeipInnerHandle {
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(None);
-        let point_to_point_listener = TokioRwLock::new(None);
+        let point_to_point_listener = TimedRwLock::new(None);
         let config_path = None;
 
         Ok(Self {
@@ -139,7 +140,7 @@ impl UPTransportVsomeipInnerHandle {
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
-        let point_to_point_listener = TokioRwLock::new(None);
+        let point_to_point_listener = TimedRwLock::new(None);
         let config_path = Some(config_path.to_path_buf());
 
         Ok(Self {
@@ -154,7 +155,7 @@ impl UPTransportVsomeipInnerHandle {
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(None);
-        let point_to_point_listener = TokioRwLock::new(None);
+        let point_to_point_listener = TimedRwLock::new(None);
         let config_path = None;
 
         Ok(Self {
@@ -170,7 +171,7 @@ impl UPTransportVsomeipInnerHandle {
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(Some(config_path));
-        let point_to_point_listener = TokioRwLock::new(None);
+        let point_to_point_listener = TimedRwLock::new(None);
         let config_path = Some(config_path.to_path_buf());
 
         Ok(Self {
@@ -860,6 +861,12 @@ impl UPTransportVsomeipInnerHandle {
                 format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
             ))
         } else {
+            self.get_storage()
+                .get_registry()
+                .await
+                .insert_client_and_app_name(registration_type.client_id(), app_name.clone())
+                .await?;
+
             Ok(app_name)
         }
     }
@@ -874,6 +881,29 @@ impl UPTransportVsomeipInnerHandle {
         &self,
     ) -> RwLockWriteGuard<'_, Option<Arc<dyn UListener>>> {
         self.point_to_point_listener.write().await
+    }
+
+    pub async fn print_rwlock_times(&self) {
+        println!("point_to_point_listener");
+        println!(
+            "reads: {:?}",
+            self.point_to_point_listener.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.point_to_point_listener.write_durations().await
+        );
+
+        self.get_storage()
+            .get_registry()
+            .await
+            .print_rwlock_times()
+            .await;
+        self.get_storage()
+            .get_rpc_correlation()
+            .await
+            .print_rwlock_times()
+            .await;
     }
 }
 
@@ -1073,75 +1103,6 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
 
             return Err(app_name_res.err().unwrap());
         };
-
-        let insert_res = self
-            .get_storage()
-            .get_registry()
-            .await
-            .insert_client_and_app_name(registration_type.client_id(), app_name.clone())
-            .await;
-        if let Err(err) = insert_res {
-            let _ = self
-                .get_storage()
-                .get_extern_fn_registry()
-                .await
-                .free_listener_id(listener_id)
-                .await;
-
-            let _ = self
-                .get_storage()
-                .get_registry()
-                .await
-                .remove_listener_id_and_listener_config_based_on_listener_id(listener_id)
-                .await;
-
-            let _ = self
-                .get_storage()
-                .get_extern_fn_registry()
-                .await
-                .remove_listener_id_transport(listener_id);
-
-            let _ = self
-                .get_storage()
-                .get_registry()
-                .await
-                .remove_client_id_based_on_listener_id(listener_id)
-                .await;
-
-            let Some(app_name) = self
-                .get_storage()
-                .get_registry()
-                .await
-                .remove_app_name_for_client_id(registration_type.client_id())
-                .await
-            else {
-                return Err(UStatus::fail_with_code(
-                    UCode::NOT_FOUND,
-                    format!("Unable to find app_name for listener_id: {listener_id}"),
-                ));
-            };
-            trace!(
-                "No more remaining listeners for client_id: {} app_name: {}",
-                registration_type.client_id(),
-                app_name
-            );
-
-            let (tx, rx) = oneshot::channel();
-            let send_to_inner_res = Self::send_to_inner_with_status(
-                &self.engine.transport_command_sender,
-                TransportCommand::StopVsomeipApp(
-                    registration_type.client_id(),
-                    app_name.clone(),
-                    tx,
-                ),
-            )
-            .await;
-            if let Err(err) = send_to_inner_res {
-                // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
-                panic!("engine has stopped! unable to proceed! with err: {err:?}");
-            }
-            Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await?;
-        }
 
         let (tx, rx) = oneshot::channel();
         let extern_fn = self
@@ -1521,6 +1482,7 @@ impl UPTransportVsomeipInnerEngine {
         );
 
         // TODO: Should be removed in favor of a signal-based strategy
+        trace!("within create_app, slept for 50ms");
         thread::sleep(Duration::from_millis(50));
 
         Ok(())
@@ -1769,6 +1731,7 @@ impl UPTransportVsomeipInnerEngine {
                 );
 
                 // Letting vsomeip settle
+                trace!("within register_listener_internal, slept for 5ms");
                 tokio::time::sleep(Duration::from_millis(5)).await;
 
                 trace!(

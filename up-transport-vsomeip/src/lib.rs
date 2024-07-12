@@ -14,8 +14,10 @@
 use async_trait::async_trait;
 use futures::executor;
 use log::error;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{oneshot, Mutex, RwLock as TokioRwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -23,6 +25,9 @@ use up_rust::{UCode, UListener, UMessage, UStatus, UUri, UUID};
 
 mod determine_message_type;
 mod extern_fn_registry;
+
+pub use extern_fn_registry::print_extern_fn_registry_rwlock_times;
+
 mod message_conversions;
 mod rpc_correlation;
 mod transport_inner;
@@ -33,6 +38,7 @@ use crate::rpc_correlation::RpcCorrelation2;
 use crate::transport_inner::{TransportCommand, UPTransportVsomeipInnerHandle};
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
 use console_subscriber;
+use tokio::time::Instant;
 use transport_inner::UPTransportVsomeipInnerEngine;
 use vsomeip_sys::extern_callback_wrappers::MessageHandlerFnPtr;
 
@@ -41,6 +47,68 @@ mod vsomeip_offered_requested;
 
 pub(crate) mod listener_registry;
 pub mod transport;
+
+pub struct TimedRwLock<T> {
+    inner: TokioRwLock<T>,
+    read_durations: Arc<Mutex<Vec<Duration>>>,
+    write_durations: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl<T> TimedRwLock<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            inner: TokioRwLock::new(value),
+            read_durations: Arc::new(Mutex::new(Vec::new())),
+            write_durations: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
+        let start = Instant::now();
+        let guard = self.inner.read().await;
+        let duration = start.elapsed();
+
+        let mut read_durations = self.read_durations.lock().await;
+        read_durations.push(duration);
+
+        guard
+    }
+
+    pub async fn write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
+        let start = Instant::now();
+        let guard = self.inner.write().await;
+        let duration = start.elapsed();
+
+        let mut write_durations = self.write_durations.lock().await;
+        write_durations.push(duration);
+
+        guard
+    }
+
+    pub async fn read_durations(&self) -> Vec<Duration> {
+        let read_durations = self.read_durations.lock().await;
+        read_durations.clone()
+    }
+
+    pub async fn write_durations(&self) -> Vec<Duration> {
+        let write_durations = self.write_durations.lock().await;
+        write_durations.clone()
+    }
+}
+
+impl<T> Deref for TimedRwLock<T> {
+    type Target = TokioRwLock<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for TimedRwLock<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 // TODO: use function from up-rust when merged
 pub(crate) fn any_uuri() -> UUri {
@@ -208,5 +276,9 @@ impl UPTransportVsomeip {
         };
         let transport_inner = Arc::new(transport_inner);
         Ok(Self { transport_inner })
+    }
+
+    pub async fn print_rwlock_times(&self) {
+        self.transport_inner.print_rwlock_times().await;
     }
 }

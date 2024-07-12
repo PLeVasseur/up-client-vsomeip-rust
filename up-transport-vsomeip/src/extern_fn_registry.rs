@@ -13,6 +13,7 @@
 
 use crate::listener_registry::ListenerRegistry;
 use crate::message_conversions::convert_vsomeip_msg_to_umsg;
+use crate::TimedRwLock;
 use crate::UPTransportVsomeip;
 use crate::{
     ApplicationName, AuthorityName, ClientId, MockableUPTransportVsomeipInner,
@@ -58,8 +59,8 @@ fn get_runtime() -> Arc<Runtime> {
 generate_message_handler_extern_c_fns!(10000);
 
 lazy_static! {
-    static ref LISTENER_ID_TRANSPORT_SHIM: TokioRwLock<HashMap<usize, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>> =
-        TokioRwLock::new(HashMap::new());
+    static ref LISTENER_ID_TRANSPORT_SHIM: TimedRwLock<HashMap<usize, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>> =
+        TimedRwLock::new(HashMap::new());
 }
 
 struct ProcMacroTransportStorage;
@@ -171,6 +172,22 @@ impl MockableExternFnRegistry for ExternFnRegistry {
             ))
         }
     }
+}
+
+pub async fn print_extern_fn_registry_rwlock_times() {
+    println!("FREE_LISTENER_IDS:");
+    println!("reads: {:?}", FREE_LISTENER_IDS.read_durations().await);
+    println!("writes: {:?}", FREE_LISTENER_IDS.write_durations().await);
+
+    println!("LISTENER_ID_TRANSPORT_SHIM:");
+    println!(
+        "reads: {:?}",
+        LISTENER_ID_TRANSPORT_SHIM.read_durations().await
+    );
+    println!(
+        "writes: {:?}",
+        LISTENER_ID_TRANSPORT_SHIM.write_durations().await
+    );
 }
 
 impl ExternFnRegistry {

@@ -1,3 +1,4 @@
+use crate::TimedRwLock;
 use crate::{ApplicationName, AuthorityName, ClientId};
 use bimap::BiMap;
 use std::collections::{HashMap, HashSet};
@@ -7,19 +8,19 @@ use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri};
 
 pub(crate) struct ListenerRegistry {
     listener_id_and_listener_config:
-        TokioRwLock<BiMap<usize, (UUri, Option<UUri>, ComparableListener)>>,
-    listener_id_to_client_id: TokioRwLock<HashMap<usize, ClientId>>,
-    client_id_to_listener_id: TokioRwLock<HashMap<ClientId, HashSet<usize>>>,
-    client_and_app_name: TokioRwLock<BiMap<ClientId, ApplicationName>>,
+        TimedRwLock<BiMap<usize, (UUri, Option<UUri>, ComparableListener)>>,
+    listener_id_to_client_id: TimedRwLock<HashMap<usize, ClientId>>,
+    client_id_to_listener_id: TimedRwLock<HashMap<ClientId, HashSet<usize>>>,
+    client_and_app_name: TimedRwLock<BiMap<ClientId, ApplicationName>>,
 }
 
 impl ListenerRegistry {
     pub fn new() -> Self {
         Self {
-            listener_id_and_listener_config: TokioRwLock::new(BiMap::new()),
-            listener_id_to_client_id: TokioRwLock::new(HashMap::new()),
-            client_id_to_listener_id: TokioRwLock::new(HashMap::new()),
-            client_and_app_name: TokioRwLock::new(BiMap::new()),
+            listener_id_and_listener_config: TimedRwLock::new(BiMap::new()),
+            listener_id_to_client_id: TimedRwLock::new(HashMap::new()),
+            client_id_to_listener_id: TimedRwLock::new(HashMap::new()),
+            client_and_app_name: TimedRwLock::new(BiMap::new()),
         }
     }
 
@@ -200,5 +201,47 @@ impl ListenerRegistry {
         };
 
         Some(comp_listener.into_inner())
+    }
+
+    pub async fn print_rwlock_times(&self) {
+        println!("listener_id_and_listener_config:");
+        println!(
+            "reads: {:?}",
+            self.listener_id_and_listener_config.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.listener_id_and_listener_config.write_durations().await
+        );
+
+        println!("listener_id_to_client_id:");
+        println!(
+            "reads: {:?}",
+            self.listener_id_to_client_id.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.listener_id_to_client_id.write_durations().await
+        );
+
+        println!("client_id_to_listener_id:");
+        println!(
+            "reads: {:?}",
+            self.client_id_to_listener_id.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.client_id_to_listener_id.write_durations().await
+        );
+
+        println!("client_and_app_name:");
+        println!(
+            "reads: {:?}",
+            self.client_and_app_name.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.client_and_app_name.write_durations().await
+        );
     }
 }

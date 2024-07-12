@@ -24,7 +24,7 @@ use up_rust::{
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
-const TEST_DURATION: u64 = 3;
+const TEST_DURATION: u64 = 1000;
 
 pub struct ResponseListener {
     received_response: AtomicUsize,
@@ -148,7 +148,7 @@ fn any_uuri() -> UUri {
 #[tokio::test]
 async fn client_service() {
     env_logger::init();
-    console_subscriber::init();
+    // console_subscriber::init();
 
     let service_authority_name = "foo";
     let streamer_ue_id = 0x7878;

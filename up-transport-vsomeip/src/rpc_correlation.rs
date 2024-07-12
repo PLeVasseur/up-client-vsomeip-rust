@@ -11,6 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use crate::TimedRwLock;
 use crate::{ClientId, ReqId, RequestId, SessionId};
 use lazy_static::lazy_static;
 use log::trace;
@@ -19,17 +20,17 @@ use tokio::sync::RwLock as TokioRwLock;
 use up_rust::{UCode, UStatus};
 
 pub(crate) struct RpcCorrelation2 {
-    ue_request_correlation: TokioRwLock<HashMap<RequestId, ReqId>>,
-    me_request_correlation: TokioRwLock<HashMap<ReqId, RequestId>>,
-    client_id_session_id_tracking: TokioRwLock<HashMap<ClientId, SessionId>>,
+    ue_request_correlation: TimedRwLock<HashMap<RequestId, ReqId>>,
+    me_request_correlation: TimedRwLock<HashMap<ReqId, RequestId>>,
+    client_id_session_id_tracking: TimedRwLock<HashMap<ClientId, SessionId>>,
 }
 
 impl RpcCorrelation2 {
     pub fn new() -> Self {
         Self {
-            ue_request_correlation: TokioRwLock::new(HashMap::new()),
-            me_request_correlation: TokioRwLock::new(HashMap::new()),
-            client_id_session_id_tracking: TokioRwLock::new(HashMap::new()),
+            ue_request_correlation: TimedRwLock::new(HashMap::new()),
+            me_request_correlation: TimedRwLock::new(HashMap::new()),
+            client_id_session_id_tracking: TimedRwLock::new(HashMap::new()),
         }
     }
 
@@ -122,6 +123,38 @@ impl RpcCorrelation2 {
         };
 
         Ok(request_id)
+    }
+
+    pub async fn print_rwlock_times(&self) {
+        println!("ue_request_correlation:");
+        println!(
+            "reads: {:?}",
+            self.ue_request_correlation.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.ue_request_correlation.write_durations().await
+        );
+
+        println!("me_request_correlation:");
+        println!(
+            "reads: {:?}",
+            self.me_request_correlation.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.me_request_correlation.write_durations().await
+        );
+
+        println!("client_id_session_id_tracking:");
+        println!(
+            "reads: {:?}",
+            self.client_id_session_id_tracking.read_durations().await
+        );
+        println!(
+            "writes: {:?}",
+            self.client_id_session_id_tracking.write_durations().await
+        );
     }
 }
 

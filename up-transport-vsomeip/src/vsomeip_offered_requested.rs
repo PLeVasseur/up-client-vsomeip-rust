@@ -11,25 +11,26 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use crate::TimedRwLock;
 use crate::{EventId, InstanceId, MethodId, ServiceId};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
 use tokio::sync::RwLock as TokioRwLock;
 
 pub(crate) struct VsomeipOfferedRequested2 {
-    offered_services: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
-    requested_services: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
-    offered_events: TokioRwLock<HashSet<(ServiceId, InstanceId, EventId)>>,
-    requested_events: TokioRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    offered_services: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    requested_services: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    offered_events: TimedRwLock<HashSet<(ServiceId, InstanceId, EventId)>>,
+    requested_events: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
 }
 
 impl VsomeipOfferedRequested2 {
     pub fn new() -> Self {
         Self {
-            offered_services: TokioRwLock::new(HashSet::new()),
-            requested_services: TokioRwLock::new(HashSet::new()),
-            offered_events: TokioRwLock::new(HashSet::new()),
-            requested_events: TokioRwLock::new(HashSet::new()),
+            offered_services: TimedRwLock::new(HashSet::new()),
+            requested_services: TimedRwLock::new(HashSet::new()),
+            offered_events: TimedRwLock::new(HashSet::new()),
+            requested_events: TimedRwLock::new(HashSet::new()),
         }
     }
 

@@ -108,6 +108,7 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                     event_id,
                     event_id,
                 );
+                trace!("doing event offered");
                 tokio::time::sleep(Duration::from_nanos(1)).await;
                 transport_storage
                     .get_vsomeip_offered_requested()
