@@ -92,7 +92,9 @@ mod tests {
         let mut app_wrapper = make_application_wrapper(
             get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
         );
-        get_pinned_application(&app_wrapper).init();
+        if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+            pinned_app.init();
+        }
 
         extern "C" fn callback(
             _service: crate::vsomeip::service_t,

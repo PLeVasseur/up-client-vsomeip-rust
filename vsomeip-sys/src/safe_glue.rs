@@ -64,10 +64,18 @@ pub fn get_pinned_runtime(wrapper: &RuntimeWrapper) -> Pin<&mut runtime> {
 ///
 /// Add some runtime safety checks on the pointer
 ///
+/// Reorganize this such that we check for existence before calling .unwrap() and if
+/// it's None, then return None. Requires changing the API to Option<Pin<&mut application>>
+///
 /// I do see a runtime panic here, perhaps when we try to work with the app before it's setup
 /// should probably do a sleep of half a second or something
-pub fn get_pinned_application(wrapper: &ApplicationWrapper) -> Pin<&mut application> {
-    unsafe { Pin::new_unchecked(wrapper.get_mut().as_mut().unwrap()) }
+pub fn get_pinned_application(wrapper: &ApplicationWrapper) -> Option<Pin<&mut application>> {
+    let ptr = unsafe { wrapper.get_mut().as_mut() };
+    if let Some(ptr) = ptr {
+        return Some(unsafe { Pin::new_unchecked(ptr) });
+    }
+
+    None
 }
 
 /// Gets a `Pin<&mut message>` from a [MessageWrapper]

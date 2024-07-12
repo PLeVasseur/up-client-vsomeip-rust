@@ -94,13 +94,21 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                 .is_event_offered(service_id, instance_id, event_id)
                 .await
             {
-                get_pinned_application(application_wrapper).offer_service(
-                    service_id,
-                    instance_id,
-                    ANY_MAJOR,
-                    // interface_version,
-                    vsomeip::ANY_MINOR,
-                );
+                if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                    pinned_app.offer_service(
+                        service_id,
+                        instance_id,
+                        ANY_MAJOR,
+                        // interface_version,
+                        vsomeip::ANY_MINOR,
+                    );
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "Application does not exist",
+                    ));
+                }
+
                 offer_single_event_safe(
                     application_wrapper,
                     service_id,
@@ -119,13 +127,14 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
 
             trace!("Immediately after request_service");
 
-            get_pinned_application(application_wrapper).notify(
-                service_id,
-                instance_id,
-                event_id,
-                payload,
-                true,
-            );
+            if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                pinned_app.notify(service_id, instance_id, event_id, payload, true);
+            } else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "Application does not exist",
+                ));
+            }
 
             Ok(())
         }
@@ -162,7 +171,16 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
                     "Missing id for Request message. Would be unable to correlate. Rejected.",
                 )
             })?;
-            let app_client_id = get_pinned_application(application_wrapper).get_client();
+            let app_client_id = {
+                let Some(pinned_app) = get_pinned_application(application_wrapper) else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "Application does not exist",
+                    ));
+                };
+
+                pinned_app.get_client()
+            };
             let app_session_id = transport_storage
                 .get_rpc_correlation()
                 .await
@@ -222,7 +240,14 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             );
 
             let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-            get_pinned_application(application_wrapper).send(shared_ptr_message);
+            if let Some(mut pinned_app) = get_pinned_application(application_wrapper) {
+                pinned_app.send(shared_ptr_message);
+            } else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "No application exists",
+                ));
+            }
 
             Ok(())
         }
@@ -314,7 +339,14 @@ pub async fn convert_umsg_to_vsomeip_msg_and_send(
             );
 
             let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
-            get_pinned_application(application_wrapper).send(shared_ptr_message);
+            if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                pinned_app.send(shared_ptr_message);
+            } else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    "No application exists",
+                ));
+            }
 
             Ok(())
         }

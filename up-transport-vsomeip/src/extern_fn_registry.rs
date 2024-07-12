@@ -182,13 +182,13 @@ pub async fn print_extern_fn_registry_rwlock_times() {
         println!("LISTENER_ID_TRANSPORT_SHIM:");
         println!(
             "reads: {:?}",
-            crate::extern_fn_registry::LISTENER_ID_TRANSPORT_SHIM
+            crate::extern_fn_registry::LISTENER_ID_TO_TRANSPORT_STORAGE
                 .read_durations()
                 .await
         );
         println!(
             "writes: {:?}",
-            crate::extern_fn_registry::LISTENER_ID_TRANSPORT_SHIM
+            crate::extern_fn_registry::LISTENER_ID_TO_TRANSPORT_STORAGE
                 .write_durations()
                 .await
         );

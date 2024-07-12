@@ -18,18 +18,28 @@ const SAMPLE_INSTANCE_ID: u16 = 1;
 
 const SAMPLE_EVENTGROUP_ID: u16 = 0x4465;
 const SAMPLE_EVENT_ID: u16 = 0x4465;
+const APP_NAME: &str = "Subscriber";
 
 fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-    let_cxx_string!(my_app_str = "Subscriber");
+    let_cxx_string!(my_app_str = APP_NAME);
     let app_wrapper = make_application_wrapper(
         get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
     );
 
-    get_pinned_application(&app_wrapper).init();
-    get_pinned_application(&app_wrapper).start();
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.init();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
+
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.start();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
 }
 
 fn main() {
@@ -53,7 +63,13 @@ fn main() {
     let mut app_wrapper =
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
 
-    let client_id = get_pinned_application(&app_wrapper).get_client();
+    let client_id = {
+        let Some(pinned_app) = get_pinned_application(app_wrapper) else {
+            panic!("Application does not exist app_name: {APP_NAME}");
+        };
+
+        pinned_app.get_client()
+    };
     println!("client_id: {client_id}");
 
     get_pinned_application(&app_wrapper).request_service(

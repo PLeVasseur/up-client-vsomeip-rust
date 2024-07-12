@@ -20,13 +20,23 @@ fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-    let_cxx_string!(my_app_str = "Publisher");
+    let app_name = "Publisher";
+    let_cxx_string!(my_app_str = app_name);
     let app_wrapper = make_application_wrapper(
         get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
     );
 
-    get_pinned_application(&app_wrapper).init();
-    get_pinned_application(&app_wrapper).start();
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.init();
+    } else {
+        panic!("No app found for app_name: {app_name}");
+    }
+
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.start();
+    } else {
+        panic!("No app found for app_name: {app_name}");
+    }
 }
 
 fn main() {

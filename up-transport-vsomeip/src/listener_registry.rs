@@ -220,6 +220,12 @@ impl ListenerRegistry {
         Some(comp_listener.into_inner())
     }
 
+    pub async fn get_listener_ids(&self) -> Vec<usize> {
+        let listener_id_to_client_id = self.listener_id_and_listener_config.read().await;
+
+        listener_id_to_client_id.left_values().copied().collect()
+    }
+
     pub async fn print_rwlock_times(&self) {
         #[cfg(feature = "timing")]
         {

@@ -15,18 +15,28 @@ const SAMPLE_SERVICE_ID: u16 = 0x1234;
 // const SAMPLE_INSTANCE_ID: u16 = 0x5678;
 const SAMPLE_INSTANCE_ID: u16 = 1;
 const SAMPLE_METHOD_ID: u16 = 0x0421;
+const APP_NAME: &str = "Hello";
 
 fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-    let_cxx_string!(my_app_str = "World");
+    let_cxx_string!(my_app_str = APP_NAME);
     let app_wrapper = make_application_wrapper(
         get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
     );
 
-    get_pinned_application(&app_wrapper).init();
-    get_pinned_application(&app_wrapper).start();
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.init();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
+
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.start();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
 }
 
 fn main() {
@@ -45,7 +55,7 @@ fn main() {
 
     println!("after we get the runtime");
 
-    let_cxx_string!(my_app_str = "World");
+    let_cxx_string!(my_app_str = APP_NAME);
 
     let app_wrapper =
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));

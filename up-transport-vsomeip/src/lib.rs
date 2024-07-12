@@ -12,6 +12,7 @@
  ********************************************************************************/
 
 use async_trait::async_trait;
+use log::trace;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -199,7 +200,7 @@ pub(crate) trait UPTransportVsomeipStorage: Send + Sync {
 }
 
 #[async_trait]
-pub(crate) trait MockableUPTransportVsomeipInner {
+pub(crate) trait MockableUPTransportVsomeipInner: Sync + Send {
     // the below are commands we can send to the inner engine
     fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage>;
 
@@ -218,10 +219,11 @@ pub(crate) trait MockableUPTransportVsomeipInner {
     ) -> Result<(), UStatus>;
 
     async fn send(&self, message: UMessage) -> Result<(), UStatus>;
+    async fn print_rwlock_times(&self);
 }
 
 pub struct UPTransportVsomeip {
-    transport_inner: Arc<UPTransportVsomeipInnerHandle>,
+    transport_inner: Arc<dyn MockableUPTransportVsomeipInner>,
 }
 
 impl UPTransportVsomeip {
@@ -261,7 +263,7 @@ impl UPTransportVsomeip {
     ) -> Result<Self, UStatus> {
         let config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        let transport_inner = {
+        let transport_inner: Arc<dyn MockableUPTransportVsomeipInner> = Arc::new({
             if let Some(config_path) = config_path {
                 let config_path = config_path.as_path();
                 let transport_inner_res = UPTransportVsomeipInnerHandle::new_with_config(
@@ -289,12 +291,17 @@ impl UPTransportVsomeip {
                     }
                 }
             }
-        };
-        let transport_inner = Arc::new(transport_inner);
+        });
         Ok(Self { transport_inner })
     }
 
     pub async fn print_rwlock_times(&self) {
         self.transport_inner.print_rwlock_times().await;
+    }
+}
+
+impl Drop for UPTransportVsomeip {
+    fn drop(&mut self) {
+        trace!("Running Drop for UPTransportVsomeip");
     }
 }

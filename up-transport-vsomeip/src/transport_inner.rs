@@ -27,12 +27,15 @@ use crate::{
 };
 use async_trait::async_trait;
 use cxx::{let_cxx_string, UniquePtr};
+use futures::executor;
 use log::{error, info, trace, warn};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::pin::pin;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Handle};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
@@ -978,32 +981,6 @@ impl UPTransportVsomeipInnerHandle {
             Ok(app_name)
         }
     }
-
-    pub async fn print_rwlock_times(&self) {
-        #[cfg(feature = "timing")]
-        {
-            println!("point_to_point_listener");
-            println!(
-                "reads: {:?}",
-                self.point_to_point_listener.read_durations().await
-            );
-            println!(
-                "writes: {:?}",
-                self.point_to_point_listener.write_durations().await
-            );
-        }
-
-        self.get_storage()
-            .get_registry()
-            .await
-            .print_rwlock_times()
-            .await;
-        self.get_storage()
-            .get_rpc_correlation()
-            .await
-            .print_rwlock_times()
-            .await;
-    }
 }
 
 #[async_trait]
@@ -1034,6 +1011,109 @@ impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
 
     async fn get_vsomeip_offered_requested(&self) -> Arc<VsomeipOfferedRequested2> {
         self.vsomeip_offered_requested.clone()
+    }
+}
+
+impl Drop for UPTransportVsomeipInnerHandle {
+    fn drop(&mut self) {
+        trace!("Running Drop for UPTransportVsomeipInnerHandle");
+
+        // Create a oneshot channel to wait for task completion
+        let (tx, rx) = oneshot::channel();
+
+        // Get the handle of the current runtime
+        let handle = Handle::current();
+
+        let storage = self.get_storage().clone();
+        let transport_command_sender = self.engine.transport_command_sender.clone();
+
+        thread::spawn(move || {
+            handle.block_on(async move {
+                let listener_ids = storage.get_registry().await.get_listener_ids().await;
+
+                let mut stopped_app_client_ids = HashSet::new();
+
+                for listener_id in listener_ids {
+                    trace!(
+                        "Removing entries from extern_fn_registry(): listener_id: {listener_id}"
+                    );
+
+                    let Some(client_id) = storage
+                        .get_registry()
+                        .await
+                        .remove_client_id_based_on_listener_id(listener_id)
+                        .await
+                    else {
+                        warn!("Unable to find client_id for listener_id: {listener_id}");
+                        continue;
+                    };
+
+                    let Some(app_name) = storage
+                        .get_registry()
+                        .await
+                        .remove_app_name_for_client_id(client_id)
+                        .await
+                    else {
+                        let base_msg = format!("No app_name found for client_id: {client_id}");
+
+                        if stopped_app_client_ids.contains(&client_id) {
+                            info!("Trying to stop already stopped app. {base_msg}");
+                        } else {
+                            warn!("Unable to stop app. {base_msg}");
+                        }
+
+                        continue;
+                    };
+
+                    stopped_app_client_ids.insert(client_id);
+
+                    // TODO: Should we iterate through all offered / requested services / events and
+                    //  unoffer / unrequest them?
+
+                    let (tx, rx) = oneshot::channel();
+                    let send_to_inner_res = Self::send_to_inner_with_status(
+                        &transport_command_sender,
+                        TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+                    )
+                    .await;
+                    if let Err(err) = send_to_inner_res {
+                        // TODO: Consider if we'd like to restart engine or if just indeterminate state and should panic
+                        panic!("engine has stopped! unable to proceed! with err: {err:?}");
+                    }
+                    let stop_res =
+                        Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await;
+                    if let Err(warn) = stop_res {
+                        warn!("{warn}");
+                    }
+
+                    if let Err(warn) = storage
+                        .get_extern_fn_registry()
+                        .await
+                        .remove_listener_id_transport(listener_id)
+                        .await
+                    {
+                        warn!("{warn}");
+                    }
+
+                    if let Err(warn) = storage
+                        .get_extern_fn_registry()
+                        .await
+                        .free_listener_id(listener_id)
+                        .await
+                    {
+                        warn!("{warn}");
+                    }
+                }
+
+                // Notify that the task is complete
+                trace!("Completed removal of all listener_ids");
+                let _ = tx.send(());
+            });
+        });
+
+        trace!("Waiting till removal of listener_ids");
+        let _ = executor::block_on(rx);
+        trace!("Finished waiting on removal of listener_ids");
     }
 }
 
@@ -1486,6 +1566,31 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
         }
         Self::await_internal_function(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
+    async fn print_rwlock_times(&self) {
+        #[cfg(feature = "timing")]
+        {
+            println!("point_to_point_listener");
+            println!(
+                "reads: {:?}",
+                self.point_to_point_listener.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.point_to_point_listener.write_durations().await
+            );
+        }
+
+        self.get_storage()
+            .get_registry()
+            .await
+            .print_rwlock_times()
+            .await;
+        self.get_storage()
+            .get_rpc_correlation()
+            .await
+            .print_rwlock_times()
+            .await;
+    }
 }
 
 pub enum TransportCommand {
@@ -1577,7 +1682,7 @@ impl UPTransportVsomeipInnerEngine {
             );
             let config_path = config_path.map(|p| p.to_path_buf());
             let runtime_wrapper = make_runtime_wrapper(vsomeip::runtime::get());
-            let_cxx_string!(app_name_cxx = app_name);
+            let_cxx_string!(app_name_cxx = app_name.clone());
             let application_wrapper = {
                 if let Some(config_path) = config_path {
                     let config_path_str = config_path.display().to_string();
@@ -1599,11 +1704,35 @@ impl UPTransportVsomeipInnerEngine {
                 ));
             }
 
-            get_pinned_application(&application_wrapper).init();
-            let client_id = get_pinned_application(&application_wrapper).get_client();
-            trace!("start_app: after starting app we see its client_id: {client_id}");
-            // FYI: thread is blocked by vsomeip here
-            get_pinned_application(&application_wrapper).start();
+            if let Some(pinned_app) = get_pinned_application(&application_wrapper) {
+                pinned_app.init();
+            } else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!("No app found for app_name: {app_name}"),
+                ));
+            }
+
+            let client_id = {
+                if let Some(pinned_app) = get_pinned_application(&application_wrapper) {
+                    pinned_app.get_client()
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        format!("No app found for app_name: {app_name}"),
+                    ));
+                }
+            };
+            trace!("start_app: after init'ing app we see its client_id: {client_id}");
+
+            if let Some(pinned_app) = get_pinned_application(&application_wrapper) {
+                pinned_app.start();
+            } else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INTERNAL,
+                    format!("No app found for app_name: {app_name}"),
+                ));
+            }
 
             Ok(())
         });
@@ -1727,7 +1856,18 @@ impl UPTransportVsomeipInnerEngine {
                         continue;
                     }
                     let mut application_wrapper = make_application_wrapper(application);
-                    let app_client_id = get_pinned_application(&application_wrapper).get_client();
+                    let app_client_id = {
+                        if let Some(pinned_app) = get_pinned_application(&application_wrapper) {
+                            pinned_app.get_client()
+                        } else {
+                            let err = UStatus::fail_with_code(
+                                UCode::INTERNAL,
+                                format!("No app found for app_name: {app_name}"),
+                            );
+                            Self::return_oneshot_result(Err(err), return_channel).await;
+                            continue;
+                        }
+                    };
                     trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
 
                     let res = Self::send_internal(
@@ -1828,12 +1968,19 @@ impl UPTransportVsomeipInnerEngine {
                     .is_event_requested(service_id, instance_id, event_id)
                     .await
                 {
-                    get_pinned_application(application_wrapper).request_service(
-                        service_id,
-                        instance_id,
-                        ANY_MAJOR,
-                        vsomeip::ANY_MINOR,
-                    );
+                    if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                        pinned_app.request_service(
+                            service_id,
+                            instance_id,
+                            ANY_MAJOR,
+                            vsomeip::ANY_MINOR,
+                        );
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::INTERNAL,
+                            "No application exists",
+                        ));
+                    }
                     request_single_event_safe(
                         application_wrapper,
                         service_id,
@@ -1841,13 +1988,20 @@ impl UPTransportVsomeipInnerEngine {
                         event_id,
                         event_id,
                     );
-                    get_pinned_application(application_wrapper).subscribe(
-                        service_id,
-                        instance_id,
-                        event_id,
-                        ANY_MAJOR,
-                        event_id,
-                    );
+                    if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                        pinned_app.subscribe(
+                            service_id,
+                            instance_id,
+                            event_id,
+                            ANY_MAJOR,
+                            event_id,
+                        );
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::INTERNAL,
+                            "No application exists",
+                        ));
+                    }
                     transport_storage
                         .get_vsomeip_offered_requested()
                         .await
@@ -1907,12 +2061,14 @@ impl UPTransportVsomeipInnerEngine {
                     .is_service_offered(service_id, instance_id, method_id)
                     .await
                 {
-                    get_pinned_application(application_wrapper).offer_service(
-                        service_id,
-                        instance_id,
-                        ANY_MAJOR,
-                        ANY_MINOR,
-                    );
+                    if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                        pinned_app.offer_service(service_id, instance_id, ANY_MAJOR, ANY_MINOR);
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::INTERNAL,
+                            "No application exists",
+                        ));
+                    }
                     transport_storage
                         .get_vsomeip_offered_requested()
                         .await
@@ -1953,12 +2109,15 @@ impl UPTransportVsomeipInnerEngine {
                     .is_service_requested(service_id, instance_id, method_id)
                     .await
                 {
-                    get_pinned_application(application_wrapper).request_service(
-                        service_id,
-                        instance_id,
-                        ANY_MAJOR,
-                        ANY_MINOR,
-                    );
+                    if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                        pinned_app.request_service(service_id, instance_id, ANY_MAJOR, ANY_MINOR);
+                    } else {
+                        return Err(UStatus::fail_with_code(
+                            UCode::INTERNAL,
+                            "No application exists",
+                        ));
+                    }
+
                     transport_storage
                         .get_vsomeip_offered_requested()
                         .await
@@ -2024,11 +2183,14 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                get_pinned_application(application_wrapper).unregister_message_handler(
-                    service_id,
-                    instance_id,
-                    method_id,
-                );
+                if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                    pinned_app.unregister_message_handler(service_id, instance_id, method_id);
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "No application exists",
+                    ));
+                }
 
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
@@ -2054,11 +2216,14 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
-                get_pinned_application(application_wrapper).unregister_message_handler(
-                    service_id,
-                    instance_id,
-                    method_id,
-                );
+                if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                    pinned_app.unregister_message_handler(service_id, instance_id, method_id);
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "No application exists",
+                    ));
+                }
 
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
@@ -2085,11 +2250,14 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
 
-                get_pinned_application(application_wrapper).unregister_message_handler(
-                    service_id,
-                    instance_id,
-                    method_id,
-                );
+                if let Some(pinned_app) = get_pinned_application(application_wrapper) {
+                    pinned_app.unregister_message_handler(service_id, instance_id, method_id);
+                } else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::INTERNAL,
+                        "No application exists",
+                    ));
+                }
 
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
@@ -2203,7 +2371,13 @@ impl UPTransportVsomeipInnerEngine {
             get_pinned_runtime(runtime_wrapper).get_application(&app_name_cxx),
         );
 
-        get_pinned_application(&app_wrapper).stop();
+        let Some(pinned_app) = get_pinned_application(&app_wrapper) else {
+            return Err(UStatus::fail_with_code(
+                UCode::INTERNAL,
+                "No application exists",
+            ));
+        };
+        pinned_app.stop();
 
         Ok(())
     }
@@ -2215,16 +2389,16 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    #[test]
-    fn test_new_supply_storage() {
+    #[tokio::test]
+    async fn test_new_supply_storage() {
         let mockable_storage =
             UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
 
         let _ = UPTransportVsomeipInnerHandle::new_supply_storage(Arc::new(mockable_storage));
     }
 
-    #[test]
-    fn test_new_with_config_supply_storage() {
+    #[tokio::test]
+    async fn test_new_with_config_supply_storage() {
         let mockable_storage =
             UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
 
