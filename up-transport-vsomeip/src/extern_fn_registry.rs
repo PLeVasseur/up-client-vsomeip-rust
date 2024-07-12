@@ -52,8 +52,10 @@ fn get_runtime() -> Arc<Runtime> {
 
 generate_message_handler_extern_c_fns!(10000);
 
+type ListenerIdToTransportStorage =
+    HashMap<usize, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>;
 lazy_static! {
-    static ref LISTENER_ID_TRANSPORT_SHIM: TimedRwLock<HashMap<usize, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>> =
+    static ref LISTENER_ID_TO_TRANSPORT_STORAGE: TimedRwLock<ListenerIdToTransportStorage> =
         TimedRwLock::new(HashMap::new());
 }
 
@@ -63,7 +65,7 @@ impl ProcMacroTransportStorage {
     async fn get_listener_id_transport(
         listener_id: usize,
     ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
-        let listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.read().await;
+        let listener_id_transport_shim = LISTENER_ID_TO_TRANSPORT_STORAGE.read().await;
         let transport = listener_id_transport_shim.get(&listener_id)?;
 
         transport.upgrade()
@@ -90,6 +92,12 @@ pub(crate) trait MockableExternFnRegistry: Send + Sync {
 
 pub(crate) struct ExternFnRegistry;
 
+impl ExternFnRegistry {
+    pub fn new_trait_obj() -> Arc<dyn MockableExternFnRegistry> {
+        Arc::new(ExternFnRegistry)
+    }
+}
+
 #[async_trait]
 impl MockableExternFnRegistry for ExternFnRegistry {
     async fn insert_listener_id_transport(
@@ -97,7 +105,7 @@ impl MockableExternFnRegistry for ExternFnRegistry {
         listener_id: usize,
         transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
     ) -> Result<(), UStatus> {
-        let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
+        let mut listener_id_transport_shim = LISTENER_ID_TO_TRANSPORT_STORAGE.write().await;
         if let std::collections::hash_map::Entry::Vacant(e) =
             listener_id_transport_shim.entry(listener_id)
         {
@@ -115,7 +123,7 @@ impl MockableExternFnRegistry for ExternFnRegistry {
     }
 
     async fn remove_listener_id_transport(&self, listener_id: usize) -> Result<(), UStatus> {
-        let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
+        let mut listener_id_transport_shim = LISTENER_ID_TO_TRANSPORT_STORAGE.write().await;
         if listener_id_transport_shim.contains_key(&listener_id) {
             listener_id_transport_shim.remove(&listener_id);
         } else {
@@ -184,12 +192,6 @@ pub async fn print_extern_fn_registry_rwlock_times() {
                 .write_durations()
                 .await
         );
-    }
-}
-
-impl ExternFnRegistry {
-    pub fn new_trait_obj() -> Arc<dyn MockableExternFnRegistry> {
-        Arc::new(ExternFnRegistry)
     }
 }
 

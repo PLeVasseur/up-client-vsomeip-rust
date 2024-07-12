@@ -340,6 +340,16 @@ impl UPTransportVsomeipInnerHandle {
                 warn!("{warn}");
             }
 
+            if let Err(warn) = self
+                .get_storage()
+                .get_extern_fn_registry()
+                .await
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
+
             return Err(err);
         }
 
@@ -368,6 +378,16 @@ impl UPTransportVsomeipInnerHandle {
                 .get_extern_fn_registry()
                 .await
                 .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
+
+            if let Err(warn) = self
+                .get_storage()
+                .get_registry()
+                .await
+                .remove_listener_id_and_listener_config_based_on_listener_id(listener_id)
                 .await
             {
                 warn!("{warn}");
@@ -440,7 +460,47 @@ impl UPTransportVsomeipInnerHandle {
         let await_res = Self::await_internal_function("register", rx).await;
 
         if let Err(err) = await_res {
-            // TODO: Roll-back all the book-keeping
+            if let Err(warn) = self
+                .get_storage()
+                .get_extern_fn_registry()
+                .await
+                .free_listener_id(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
+
+            if let Err(warn) = self
+                .get_storage()
+                .get_extern_fn_registry()
+                .await
+                .remove_listener_id_transport(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
+
+            if let Err(warn) = self
+                .get_storage()
+                .get_registry()
+                .await
+                .remove_listener_id_and_listener_config_based_on_listener_id(listener_id)
+                .await
+            {
+                warn!("{warn}");
+            }
+
+            if self
+                .get_storage()
+                .get_registry()
+                .await
+                .remove_client_id_based_on_listener_id(listener_id)
+                .await
+                .is_none()
+            {
+                warn!("No client_id found to remove for listener_id: {listener_id}");
+            }
+
             return Err(err);
         }
 
@@ -495,8 +555,7 @@ impl UPTransportVsomeipInnerHandle {
             .await;
 
             if let Err(err) = await_res {
-                // TODO: Roll-back the book-keeping done up till this point
-                return Err(err);
+                panic!("Unable to start necessary vsomeip app in point-to-point mode. app_config.id: {} app_config.name: {} err: {}", app_config.id, app_config.name, err);
             }
 
             let registration_type = RegistrationType::Request(app_config.id);

@@ -15,11 +15,16 @@ use crate::TimedRwLock;
 use crate::{EventId, InstanceId, MethodId, ServiceId};
 use std::collections::HashSet;
 
+type OfferedServices = HashSet<(ServiceId, InstanceId, MethodId)>;
+type RequestedServices = HashSet<(ServiceId, InstanceId, MethodId)>;
+type OfferedEvents = HashSet<(ServiceId, InstanceId, EventId)>;
+type RequestedEvents = HashSet<(ServiceId, InstanceId, MethodId)>;
+
 pub(crate) struct VsomeipOfferedRequested2 {
-    offered_services: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
-    requested_services: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
-    offered_events: TimedRwLock<HashSet<(ServiceId, InstanceId, EventId)>>,
-    requested_events: TimedRwLock<HashSet<(ServiceId, InstanceId, MethodId)>>,
+    offered_services: TimedRwLock<OfferedServices>,
+    requested_services: TimedRwLock<RequestedServices>,
+    offered_events: TimedRwLock<OfferedEvents>,
+    requested_events: TimedRwLock<RequestedEvents>,
 }
 
 impl VsomeipOfferedRequested2 {

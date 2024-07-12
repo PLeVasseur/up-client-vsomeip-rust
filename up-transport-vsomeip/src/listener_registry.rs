@@ -19,12 +19,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri};
 
+type ListenerIdAndListenerConfig = BiMap<usize, (UUri, Option<UUri>, ComparableListener)>;
+type ListenerIdToClientId = HashMap<usize, ClientId>;
+type ClientIdToListenerId = HashMap<ClientId, HashSet<usize>>;
+type ClientAndAppName = BiMap<ClientId, ApplicationName>;
 pub(crate) struct ListenerRegistry {
-    listener_id_and_listener_config:
-        TimedRwLock<BiMap<usize, (UUri, Option<UUri>, ComparableListener)>>,
-    listener_id_to_client_id: TimedRwLock<HashMap<usize, ClientId>>,
-    client_id_to_listener_id: TimedRwLock<HashMap<ClientId, HashSet<usize>>>,
-    client_and_app_name: TimedRwLock<BiMap<ClientId, ApplicationName>>,
+    listener_id_and_listener_config: TimedRwLock<ListenerIdAndListenerConfig>,
+    listener_id_to_client_id: TimedRwLock<ListenerIdToClientId>,
+    client_id_to_listener_id: TimedRwLock<ClientIdToListenerId>,
+    client_and_app_name: TimedRwLock<ClientAndAppName>,
 }
 
 impl ListenerRegistry {

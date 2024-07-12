@@ -17,10 +17,14 @@ use log::trace;
 use std::collections::HashMap;
 use up_rust::{UCode, UStatus};
 
+type UeRequestCorrelation = HashMap<RequestId, ReqId>;
+type MeRequestCorrelation = HashMap<ReqId, RequestId>;
+type ClientIdSessionIdTracking = HashMap<ClientId, SessionId>;
+
 pub(crate) struct RpcCorrelation2 {
-    ue_request_correlation: TimedRwLock<HashMap<RequestId, ReqId>>,
-    me_request_correlation: TimedRwLock<HashMap<ReqId, RequestId>>,
-    client_id_session_id_tracking: TimedRwLock<HashMap<ClientId, SessionId>>,
+    ue_request_correlation: TimedRwLock<UeRequestCorrelation>,
+    me_request_correlation: TimedRwLock<MeRequestCorrelation>,
+    client_id_session_id_tracking: TimedRwLock<ClientIdSessionIdTracking>,
 }
 
 impl RpcCorrelation2 {
