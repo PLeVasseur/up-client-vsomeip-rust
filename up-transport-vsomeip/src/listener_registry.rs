@@ -218,44 +218,47 @@ impl ListenerRegistry {
     }
 
     pub async fn print_rwlock_times(&self) {
-        println!("listener_id_and_listener_config:");
-        println!(
-            "reads: {:?}",
-            self.listener_id_and_listener_config.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.listener_id_and_listener_config.write_durations().await
-        );
+        #[cfg(feature = "timing")]
+        {
+            println!("listener_id_and_listener_config:");
+            println!(
+                "reads: {:?}",
+                self.listener_id_and_listener_config.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.listener_id_and_listener_config.write_durations().await
+            );
 
-        println!("listener_id_to_client_id:");
-        println!(
-            "reads: {:?}",
-            self.listener_id_to_client_id.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.listener_id_to_client_id.write_durations().await
-        );
+            println!("listener_id_to_client_id:");
+            println!(
+                "reads: {:?}",
+                self.listener_id_to_client_id.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.listener_id_to_client_id.write_durations().await
+            );
 
-        println!("client_id_to_listener_id:");
-        println!(
-            "reads: {:?}",
-            self.client_id_to_listener_id.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.client_id_to_listener_id.write_durations().await
-        );
+            println!("client_id_to_listener_id:");
+            println!(
+                "reads: {:?}",
+                self.client_id_to_listener_id.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.client_id_to_listener_id.write_durations().await
+            );
 
-        println!("client_and_app_name:");
-        println!(
-            "reads: {:?}",
-            self.client_and_app_name.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.client_and_app_name.write_durations().await
-        );
+            println!("client_and_app_name:");
+            println!(
+                "reads: {:?}",
+                self.client_and_app_name.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.client_and_app_name.write_durations().await
+            );
+        }
     }
 }

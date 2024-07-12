@@ -15,8 +15,7 @@ use async_trait::async_trait;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{Mutex, RwLock as TokioRwLock};
+use tokio::sync::RwLock as TokioRwLock;
 use up_rust::{UCode, UListener, UMessage, UStatus, UUri, UUID};
 
 mod determine_message_type;
@@ -32,7 +31,6 @@ use crate::listener_registry::ListenerRegistry;
 use crate::rpc_correlation::RpcCorrelation2;
 use crate::transport_inner::UPTransportVsomeipInnerHandle;
 use crate::vsomeip_offered_requested::VsomeipOfferedRequested2;
-use tokio::time::Instant;
 
 mod vsomeip_config;
 mod vsomeip_offered_requested;
@@ -40,9 +38,21 @@ mod vsomeip_offered_requested;
 pub(crate) mod listener_registry;
 pub mod transport;
 
+#[cfg(feature = "timing")]
+mod timing_imports {
+    pub use std::time::Duration;
+    pub use tokio::sync::Mutex;
+    pub use tokio::time::Instant;
+}
+
+#[cfg(feature = "timing")]
+use timing_imports::*;
+
 pub struct TimedRwLock<T> {
     inner: TokioRwLock<T>,
+    #[cfg(feature = "timing")]
     read_durations: Arc<Mutex<Vec<Duration>>>,
+    #[cfg(feature = "timing")]
     write_durations: Arc<Mutex<Vec<Duration>>>,
 }
 
@@ -50,38 +60,52 @@ impl<T> TimedRwLock<T> {
     pub fn new(value: T) -> Self {
         Self {
             inner: TokioRwLock::new(value),
+            #[cfg(feature = "timing")]
             read_durations: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(feature = "timing")]
             write_durations: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
+        #[cfg(feature = "timing")]
         let start = Instant::now();
-        let guard = self.inner.read().await;
-        let duration = start.elapsed();
 
-        let mut read_durations = self.read_durations.lock().await;
-        read_durations.push(duration);
+        let guard = self.inner.read().await;
+
+        #[cfg(feature = "timing")]
+        {
+            let duration = start.elapsed();
+            let mut read_durations = self.read_durations.lock().await;
+            read_durations.push(duration);
+        }
 
         guard
     }
 
     pub async fn write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
+        #[cfg(feature = "timing")]
         let start = Instant::now();
-        let guard = self.inner.write().await;
-        let duration = start.elapsed();
 
-        let mut write_durations = self.write_durations.lock().await;
-        write_durations.push(duration);
+        let guard = self.inner.write().await;
+
+        #[cfg(feature = "timing")]
+        {
+            let duration = start.elapsed();
+            let mut write_durations = self.write_durations.lock().await;
+            write_durations.push(duration);
+        }
 
         guard
     }
 
+    #[cfg(feature = "timing")]
     pub async fn read_durations(&self) -> Vec<Duration> {
         let read_durations = self.read_durations.lock().await;
         read_durations.clone()
     }
 
+    #[cfg(feature = "timing")]
     pub async fn write_durations(&self) -> Vec<Duration> {
         let write_durations = self.write_durations.lock().await;
         write_durations.clone()

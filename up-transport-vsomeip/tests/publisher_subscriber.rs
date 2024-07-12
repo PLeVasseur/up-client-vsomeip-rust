@@ -154,13 +154,13 @@ async fn publisher_subscriber() {
         subscriber_listener_check.received_publish()
     );
 
-    // up_transport_vsomeip::print_extern_fn_registry_rwlock_times().await;
-    //
-    // println!("publisher:");
-    // publisher.print_rwlock_times().await;
-    //
-    // println!("subscriber:");
-    // subscriber.print_rwlock_times().await;
+    up_transport_vsomeip::print_extern_fn_registry_rwlock_times().await;
+
+    println!("publisher:");
+    publisher.print_rwlock_times().await;
+
+    println!("subscriber:");
+    subscriber.print_rwlock_times().await;
 
     assert!(iterations - subscriber_listener_check.received_publish() <= TEST_SLACK);
 }

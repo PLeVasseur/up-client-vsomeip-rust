@@ -921,15 +921,18 @@ impl UPTransportVsomeipInnerHandle {
     }
 
     pub async fn print_rwlock_times(&self) {
-        println!("point_to_point_listener");
-        println!(
-            "reads: {:?}",
-            self.point_to_point_listener.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.point_to_point_listener.write_durations().await
-        );
+        #[cfg(feature = "timing")]
+        {
+            println!("point_to_point_listener");
+            println!(
+                "reads: {:?}",
+                self.point_to_point_listener.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.point_to_point_listener.write_durations().await
+            );
+        }
 
         self.get_storage()
             .get_registry()

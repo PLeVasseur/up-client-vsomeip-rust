@@ -124,35 +124,38 @@ impl RpcCorrelation2 {
     }
 
     pub async fn print_rwlock_times(&self) {
-        println!("ue_request_correlation:");
-        println!(
-            "reads: {:?}",
-            self.ue_request_correlation.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.ue_request_correlation.write_durations().await
-        );
+        #[cfg(feature = "timing")]
+        {
+            println!("ue_request_correlation:");
+            println!(
+                "reads: {:?}",
+                self.ue_request_correlation.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.ue_request_correlation.write_durations().await
+            );
 
-        println!("me_request_correlation:");
-        println!(
-            "reads: {:?}",
-            self.me_request_correlation.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.me_request_correlation.write_durations().await
-        );
+            println!("me_request_correlation:");
+            println!(
+                "reads: {:?}",
+                self.me_request_correlation.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.me_request_correlation.write_durations().await
+            );
 
-        println!("client_id_session_id_tracking:");
-        println!(
-            "reads: {:?}",
-            self.client_id_session_id_tracking.read_durations().await
-        );
-        println!(
-            "writes: {:?}",
-            self.client_id_session_id_tracking.write_durations().await
-        );
+            println!("client_id_session_id_tracking:");
+            println!(
+                "reads: {:?}",
+                self.client_id_session_id_tracking.read_durations().await
+            );
+            println!(
+                "writes: {:?}",
+                self.client_id_session_id_tracking.write_durations().await
+            );
+        }
     }
 }
 
