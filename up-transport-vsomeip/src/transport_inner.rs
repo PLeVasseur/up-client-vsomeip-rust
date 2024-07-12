@@ -440,6 +440,7 @@ impl UPTransportVsomeipInnerHandle {
         let await_res = Self::await_internal_function("register", rx).await;
 
         if let Err(err) = await_res {
+            // TODO: Roll-back all the book-keeping
             return Err(err);
         }
 
@@ -494,6 +495,7 @@ impl UPTransportVsomeipInnerHandle {
             .await;
 
             if let Err(err) = await_res {
+                // TODO: Roll-back the book-keeping done up till this point
                 return Err(err);
             }
 
@@ -649,12 +651,13 @@ impl UPTransportVsomeipInnerHandle {
                     warn!("{warn}");
                 }
 
-                if let None = self
+                if self
                     .get_storage()
                     .get_registry()
                     .await
                     .remove_client_id_based_on_listener_id(listener_id)
                     .await
+                    .is_none()
                 {
                     warn!("No client_id found to remove for listener_id: {listener_id}");
                 }
@@ -1099,12 +1102,13 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 warn!("{warn}");
             }
 
-            if let None = self
+            if self
                 .get_storage()
                 .get_registry()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id)
                 .await
+                .is_none()
             {
                 warn!("No client_id found to remove for listener_id: {listener_id}");
             }
@@ -1148,12 +1152,13 @@ impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
                 warn!("{warn}");
             }
 
-            if let None = self
+            if self
                 .get_storage()
                 .get_registry()
                 .await
                 .remove_client_id_based_on_listener_id(listener_id)
                 .await
+                .is_none()
             {
                 warn!("No client_id found to remove for listener_id: {listener_id}");
             }
@@ -2132,11 +2137,11 @@ impl UPTransportVsomeipInnerEngine {
 
         let_cxx_string!(app_name_cxx = app_name);
 
-        let mut app_wrapper = make_application_wrapper(
+        let app_wrapper = make_application_wrapper(
             get_pinned_runtime(runtime_wrapper).get_application(&app_name_cxx),
         );
 
-        get_pinned_application(&mut app_wrapper).stop();
+        get_pinned_application(&app_wrapper).stop();
 
         Ok(())
     }

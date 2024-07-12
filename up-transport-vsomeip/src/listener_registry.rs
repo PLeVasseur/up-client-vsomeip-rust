@@ -71,7 +71,7 @@ impl ListenerRegistry {
             debug!("listener_id_to_client_id: {listener_id_to_client_id:?}");
 
             let client_id = listener_id_to_client_id.get(&listener_id).unwrap();
-            return Some((listener_id, client_id.clone()));
+            return Some((listener_id, *client_id));
         }
 
         let insert_res = listener_id_to_client_id.insert(listener_id, client_id);
@@ -105,7 +105,7 @@ impl ListenerRegistry {
         let removed = listener_id_to_client_id.remove(&listener_id);
         if let Some(client_id) = removed {
             client_id_to_listener_id
-                .entry(client_id.clone())
+                .entry(client_id)
                 .or_default()
                 .remove(&listener_id);
 
@@ -169,9 +169,7 @@ impl ListenerRegistry {
     ) -> Option<ApplicationName> {
         let mut client_and_app_name = self.client_and_app_name.write().await;
 
-        let Some((_client_id, app_name)) = client_and_app_name.remove_by_left(&client_id) else {
-            return None;
-        };
+        let (_client_id, app_name) = client_and_app_name.remove_by_left(&client_id)?;
 
         Some(app_name.clone())
     }
@@ -179,9 +177,7 @@ impl ListenerRegistry {
     pub async fn get_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
         let client_and_app_name = self.client_and_app_name.read().await;
 
-        let Some(app_name) = client_and_app_name.get_by_left(&client_id) else {
-            return None;
-        };
+        let app_name = client_and_app_name.get_by_left(&client_id)?;
 
         Some(app_name.clone())
     }
@@ -193,13 +189,8 @@ impl ListenerRegistry {
         let listener_id_to_client_id = self.listener_id_to_client_id.read().await;
         let client_and_app_name = self.client_and_app_name.read().await;
 
-        let Some(client_id) = listener_id_to_client_id.get(&listener_id) else {
-            return None;
-        };
-
-        let Some(app_name) = client_and_app_name.get_by_left(&client_id) else {
-            return None;
-        };
+        let client_id = listener_id_to_client_id.get(&listener_id)?;
+        let app_name = client_and_app_name.get_by_left(client_id)?;
 
         Some(app_name.clone())
     }
@@ -210,12 +201,9 @@ impl ListenerRegistry {
     ) -> Option<usize> {
         let listener_id_and_listener_config = self.listener_id_and_listener_config.read().await;
 
-        let Some(listener_id) = listener_id_and_listener_config.get_by_right(&listener_config)
-        else {
-            return None;
-        };
+        let listener_id = listener_id_and_listener_config.get_by_right(&listener_config)?;
 
-        Some(listener_id.clone())
+        Some(*listener_id)
     }
 
     pub async fn get_listener_for_listener_id(
@@ -224,10 +212,7 @@ impl ListenerRegistry {
     ) -> Option<Arc<dyn UListener>> {
         let listener_id_and_listener_config = self.listener_id_and_listener_config.read().await;
 
-        let Some((_, _, comp_listener)) = listener_id_and_listener_config.get_by_left(&listener_id)
-        else {
-            return None;
-        };
+        let (_, _, comp_listener) = listener_id_and_listener_config.get_by_left(&listener_id)?;
 
         Some(comp_listener.into_inner())
     }

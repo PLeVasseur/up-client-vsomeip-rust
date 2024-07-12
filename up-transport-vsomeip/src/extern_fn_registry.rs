@@ -64,9 +64,7 @@ impl ProcMacroTransportStorage {
         listener_id: usize,
     ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
         let listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.read().await;
-        let Some(transport) = listener_id_transport_shim.get(&listener_id) else {
-            return None;
-        };
+        let transport = listener_id_transport_shim.get(&listener_id)?;
 
         transport.upgrade()
     }
@@ -100,8 +98,10 @@ impl MockableExternFnRegistry for ExternFnRegistry {
         transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
     ) -> Result<(), UStatus> {
         let mut listener_id_transport_shim = LISTENER_ID_TRANSPORT_SHIM.write().await;
-        if !listener_id_transport_shim.contains_key(&listener_id) {
-            listener_id_transport_shim.insert(listener_id, Arc::downgrade(&transport));
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            listener_id_transport_shim.entry(listener_id)
+        {
+            e.insert(Arc::downgrade(&transport));
         } else {
             return Err(UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
