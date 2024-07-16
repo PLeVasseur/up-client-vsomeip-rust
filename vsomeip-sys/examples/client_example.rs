@@ -5,10 +5,6 @@ use std::time::Duration;
 use vsomeip_sys::glue::{
     make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
 };
-use vsomeip_sys::safe_glue::{
-    get_pinned_application, get_pinned_message_base, get_pinned_payload, get_pinned_runtime,
-    set_data_safe, set_message_payload,
-};
 use vsomeip_sys::vsomeip::runtime;
 
 const SAMPLE_SERVICE_ID: u16 = 0x1234;
@@ -22,21 +18,13 @@ fn start_app() {
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
     let_cxx_string!(my_app_str = APP_NAME);
-    let app_wrapper = make_application_wrapper(
-        get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
-    );
-
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.init();
-    } else {
-        panic!("No app found for app_name: {APP_NAME}");
-    }
-
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.start();
-    } else {
-        panic!("No app found for app_name: {APP_NAME}");
-    }
+    let Some(app_wrapper) =
+        make_application_wrapper(runtime_wrapper.get_pinned().create_application(&my_app_str))
+    else {
+        panic!("No app created for app_name: {APP_NAME}");
+    };
+    app_wrapper.get_pinned().init();
+    app_wrapper.get_pinned().start();
 }
 
 fn main() {
@@ -57,45 +45,44 @@ fn main() {
 
     let_cxx_string!(my_app_str = APP_NAME);
 
-    let app_wrapper =
-        make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
+    let Some(app_wrapper) =
+        make_application_wrapper(runtime_wrapper.get_pinned().get_application(&my_app_str))
+    else {
+        panic!("Unable to find application");
+    };
 
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.request_service(
-            SAMPLE_SERVICE_ID,
-            SAMPLE_INSTANCE_ID,
-            vsomeip_sys::vsomeip::ANY_MAJOR,
-            vsomeip_sys::vsomeip::ANY_MINOR,
-        );
-    } else {
-        panic!("No application in wrapper");
-    }
+    app_wrapper.get_pinned().request_service(
+        SAMPLE_SERVICE_ID,
+        SAMPLE_INSTANCE_ID,
+        vsomeip_sys::vsomeip::ANY_MAJOR,
+        vsomeip_sys::vsomeip::ANY_MINOR,
+    );
 
     loop {
         sleep(Duration::from_millis(1000));
 
-        let mut request =
-            make_message_wrapper(get_pinned_runtime(&runtime_wrapper).create_request(true));
-        get_pinned_message_base(&request).set_service(SAMPLE_SERVICE_ID);
-        get_pinned_message_base(&request).set_instance(SAMPLE_INSTANCE_ID);
-        get_pinned_message_base(&request).set_method(SAMPLE_METHOD_ID);
+        let request = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
+        request
+            .get_message_base_pinned()
+            .set_service(SAMPLE_SERVICE_ID);
+        request
+            .get_message_base_pinned()
+            .set_instance(SAMPLE_INSTANCE_ID);
+        request
+            .get_message_base_pinned()
+            .set_method(SAMPLE_METHOD_ID);
 
         let mut payload_wrapper =
-            make_payload_wrapper(get_pinned_runtime(&runtime_wrapper).create_payload());
+            make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
 
         let payload_string = "Hello, vsomeip!";
         let payload_data = payload_string.as_bytes();
 
-        set_data_safe(get_pinned_payload(&payload_wrapper), payload_data);
-        set_message_payload(&mut request, &mut payload_wrapper);
+        payload_wrapper.set_data_safe(payload_data);
+        request.set_message_payload(&mut payload_wrapper);
 
         let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();
         println!("attempting send...");
-
-        if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-            pinned_app.send(shared_ptr_message);
-        } else {
-            panic!("No application in wrapper");
-        }
+        app_wrapper.get_pinned().send(shared_ptr_message);
     }
 }

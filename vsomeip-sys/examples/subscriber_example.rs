@@ -2,12 +2,9 @@ use cxx::{let_cxx_string, SharedPtr};
 use std::thread;
 use std::thread::{park, sleep};
 use std::time::Duration;
-use vsomeip_sys::extern_callback_wrappers::{MessageHandlerFnPtr, SubscriptionStatusHandlerFnPtr};
-use vsomeip_sys::glue::{make_application_wrapper, make_message_wrapper, make_runtime_wrapper};
-use vsomeip_sys::safe_glue::{
-    get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-    get_pinned_runtime, register_message_handler_fn_ptr_safe,
-    register_subscription_status_handler_fn_ptr_safe, request_single_event_safe,
+use vsomeip_sys::glue::{
+    make_application_wrapper, make_message_wrapper, make_runtime_wrapper, MessageHandlerFnPtr,
+    SubscriptionStatusHandlerFnPtr,
 };
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message, runtime, ANY_MAJOR, ANY_MINOR};
@@ -25,21 +22,13 @@ fn start_app() {
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
     let_cxx_string!(my_app_str = APP_NAME);
-    let app_wrapper = make_application_wrapper(
-        get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
-    );
-
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.init();
-    } else {
-        panic!("No app found for app_name: {APP_NAME}");
-    }
-
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.start();
-    } else {
-        panic!("No app found for app_name: {APP_NAME}");
-    }
+    let Some(app_wrapper) =
+        make_application_wrapper(runtime_wrapper.get_pinned().create_application(&my_app_str))
+    else {
+        panic!("No app created for app_name: {APP_NAME}");
+    };
+    app_wrapper.get_pinned().init();
+    app_wrapper.get_pinned().start();
 }
 
 fn main() {
@@ -60,26 +49,23 @@ fn main() {
 
     let_cxx_string!(my_app_str = "Subscriber");
 
-    let mut app_wrapper =
-        make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
-
-    let client_id = {
-        let Some(pinned_app) = get_pinned_application(&app_wrapper) else {
-            panic!("Application does not exist app_name: {APP_NAME}");
-        };
-
-        pinned_app.get_client()
+    let Some(app_wrapper) =
+        make_application_wrapper(runtime_wrapper.get_pinned().get_application(&my_app_str))
+    else {
+        panic!("Application does not exist app_name: {APP_NAME}");
     };
+
+    let client_id = app_wrapper.get_pinned().get_client();
     println!("client_id: {client_id}");
 
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.request_service(SAMPLE_SERVICE_ID, SAMPLE_INSTANCE_ID, ANY_MAJOR, ANY_MINOR);
-    } else {
-        panic!("Application does not exist app_name: {APP_NAME}");
-    }
+    app_wrapper.get_pinned().request_service(
+        SAMPLE_SERVICE_ID,
+        SAMPLE_INSTANCE_ID,
+        ANY_MAJOR,
+        ANY_MINOR,
+    );
 
-    request_single_event_safe(
-        &mut app_wrapper,
+    app_wrapper.request_single_event_safe(
         SAMPLE_SERVICE_ID,
         SAMPLE_INSTANCE_ID,
         SAMPLE_EVENT_ID,
@@ -100,8 +86,7 @@ fn main() {
     let subscription_status_handler_fn_ptr =
         SubscriptionStatusHandlerFnPtr(subscription_status_listener);
 
-    register_subscription_status_handler_fn_ptr_safe(
-        &mut app_wrapper,
+    app_wrapper.register_subscription_status_handler_fn_ptr_safe(
         vsomeip::ANY_SERVICE,
         vsomeip::ANY_INSTANCE,
         vsomeip::ANY_EVENTGROUP,
@@ -110,38 +95,33 @@ fn main() {
         true,
     );
 
-    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-        pinned_app.subscribe(
-            SAMPLE_SERVICE_ID,
-            SAMPLE_INSTANCE_ID,
-            SAMPLE_EVENTGROUP_ID,
-            ANY_MAJOR,
-            SAMPLE_EVENT_ID,
-        );
-    } else {
-        panic!("Application does not exist app_name: {APP_NAME}");
-    }
+    app_wrapper.get_pinned().subscribe(
+        SAMPLE_SERVICE_ID,
+        SAMPLE_INSTANCE_ID,
+        SAMPLE_EVENTGROUP_ID,
+        ANY_MAJOR,
+        SAMPLE_EVENT_ID,
+    );
 
-    extern "C" fn my_msg_handler(_msg: &SharedPtr<message>) {
+    extern "C" fn my_msg_handler(msg: &SharedPtr<message>) {
         println!("received event!");
 
-        let cloned_msg = _msg.clone();
-        let mut msg_wrapper = make_message_wrapper(cloned_msg);
+        let cloned_msg = msg.clone();
+        let msg_wrapper = make_message_wrapper(cloned_msg);
 
-        let msg_type = get_pinned_message_base(&msg_wrapper).get_message_type();
+        let msg_type = msg_wrapper.get_message_base_pinned().get_message_type();
         println!("message_type_e: {msg_type:?}");
 
-        let Some(payload_wrapper) = get_message_payload(&mut msg_wrapper) else {
+        let Some(payload_wrapper) = msg_wrapper.get_message_payload() else {
             panic!("Unable to get PayloadWrapper from MessageWrapper");
         };
-        let payload = get_data_safe(&payload_wrapper);
+        let payload = payload_wrapper.get_data_safe();
 
         println!("payload:\n{payload:?}")
     }
     let my_callback = MessageHandlerFnPtr(my_msg_handler);
 
-    register_message_handler_fn_ptr_safe(
-        &mut app_wrapper,
+    app_wrapper.register_message_handler_fn_ptr_safe(
         SAMPLE_SERVICE_ID,
         vsomeip::ANY_INSTANCE,
         SAMPLE_EVENT_ID,

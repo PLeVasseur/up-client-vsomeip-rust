@@ -51,23 +51,24 @@ include_cpp! {
     generate!("glue::create_payload_wrapper")
 }
 
+mod extern_callback_wrappers;
+mod glue_additions;
+mod unsafe_fns {
+    pub use crate::ffi::glue::create_payload_wrapper;
+    pub use crate::ffi::glue::upcast;
+}
+
 pub mod vsomeip {
     pub use crate::ffi::vsomeip_v3::*;
 }
 
-pub mod extern_callback_wrappers;
-pub mod safe_glue;
-
-mod unsafe_fns {
-    pub use crate::ffi::glue::create_payload_wrapper;
-}
-
 pub mod glue {
-    pub use crate::ffi::glue::upcast;
+    pub use crate::extern_callback_wrappers::*;
     pub use crate::ffi::glue::{
-        make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
-        ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper,
+        make_message_wrapper, make_payload_wrapper, make_runtime_wrapper, ApplicationWrapper,
+        MessageWrapper, PayloadWrapper, RuntimeWrapper,
     };
+    pub use crate::glue_additions::make_application_wrapper;
 }
 
 #[cfg(test)]
@@ -78,12 +79,6 @@ mod tests {
     use crate::ffi::vsomeip_v3::runtime;
     use crate::glue::{
         make_application_wrapper, make_message_wrapper, make_payload_wrapper, make_runtime_wrapper,
-    };
-    use crate::safe_glue::{
-        get_data_safe, get_message_payload, get_pinned_application, get_pinned_message_base,
-        get_pinned_payload, get_pinned_runtime, offer_single_event_safe,
-        register_availability_handler_fn_ptr_safe, register_message_handler_fn_ptr_safe,
-        register_state_handler_fn_ptr_safe, set_data_safe, set_message_payload,
     };
     use crate::vsomeip;
     use crate::vsomeip::state_type_e;
@@ -101,12 +96,12 @@ mod tests {
         let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
         let_cxx_string!(my_app_str = "my_app");
-        let mut app_wrapper = make_application_wrapper(
-            get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
-        );
-        if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-            pinned_app.init();
-        }
+        let Some(app_wrapper) =
+            make_application_wrapper(runtime_wrapper.get_pinned().create_application(&my_app_str))
+        else {
+            panic!("Unable to get app wrapper");
+        };
+        app_wrapper.get_pinned().init();
 
         extern "C" fn callback(
             _service: crate::vsomeip::service_t,
@@ -116,42 +111,40 @@ mod tests {
             println!("hello from Rust!");
         }
         let callback = AvailabilityHandlerFnPtr(callback);
-        register_availability_handler_fn_ptr_safe(&mut app_wrapper, 1, 2, callback, 3, 4);
-        let request =
-            make_message_wrapper(get_pinned_runtime(&runtime_wrapper).create_request(true));
+        app_wrapper.register_availability_handler_fn_ptr_safe(1, 2, callback, 3, 4);
+        let request = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
 
-        let reliable = get_pinned_message_base(&request).is_reliable();
+        let reliable = (*request).get_message_base_pinned().is_reliable();
 
         println!("reliable? {reliable}");
 
-        let mut request =
-            make_message_wrapper(get_pinned_runtime(&runtime_wrapper).create_request(true));
-        get_pinned_message_base(&request).set_service(1);
-        get_pinned_message_base(&request).set_instance(2);
-        get_pinned_message_base(&request).set_method(3);
+        let request = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
+        (*request).get_message_base_pinned().set_service(1);
+        (*request).get_message_base_pinned().set_instance(2);
+        (*request).get_message_base_pinned().set_method(3);
 
         let mut payload_wrapper =
-            make_payload_wrapper(get_pinned_runtime(&runtime_wrapper).create_payload());
-        let _foo = get_pinned_payload(&payload_wrapper);
+            make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
+        let _foo = payload_wrapper.get_pinned();
 
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
 
-        set_data_safe(get_pinned_payload(&payload_wrapper), &data);
+        (*payload_wrapper).set_data_safe(&data);
 
-        let data_vec = get_data_safe(&payload_wrapper);
+        let data_vec = (*payload_wrapper).get_data_safe();
         println!("{:?}", data_vec);
 
-        set_message_payload(&mut request, &mut payload_wrapper);
+        (*request).set_message_payload(&mut payload_wrapper);
 
         println!("set_message_payload");
 
-        let Some(loaded_payload) = get_message_payload(&mut request) else {
+        let Some(loaded_payload) = (*request).get_message_payload() else {
             panic!("Unable to get PayloadWrapper from MessageWrapper");
         };
 
         println!("get_message_payload");
 
-        let loaded_data_vec = get_data_safe(&loaded_payload);
+        let loaded_data_vec = loaded_payload.get_data_safe();
 
         println!("loaded_data_vec: {loaded_data_vec:?}");
 
@@ -190,18 +183,13 @@ mod tests {
             let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
             let_cxx_string!(app_name_cxx = app_name_check);
-            let app_wrapper = make_application_wrapper(
-                get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
-            );
 
-            println!("Before starting app, in theory:");
-            match get_pinned_application(&app_wrapper) {
-                Some(_pinned_app) => {
-                    panic!("Application had started");
-                }
-                None => {
-                    println!("Application not started yet");
-                }
+            if make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
+                .is_some()
+            {
+                panic!("Application had started");
+            } else {
+                println!("Application not started yet");
             }
 
             let binding = RECEIVER.lock().unwrap();
@@ -212,33 +200,26 @@ mod tests {
 
                 match msg {
                     state_type_e::ST_REGISTERED => {
-                        let app_wrapper = make_application_wrapper(
-                            get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
-                        );
-
-                        println!("After starting app, in theory:");
-                        match get_pinned_application(&app_wrapper) {
-                            Some(_pinned_app) => {
-                                println!("Application had started");
-                            }
-                            None => {
-                                panic!("Application not started yet");
-                            }
+                        if make_application_wrapper(
+                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
+                        )
+                        .is_some()
+                        {
+                            println!("Application had started");
+                        } else {
+                            panic!("Application not started yet");
                         }
                     }
                     state_type_e::ST_DEREGISTERED => {
-                        let app_wrapper = make_application_wrapper(
-                            get_pinned_runtime(&runtime_wrapper).get_application(&app_name_cxx),
-                        );
-
                         println!("After stopping app, in theory:");
-                        match get_pinned_application(&app_wrapper) {
-                            Some(_pinned_app) => {
-                                panic!("Application still running");
-                            }
-                            None => {
-                                println!("Application has stopped");
-                            }
+                        if make_application_wrapper(
+                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
+                        )
+                        .is_some()
+                        {
+                            panic!("Application still running");
+                        } else {
+                            println!("Application has stopped");
                         }
                     }
                 }
@@ -253,23 +234,21 @@ mod tests {
             let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
             let_cxx_string!(app_name_cxx = app_name_start);
-            let mut app_wrapper = make_application_wrapper(
-                get_pinned_runtime(&runtime_wrapper).create_application(&app_name_cxx),
-            );
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.init();
-            }
+            let Some(app_wrapper) = make_application_wrapper(
+                runtime_wrapper
+                    .get_pinned()
+                    .create_application(&app_name_cxx),
+            ) else {
+                panic!("Unable to create application");
+            };
+            app_wrapper.get_pinned().init();
             let state_handler = AvailableStateHandlerFnPtr(available_state_handler);
-            register_state_handler_fn_ptr_safe(&mut app_wrapper, state_handler);
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.start();
-            }
+            app_wrapper.register_state_handler_fn_ptr_safe(state_handler);
+            app_wrapper.get_pinned().start();
 
             thread::sleep(Duration::from_millis(500));
 
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.stop();
-            }
+            app_wrapper.get_pinned().stop();
         });
 
         let _ = handle.join();
@@ -332,20 +311,16 @@ mod tests {
 
             let_cxx_string!(app_name_cxx = app_name_publisher_start);
 
-            let app_wrapper = make_application_wrapper(
-                get_pinned_runtime(&runtime_wrapper).create_application(&app_name_cxx),
-            );
-
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.init();
-            } else {
+            let Some(app_wrapper) = make_application_wrapper(
+                runtime_wrapper
+                    .get_pinned()
+                    .create_application(&app_name_cxx),
+            ) else {
                 panic!("Unable to init app");
-            }
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.start();
-            } else {
-                panic!("Unable to start app");
-            }
+            };
+
+            app_wrapper.get_pinned().init();
+            app_wrapper.get_pinned().start();
         });
 
         let app_name_subscriber_start = app_name_subscriber.to_string();
@@ -354,56 +329,52 @@ mod tests {
 
             let_cxx_string!(app_name_cxx = app_name_subscriber_start);
 
-            let app_wrapper = make_application_wrapper(
-                get_pinned_runtime(&runtime_wrapper).create_application(&app_name_cxx),
-            );
-
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.init();
-            } else {
+            let Some(app_wrapper) = make_application_wrapper(
+                runtime_wrapper
+                    .get_pinned()
+                    .create_application(&app_name_cxx),
+            ) else {
                 panic!("Unable to init app");
-            }
-            if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
-                pinned_app.start();
-            } else {
-                panic!("Unable to start app");
-            }
+            };
+            app_wrapper.get_pinned().init();
+            app_wrapper.get_pinned().start();
         });
 
         thread::sleep(Duration::from_millis(500));
 
-        let mut publisher_app_wrapper = make_application_wrapper(
-            get_pinned_runtime(&runtime_wrapper).get_application(&app_name_publisher_cxx),
-        );
-        let mut subscriber_app_wrapper = make_application_wrapper(
-            get_pinned_runtime(&runtime_wrapper).get_application(&app_name_subscriber_cxx),
-        );
-
-        if let Some(pinned_app) = get_pinned_application(&subscriber_app_wrapper) {
-            pinned_app.request_service(
-                service_id,
-                instance_id,
-                vsomeip::ANY_MAJOR,
-                vsomeip::ANY_MINOR,
-            )
-        }
-
-        if let Some(pinned_app) = get_pinned_application(&subscriber_app_wrapper) {
-            pinned_app.subscribe(
-                service_id,
-                instance_id,
-                eventgroup_id,
-                vsomeip::ANY_MAJOR,
-                event_id,
-            );
-        } else {
+        let Some(publisher_app_wrapper) = make_application_wrapper(
+            runtime_wrapper
+                .get_pinned()
+                .get_application(&app_name_publisher_cxx),
+        ) else {
+            panic!("Application does not exist app_name: {app_name_publisher}");
+        };
+        let Some(subscriber_app_wrapper) = make_application_wrapper(
+            runtime_wrapper
+                .get_pinned()
+                .get_application(&app_name_subscriber_cxx),
+        ) else {
             panic!("Application does not exist app_name: {app_name_subscriber}");
-        }
+        };
+
+        subscriber_app_wrapper.get_pinned().request_service(
+            service_id,
+            instance_id,
+            vsomeip::ANY_MAJOR,
+            vsomeip::ANY_MINOR,
+        );
+
+        subscriber_app_wrapper.get_pinned().subscribe(
+            service_id,
+            instance_id,
+            eventgroup_id,
+            vsomeip::ANY_MAJOR,
+            event_id,
+        );
 
         let my_callback = MessageHandlerFnPtr(my_msg_handler);
 
-        register_message_handler_fn_ptr_safe(
-            &mut subscriber_app_wrapper,
+        subscriber_app_wrapper.register_message_handler_fn_ptr_safe(
             service_id,
             instance_id,
             event_id,
@@ -414,8 +385,7 @@ mod tests {
 
         let pub_service_availability_handler =
             AvailabilityHandlerFnPtr(publishing_service_availability_handler);
-        register_availability_handler_fn_ptr_safe(
-            &mut publisher_app_wrapper,
+        publisher_app_wrapper.register_availability_handler_fn_ptr_safe(
             service_id,
             instance_id,
             pub_service_availability_handler,
@@ -423,24 +393,14 @@ mod tests {
             vsomeip::ANY_MINOR,
         );
 
-        if let Some(pinned_app) = get_pinned_application(&publisher_app_wrapper) {
-            pinned_app.offer_service(
-                service_id,
-                instance_id,
-                vsomeip::ANY_MAJOR,
-                vsomeip::ANY_MINOR,
-            );
-        } else {
-            panic!("Unable to offer service");
-        }
-
-        offer_single_event_safe(
-            &mut publisher_app_wrapper,
+        publisher_app_wrapper.get_pinned().offer_service(
             service_id,
             instance_id,
-            event_id,
-            event_id,
+            vsomeip::ANY_MAJOR,
+            vsomeip::ANY_MINOR,
         );
+
+        publisher_app_wrapper.offer_single_event_safe(service_id, instance_id, event_id, event_id);
 
         wait_for_service_available();
 
@@ -451,14 +411,18 @@ mod tests {
         #[allow(unused_variables)]
         let mut iterations: usize = 0;
         while Instant::now().duration_since(start_time) < duration {
-            if let Some(pinned_app) = get_pinned_application(&publisher_app_wrapper) {
-                let vsomeip_payload =
-                    make_payload_wrapper(get_pinned_runtime(&runtime_wrapper).create_payload());
-                let payload = [1, 2, 3, 4];
-                set_data_safe(get_pinned_payload(&vsomeip_payload), &payload);
-                let attachable_payload = vsomeip_payload.get_shared_ptr();
-                pinned_app.notify(service_id, instance_id, event_id, attachable_payload, true);
-            }
+            let vsomeip_payload =
+                make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
+            let payload = [1, 2, 3, 4];
+            vsomeip_payload.set_data_safe(&payload);
+            let attachable_payload = vsomeip_payload.get_shared_ptr();
+            publisher_app_wrapper.get_pinned().notify(
+                service_id,
+                instance_id,
+                event_id,
+                attachable_payload,
+                true,
+            );
 
             iterations += 1;
         }
