@@ -13,10 +13,12 @@
 
 use crate::cxx_bridge::handler_registration::{
     offer_single_event, register_availability_handler_fn_ptr, register_message_handler_fn_ptr,
-    register_subscription_status_handler_fn_ptr, request_single_event,
+    register_state_handler_fn_ptr, register_subscription_status_handler_fn_ptr,
+    request_single_event,
 };
 use crate::extern_callback_wrappers::{
-    AvailabilityHandlerFnPtr, MessageHandlerFnPtr, SubscriptionStatusHandlerFnPtr,
+    AvailabilityHandlerFnPtr, AvailableStateHandlerFnPtr, MessageHandlerFnPtr,
+    SubscriptionStatusHandlerFnPtr,
 };
 use crate::ffi::glue::{get_payload_raw, set_payload_raw};
 use crate::glue::upcast;
@@ -64,10 +66,18 @@ pub fn get_pinned_runtime(wrapper: &RuntimeWrapper) -> Pin<&mut runtime> {
 ///
 /// Add some runtime safety checks on the pointer
 ///
+/// Reorganize this such that we check for existence before calling .unwrap() and if
+/// it's None, then return None. Requires changing the API to Option<Pin<&mut application>>
+///
 /// I do see a runtime panic here, perhaps when we try to work with the app before it's setup
 /// should probably do a sleep of half a second or something
-pub fn get_pinned_application(wrapper: &ApplicationWrapper) -> Pin<&mut application> {
-    unsafe { Pin::new_unchecked(wrapper.get_mut().as_mut().unwrap()) }
+pub fn get_pinned_application(wrapper: &ApplicationWrapper) -> Option<Pin<&mut application>> {
+    let ptr = unsafe { wrapper.get_mut().as_mut() };
+    if let Some(ptr) = ptr {
+        return Some(unsafe { Pin::new_unchecked(ptr) });
+    }
+
+    None
 }
 
 /// Gets a `Pin<&mut message>` from a [MessageWrapper]
@@ -198,7 +208,6 @@ pub fn get_data_safe(payload_wrapper: &PayloadWrapper) -> Vec<u8> {
     trace!("Before slice::from_raw_parts");
 
     // Convert the raw pointer and length to a slice
-    // TODO: May be crashing here? Would be good to check this
     let data_slice: &[u8] = unsafe { slice::from_raw_parts(data_ptr, length as usize) };
 
     trace!("After slice::from_raw_parts");
@@ -250,44 +259,43 @@ pub fn set_message_payload(
 /// Add some runtime safety checks on the pointers
 pub fn get_message_payload(
     message_wrapper: &mut UniquePtr<MessageWrapper>,
-) -> UniquePtr<PayloadWrapper> {
+) -> Option<UniquePtr<PayloadWrapper>> {
     if message_wrapper.is_null() {
         eprintln!("message_wrapper is null");
-        return cxx::UniquePtr::null();
+        return None;
     }
 
     // let message_pin = Pin::new_unchecked(message_wrapper.as_mut().unwrap());
     let message_wrapper = message_wrapper.as_mut();
     let Some(message_wrapper_pin) = message_wrapper else {
         error!("Unable to get pinned message wrapper");
-        return UniquePtr::null();
+        return None;
     };
     let message_pin = unsafe { Pin::new_unchecked(message_wrapper_pin) };
     let message_ptr = MessageWrapper::get_mut(&message_pin) as *const message;
 
-    // TODO: Should handle by returning None instead of a null pointer
     if (message_ptr as *const ()).is_null() {
-        eprintln!("message_ptr is null");
-        return UniquePtr::null();
+        error!("message_ptr is null");
+        return None;
     }
 
     let payload_ptr = unsafe { get_payload_raw(message_ptr) };
 
     if (payload_ptr as *const ()).is_null() {
-        eprintln!("payload_ptr is null");
-        return UniquePtr::null();
+        error!("payload_ptr is null");
+        return None;
     }
 
     // Use the intermediate function to create a UniquePtr<PayloadWrapper>
     let payload_wrapper = unsafe { create_payload_wrapper(payload_ptr) };
 
     if payload_wrapper.is_null() {
-        eprintln!("Failed to create UniquePtr<PayloadWrapper>");
+        error!("Failed to create UniquePtr<PayloadWrapper>");
     } else {
         trace!("Successfully created UniquePtr<PayloadWrapper>");
     }
 
-    payload_wrapper
+    Some(payload_wrapper)
 }
 
 /// Requests a single [eventgroup_t][crate::vsomeip::eventgroup_t] for the application
@@ -451,5 +459,15 @@ pub fn register_subscription_status_handler_fn_ptr_safe(
             _fn_ptr_handler,
             _is_selective,
         );
+    }
+}
+
+pub fn register_state_handler_fn_ptr_safe(
+    application_wrapper: &mut UniquePtr<ApplicationWrapper>,
+    fn_ptr_handler: AvailableStateHandlerFnPtr,
+) {
+    unsafe {
+        let application_wrapper_ptr = application_wrapper.pin_mut().get_self();
+        register_state_handler_fn_ptr(application_wrapper_ptr, fn_ptr_handler);
     }
 }

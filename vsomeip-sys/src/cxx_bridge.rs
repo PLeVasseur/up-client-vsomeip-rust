@@ -128,6 +128,13 @@ pub mod handler_registration {
             _fn_ptr_handler: subscription_status_handler_fn_ptr,
             _is_selective: bool,
         );
+
+        type state_handler_fn_ptr = crate::extern_callback_wrappers::AvailableStateHandlerFnPtr;
+
+        pub unsafe fn register_state_handler_fn_ptr(
+            application_wrapper: *mut ApplicationWrapper,
+            _fn_ptr_handler: state_handler_fn_ptr,
+        );
     }
 }
 

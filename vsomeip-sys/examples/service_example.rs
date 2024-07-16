@@ -15,17 +15,28 @@ const SAMPLE_SERVICE_ID: u16 = 0x1234;
 const SAMPLE_INSTANCE_ID: u16 = 1;
 // const SAMPLE_INSTANCE_ID: u16 = 0x5678;
 const SAMPLE_METHOD_ID: u16 = 0x0421;
+const APP_NAME: &str = "World";
 
 fn start_app() {
     let my_runtime = runtime::get();
     let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-    let_cxx_string!(my_app_str = "World");
+    let_cxx_string!(my_app_str = APP_NAME);
     let app_wrapper = make_application_wrapper(
         get_pinned_runtime(&runtime_wrapper).create_application(&my_app_str),
     );
-    get_pinned_application(&app_wrapper).init();
-    get_pinned_application(&app_wrapper).start();
+
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.init();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
+
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.start();
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
 }
 
 fn main() {
@@ -44,17 +55,21 @@ fn main() {
 
     println!("after we get the runtime");
 
-    let_cxx_string!(my_app_str = "World");
+    let_cxx_string!(my_app_str = APP_NAME);
 
     let mut app_wrapper =
         make_application_wrapper(get_pinned_runtime(&runtime_wrapper).get_application(&my_app_str));
 
-    get_pinned_application(&app_wrapper).offer_service(
-        SAMPLE_SERVICE_ID,
-        SAMPLE_INSTANCE_ID,
-        vsomeip::ANY_MAJOR,
-        vsomeip::ANY_MINOR,
-    );
+    if let Some(pinned_app) = get_pinned_application(&app_wrapper) {
+        pinned_app.offer_service(
+            SAMPLE_SERVICE_ID,
+            SAMPLE_INSTANCE_ID,
+            vsomeip::ANY_MAJOR,
+            vsomeip::ANY_MINOR,
+        );
+    } else {
+        panic!("No app found for app_name: {APP_NAME}");
+    }
 
     extern "C" fn my_msg_handler(_msg: &SharedPtr<message>) {
         println!("received Request!");
@@ -65,7 +80,9 @@ fn main() {
         let msg_type = get_pinned_message_base(&msg_wrapper).get_message_type();
         println!("message_type_e: {msg_type:?}");
 
-        let payload_wrapper = get_message_payload(&mut msg_wrapper);
+        let Some(payload_wrapper) = get_message_payload(&mut msg_wrapper) else {
+            panic!("Unable to get PayloadWrapper from MessageWrapper");
+        };
         let payload = get_data_safe(&payload_wrapper);
 
         println!("payload:\n{payload:?}");

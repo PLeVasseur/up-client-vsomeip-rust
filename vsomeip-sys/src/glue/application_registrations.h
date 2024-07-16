@@ -43,4 +43,6 @@ void register_subscription_status_handler_fn_ptr(ApplicationWrapper* application
                                           vsomeip_v3::instance_t _instance, vsomeip_v3::eventgroup_t _eventgroup, vsomeip_v3::event_t _event,
                                           subscription_status_handler_fn_ptr _fn_ptr_handler, bool _is_selective = false);
 
+void register_state_handler_fn_ptr(ApplicationWrapper* application_wrapper, state_handler_fn_ptr _fn_ptr_handler);
+
 } // namespace glue

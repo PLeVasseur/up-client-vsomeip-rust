@@ -69,3 +69,19 @@ unsafe impl ExternType for SubscriptionStatusHandlerFnPtr {
     type Id = type_id!("glue::subscription_status_handler_fn_ptr");
     type Kind = cxx::kind::Trivial;
 }
+
+/// A Rust wrapper around the extern "C" fn used when registering a [subscription_status_handler_t](crate::vsomeip::subscription_status_handler_t)
+///
+/// # Rationale
+///
+/// We want the ability to think at a higher level and not need to consider the underlying
+/// extern "C" fn, so we wrap this here in a Rust struct
+#[repr(transparent)]
+pub struct AvailableStateHandlerFnPtr(
+    pub extern "C" fn(registration_state: crate::ffi::vsomeip_v3::state_type_e),
+);
+
+unsafe impl ExternType for AvailableStateHandlerFnPtr {
+    type Id = type_id!("glue::state_handler_fn_ptr");
+    type Kind = cxx::kind::Trivial;
+}
