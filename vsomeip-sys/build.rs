@@ -11,9 +11,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use cmake::Config;
 use decompress::ExtractOptsBuilder;
 use reqwest::blocking::Client;
 use std::error::Error;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -27,12 +29,12 @@ const VSOMEIP_VERSION_ARCHIVE: &str = "3.4.10.tar.gz";
 fn main() -> miette::Result<()> {
     let out_dir = env::var_os("OUT_DIR").unwrap();
 
-    let vsomeip_interface_path = {
+    let user_supplied_vsomeip_include_path = env::var("VSOMEIP_INCLUDE_PATH");
+    let (vsomeip_interface_path, vsomeip_compile_paths) = {
         // here we allow bringing the user's own vsomeip interface to bind against if they so wish
         // note that this binding is configured to work with the tagged release above of VSOMEIP_VERSION_ARCHIVE
-        let user_supplied_vsomeip_include_path = env::var("VSOMEIP_INCLUDE_PATH");
-        if let Ok(user_supplied_vsomeip_include_path) = user_supplied_vsomeip_include_path {
-            PathBuf::from(user_supplied_vsomeip_include_path)
+        if let Ok(ref user_supplied_vsomeip_include_path) = user_supplied_vsomeip_include_path {
+            (PathBuf::from(user_supplied_vsomeip_include_path), None)
         } else {
             let vsomeip_archive_dest = Path::new(&out_dir).join("vsomeip").join("vsomeip.tar.gz");
             let vsomeip_archive_url =
@@ -41,14 +43,53 @@ fn main() -> miette::Result<()> {
             download_and_write_file(&vsomeip_archive_url, &vsomeip_archive_dest)
                 .expect("Unable to download released archive");
             decompress::decompress(
-                vsomeip_archive_dest,
+                vsomeip_archive_dest.clone(),
                 vsomeip_source_folder.clone(),
                 &ExtractOptsBuilder::default().strip(1).build().unwrap(),
             )
             .expect("Unable to extract tar.gz");
-            vsomeip_source_folder.join("interface")
+            println!(
+                "cargo:warning=# vsomeip_source_folder: {}",
+                vsomeip_source_folder.display()
+            );
+            let vsomeip_install_folder =
+                Path::new(&out_dir).join("vsomeip").join("vsomeip-install");
+            (
+                vsomeip_source_folder.join("interface"),
+                Some((vsomeip_source_folder, vsomeip_install_folder)),
+            )
         }
     };
+
+    let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH");
+    let compile_vsomeip = env::var("COMPILE_VSOMEIP");
+    if let Ok(flag) = compile_vsomeip {
+        println!("cargo:warning=# COMPILE_VSOMEIP flag set: {}", flag);
+        if flag == "true" {
+            println!("cargo:warning=# COMPILE_VSOMEIP flag set to true");
+            if let Some((vsomeip_project_root, vsomeip_install_path_default)) =
+                vsomeip_compile_paths
+            {
+                println!("cargo:warning=# vsomeip_project_root set");
+                println!(
+                    "cargo:warning=# vsomeip_project_root: {}",
+                    vsomeip_project_root.display()
+                );
+                let vsomeip_install_path = {
+                    if let Ok(vsomeip_install_path) = vsomeip_install_path {
+                        PathBuf::from(vsomeip_install_path)
+                    } else {
+                        vsomeip_install_path_default
+                    }
+                };
+                println!(
+                    "cargo:warning=# vsomeip_install_path: {}",
+                    vsomeip_install_path.display()
+                );
+                compile_vsomeip_from_source(vsomeip_project_root, vsomeip_install_path)?;
+            }
+        }
+    }
 
     let vsomeip_lib_path = env::var("VSOMEIP_LIB_PATH")
         .expect("You must supply the path to a vsomeip library install, e.g. /usr/local/lib");
@@ -74,6 +115,28 @@ fn main() -> miette::Result<()> {
         arch_specific_cpp_stdlib
     );
 
+    generate_bindings(
+        &out_dir,
+        &vsomeip_interface_path,
+        vsomeip_lib_path,
+        &generic_cpp_stdlib,
+        &arch_specific_cpp_stdlib,
+        project_root,
+        &runtime_wrapper_dir,
+    )?;
+
+    Ok(())
+}
+
+fn generate_bindings(
+    out_dir: &OsString,
+    vsomeip_interface_path: &PathBuf,
+    vsomeip_lib_path: String,
+    generic_cpp_stdlib: &String,
+    arch_specific_cpp_stdlib: &String,
+    project_root: PathBuf,
+    runtime_wrapper_dir: &PathBuf,
+) -> miette::Result<()> {
     // we use autocxx to generate bindings for all those requested in src/lib.rs in the include_cpp! {} macro
     let mut b = autocxx_build::Builder::new(
         "src/lib.rs",
@@ -101,8 +164,8 @@ fn main() -> miette::Result<()> {
         .file("src/glue/application_registrations.cpp")
         .file("src/glue/src/application_wrapper.cpp")
         .include(&include_dir)
-        .include(&vsomeip_interface_path)
-        .include(&runtime_wrapper_dir)
+        .include(vsomeip_interface_path)
+        .include(runtime_wrapper_dir)
         .flag_if_supported("-Wno-deprecated-declarations") // suppress warnings from C++
         .flag_if_supported("-Wno-unused-function") // compiler compiling vsomeip
         .flag_if_supported("-std=c++17")
@@ -156,7 +219,6 @@ fn main() -> miette::Result<()> {
         .expect("Failed to rename the temporary file to the original file");
 
     println!("cargo:warning=# rewrote the autocxx file");
-
     Ok(())
 }
 
@@ -261,4 +323,26 @@ fn download_and_write_file(url: &str, dest_path: &PathBuf) -> Result<(), Box<dyn
     }
 
     Err("Failed to download file after multiple attempts".into())
+}
+
+fn compile_vsomeip_from_source(
+    vsomeip_project_root: PathBuf,
+    vsomeip_install_path: PathBuf,
+) -> miette::Result<()> {
+    let install_path = format!("{}", vsomeip_install_path.display());
+
+    println!("cargo:warning=# install_path: {}", install_path);
+
+    let vsomeip_cmake_build = Config::new(vsomeip_project_root)
+        .define("CMAKE_INSTALL_PREFIX", install_path.clone())
+        .define("ENABLE_SIGNAL_HANDLING", "1")
+        .build_target("install")
+        .build();
+
+    println!(
+        "cargo:warning=# vsomeip_cmake_build: {}",
+        vsomeip_cmake_build.display()
+    );
+
+    Ok(())
 }
