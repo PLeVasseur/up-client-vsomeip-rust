@@ -60,10 +60,19 @@ fn main() -> miette::Result<()> {
     let runtime_wrapper_dir = project_root.join("src/glue/include"); // Update the path as necessary
 
     // Somewhat useful debugging
-    // println!("cargo:warning=# CARGO_MANIFEST_DIR : {}", project_root.display());
-    // println!("cargo:warning=# OUT_DIR            : {}", out_path.display());
-    // println!("cargo:warning=# vsomeip_interface  : {}", interface_path.display());
-    // println!("cargo:warning=# runtime_wrapper    : {}", runtime_wrapper_dir.display());
+    println!("cargo:warning=# vsomeip_lib_path  : {}", vsomeip_lib_path);
+    println!(
+        "cargo:warning=# vsomeip_interface_path  : {}",
+        vsomeip_interface_path.display()
+    );
+    println!(
+        "cargo:warning=# generic_cpp_stdlib  : {}",
+        generic_cpp_stdlib
+    );
+    println!(
+        "cargo:warning=# arch_specific_cpp_stdlib  : {}",
+        arch_specific_cpp_stdlib
+    );
 
     // we use autocxx to generate bindings for all those requested in src/lib.rs in the include_cpp! {} macro
     let mut b = autocxx_build::Builder::new(
@@ -134,32 +143,11 @@ fn main() -> miette::Result<()> {
 
     for line in reader.lines() {
         let mut line = line.expect("Failed to read a line from the input file");
-        line = line.replace(
-            "pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
-            "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete"
-        );
-        line = line.replace(
-            "pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;",
-            "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;"
-        );
-        line = line.replace(
-            "pub use super::super::bindgen::root::std::chrono::seconds;",
-            "",
-        );
-        line = line.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
-        line = line.replace("successfully [de]registered", "successfully de/registered");
-        line = line.replace(
-            "#[derive(Clone, Hash, PartialEq, Eq)]",
-            "#[derive(Clone, Hash, PartialEq, Eq, Debug)]",
-        );
-        line = line.replace(
-            "pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);",
-            "pub(crate) unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);"
-        );
-        // line = line.replace(
-        //     "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
-        //     "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
-        // );
+        line = fix_unused_imports(line);
+        line = fix_unsafe_fn_unused(line);
+        line = fix_doc_build(line);
+        line = add_enum_debug(line);
+
         writeln!(writer, "{}", line).expect("Failed to write a line to the temporary file");
     }
 
@@ -167,48 +155,60 @@ fn main() -> miette::Result<()> {
     fs::rename(temp_file_path, file_path)
         .expect("Failed to rename the temporary file to the original file");
 
-    // let input_file = File::open(&file_path).expect("Unable to find autocxx generated file");
-    // let reader = BufReader::new(input_file);
-    // let mut modified_lines = Vec::new();
-    //
-    // for line in reader.lines() {
-    //     let mut line = line.expect("Unable to read line");
-    //     line = line.replace(
-    //         "pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;",
-    //         "#[allow(unused_imports)] pub use bindgen :: root :: std_chrono_duration_int64_t_AutocxxConcrete ;"
-    //     );
-    //     line = line.replace(
-    //         "pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;",
-    //         "#[allow(unused_imports)] pub use super :: super :: bindgen :: root :: std :: chrono :: seconds ;"
-    //     );
-    //     line = line.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
-    //     line = line.replace("successfully [de]registered", "successfully de/registered");
-    //     line = line.replace(
-    //         "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq)] pub enum message_type_e",
-    //         "# [repr (u8)] # [derive (Clone , Hash , PartialEq , Eq, Debug)] pub enum message_type_e"
-    //     );
-    //     modified_lines.push(line);
-    // }
-    //
-    // let output_file = File::create(&file_path).expect("Unable to write out autocxx modified file");
-    // let mut writer = BufWriter::new(output_file);
-    //
-    // for line in modified_lines {
-    //     writeln!(writer, "{}", line).expect("Unable to write line");
-    // }
-    //
-    // writer.flush().expect("Unable to flush writer for file");
-
     println!("cargo:warning=# rewrote the autocxx file");
 
     Ok(())
+}
+
+fn fix_unused_imports(line: String) -> String {
+    let mut fixed_line = line.replace(
+        "pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
+        "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
+    );
+    fixed_line = fixed_line.replace(
+        "pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;",
+        "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;"
+    );
+    fixed_line = fixed_line.replace(
+        "pub use super::super::bindgen::root::std::chrono::seconds;",
+        "",
+    );
+
+    fixed_line
+}
+
+fn fix_unsafe_fn_unused(line: String) -> String {
+    let mut fixed_line = line.replace("pub unsafe fn create_payload1", "unsafe fn create_payload1");
+    fixed_line = fixed_line.replace(
+        "pub unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);",
+        "pub(crate) unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);",
+    );
+
+    fixed_line
+}
+
+fn fix_doc_build(line: String) -> String {
+    // we may have to fix more in the future
+    #[allow(clippy::let_and_return)]
+    let fixed_line = line.replace("successfully [de]registered", "successfully de/registered");
+    fixed_line
+}
+
+fn add_enum_debug(line: String) -> String {
+    // we may have to fix more in the future
+    #[allow(clippy::let_and_return)]
+    let fixed_line = line.replace(
+        "#[derive(Clone, Hash, PartialEq, Eq)]",
+        "#[derive(Clone, Hash, PartialEq, Eq, Debug)]",
+    );
+    fixed_line
 }
 
 // Retrieves a file from `url` (from GitHub, for instance) and places it in the build directory (`OUT_DIR`) with the name
 // provided by `destination` parameter.
 fn download_and_write_file(url: &str, dest_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let client = Client::builder()
-        .timeout(Duration::from_secs(120)) // Set a timeout of 60 seconds
+        .timeout(Duration::from_secs(120))
         .build()?;
     let mut retries = 3;
 
