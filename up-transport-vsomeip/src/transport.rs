@@ -11,36 +11,37 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::UPClientVsomeip;
+use crate::UPTransportVsomeip;
 use async_trait::async_trait;
 use std::sync::Arc;
 use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri};
 
 #[async_trait]
-impl UTransport for UPClientVsomeip {
+impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        // implementation goes here
-        println!("Sending message: {:?}", message);
-
-        Ok(())
+        self.transport_inner.send(message).await
     }
 
     async fn register_listener(
         &self,
-        _source_filter: &UUri,
-        _sink_filter: Option<&UUri>,
-        _listener: Arc<dyn UListener>,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        Ok(())
+        self.transport_inner
+            .register_listener(source_filter, sink_filter, listener)
+            .await
     }
 
     async fn unregister_listener(
         &self,
-        _source_filter: &UUri,
-        _sink_filter: Option<&UUri>,
-        _listener: Arc<dyn UListener>,
+        source_filter: &UUri,
+        sink_filter: Option<&UUri>,
+        listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        Ok(())
+        self.transport_inner
+            .unregister_listener(source_filter, sink_filter, listener)
+            .await
     }
 
     async fn receive(
