@@ -49,7 +49,7 @@ fn main() -> miette::Result<()> {
             )
             .expect("Unable to extract tar.gz");
             println!(
-                "cargo:warning=# vsomeip_source_folder: {}",
+                "debug: vsomeip_source_folder: {}",
                 vsomeip_source_folder.display()
             );
             let vsomeip_install_folder =
@@ -64,15 +64,15 @@ fn main() -> miette::Result<()> {
     let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH");
     let compile_vsomeip = env::var("COMPILE_VSOMEIP");
     if let Ok(flag) = compile_vsomeip {
-        println!("cargo:warning=# COMPILE_VSOMEIP flag set: {}", flag);
+        println!("debug: COMPILE_VSOMEIP flag set: {}", flag);
         if flag == "true" {
-            println!("cargo:warning=# COMPILE_VSOMEIP flag set to true");
+            println!("debug: COMPILE_VSOMEIP flag set to true");
             if let Some((vsomeip_project_root, vsomeip_install_path_default)) =
                 vsomeip_compile_paths
             {
-                println!("cargo:warning=# vsomeip_project_root set");
+                println!("debug: vsomeip_project_root set");
                 println!(
-                    "cargo:warning=# vsomeip_project_root: {}",
+                    "debug: vsomeip_project_root: {}",
                     vsomeip_project_root.display()
                 );
                 let vsomeip_install_path = {
@@ -83,7 +83,7 @@ fn main() -> miette::Result<()> {
                     }
                 };
                 println!(
-                    "cargo:warning=# vsomeip_install_path: {}",
+                    "debug: vsomeip_install_path: {}",
                     vsomeip_install_path.display()
                 );
                 compile_vsomeip_from_source(vsomeip_project_root, vsomeip_install_path)?;
@@ -101,17 +101,14 @@ fn main() -> miette::Result<()> {
     let runtime_wrapper_dir = project_root.join("src/glue/include"); // Update the path as necessary
 
     // Somewhat useful debugging
-    println!("cargo:warning=# vsomeip_lib_path  : {}", vsomeip_lib_path);
+    println!("debug: vsomeip_lib_path  : {}", vsomeip_lib_path);
     println!(
-        "cargo:warning=# vsomeip_interface_path  : {}",
+        "debug: vsomeip_interface_path  : {}",
         vsomeip_interface_path.display()
     );
+    println!("debug: generic_cpp_stdlib  : {}", generic_cpp_stdlib);
     println!(
-        "cargo:warning=# generic_cpp_stdlib  : {}",
-        generic_cpp_stdlib
-    );
-    println!(
-        "cargo:warning=# arch_specific_cpp_stdlib  : {}",
+        "debug: arch_specific_cpp_stdlib  : {}",
         arch_specific_cpp_stdlib
     );
 
@@ -178,7 +175,7 @@ fn generate_bindings(
         .join("autocxx-build-dir")
         .join("rs")
         .join("autocxx-ffi-default-gen.rs");
-    println!("cargo:warning=# file_path : {}", file_path.display());
+    println!("debug: file_path : {}", file_path.display());
 
     if !file_path.exists() {
         panic!("Unable to find autocxx generated code to rewrite");
@@ -218,18 +215,18 @@ fn generate_bindings(
     fs::rename(temp_file_path, file_path)
         .expect("Failed to rename the temporary file to the original file");
 
-    println!("cargo:warning=# rewrote the autocxx file");
+    println!("debug: rewrote the autocxx file");
     Ok(())
 }
 
 fn fix_unused_imports(line: String) -> String {
     let mut fixed_line = line.replace(
-        "pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
-        "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete",
+        "pub use bindgen::root::std_chrono_duration_long_AutocxxConcrete;",
+        "",
     );
     fixed_line = fixed_line.replace(
         "pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;",
-        "#[allow(unused_imports)] pub use bindgen::root::std_chrono_duration_int64_t_AutocxxConcrete;"
+        "",
     );
     fixed_line = fixed_line.replace(
         "pub use super::super::bindgen::root::std::chrono::seconds;",
