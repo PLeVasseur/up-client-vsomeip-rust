@@ -25,8 +25,7 @@ fn vsomeip_includes() -> PathBuf {
 fn vsomeip_includes() -> PathBuf {
     let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH")
         .expect("You must supply the path to a vsomeip library install, e.g. /usr/local");
-    let vsomeip_include_path = PathBuf::from(&vsomeip_install_path).join("include");
-    format!("{}", vsomeip_include_path)
+    PathBuf::from(&vsomeip_install_path).join("include")
 }
 
 #[cfg(feature = "bundled")]
