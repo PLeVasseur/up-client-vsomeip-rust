@@ -161,10 +161,10 @@ jobs:
         run: cargo build --no-default-features
       - name: cargo fmt
         working-directory: ${{github.workspace}}
-        run: cargo fmt -- --check --no-default-features
+        run: cargo fmt --no-default-features -- --check
       - name: cargo clippy
         working-directory: ${{github.workspace}}
-        run: cargo clippy --all-targets -- -W warnings -D warnings --no-default-features
+        run: cargo clippy --no-default-features --all-targets -- -W warnings -D warnings
 
   test:
     name: Test
