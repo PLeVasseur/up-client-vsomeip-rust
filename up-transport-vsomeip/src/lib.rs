@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 use crate::transport_inner::transport_inner_handle::UPTransportVsomeipInnerHandle;
-use crate::transport_inner::MockableUPTransportVsomeipInner;
+use crate::transport_inner::UPTransportVsomeipInner;
 use log::trace;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -62,7 +62,7 @@ type ListenerId = usize;
 /// and the "engine" of the innner transport to allow mocking of them.
 pub struct UPTransportVsomeip {
     /// Internally held inner implementation
-    transport_inner: Arc<dyn MockableUPTransportVsomeipInner>,
+    transport_inner: Arc<dyn UPTransportVsomeipInner>,
 }
 
 impl UPTransportVsomeip {
@@ -122,7 +122,7 @@ impl UPTransportVsomeip {
     ) -> Result<Self, UStatus> {
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        let transport_inner: Arc<dyn MockableUPTransportVsomeipInner> = Arc::new({
+        let transport_inner: Arc<dyn UPTransportVsomeipInner> = Arc::new({
             if let Some(config_path) = optional_config_path {
                 let config_path = config_path.as_path();
                 let transport_inner_res = UPTransportVsomeipInnerHandle::new_with_config(

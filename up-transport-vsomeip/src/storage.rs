@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 /// Trait to make testing of [crate::UPTransportVsomeip] more decoupled and simpler.
 ///
-/// Holds all state necessary for the functioning of a [crate::transport_inner::MockableUPTransportVsomeipInner]
+/// Holds all state necessary for the functioning of a [crate::transport_inner::UPTransportVsomeipInner]
 pub trait UPTransportVsomeipStorage: Send + Sync {
     /// Returns the [up_rust::UUri::authority_name] local authority of this device
     fn get_local_authority(&self) -> AuthorityName;

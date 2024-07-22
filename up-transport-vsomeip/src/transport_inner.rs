@@ -31,7 +31,7 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
 const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 /// Trait to make testing of [crate::UPTransportVsomeip] more decoupled and simpler.
 #[async_trait]
-pub(crate) trait MockableUPTransportVsomeipInner: Sync + Send {
+pub(crate) trait UPTransportVsomeipInner: Sync + Send {
     /// Returns us a [UPTransportVsomeipStorage] trait object with wich to interact with
     /// the internal state of the transport
     fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage>;

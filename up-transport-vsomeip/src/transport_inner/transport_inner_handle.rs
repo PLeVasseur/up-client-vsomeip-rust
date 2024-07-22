@@ -25,7 +25,7 @@ use crate::transport_inner::{
 };
 use crate::utils::{any_uuri, any_uuri_fixed_authority_id, TimedStdRwLock};
 use crate::vsomeip_config::extract_applications;
-use crate::{ApplicationName, AuthorityName, MockableUPTransportVsomeipInner, UeId};
+use crate::{ApplicationName, AuthorityName, UPTransportVsomeipInner, UeId};
 use async_trait::async_trait;
 use futures::executor;
 use log::{error, info, trace, warn};
@@ -953,7 +953,7 @@ impl Drop for UPTransportVsomeipInnerHandle {
 }
 
 #[async_trait]
-impl MockableUPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
+impl UPTransportVsomeipInner for UPTransportVsomeipInnerHandle {
     fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage> {
         self.storage.clone()
     }
