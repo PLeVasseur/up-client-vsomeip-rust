@@ -158,13 +158,13 @@ jobs:
 
       - name: Build the project
         working-directory: ${{github.workspace}}
-        run: cargo build
+        run: cargo build --no-default-features
       - name: cargo fmt
         working-directory: ${{github.workspace}}
-        run: cargo fmt -- --check
+        run: cargo fmt -- --check --no-default-features
       - name: cargo clippy
         working-directory: ${{github.workspace}}
-        run: cargo clippy --all-targets -- -W warnings -D warnings
+        run: cargo clippy --all-targets -- -W warnings -D warnings --no-default-features
 
   test:
     name: Test
@@ -219,7 +219,7 @@ jobs:
       - name: Run tests and report code coverage
         run: |
           # enable nightly features so that we can also include Doctests
-          RUSTC_BOOTSTRAP=1 cargo tarpaulin -o xml -o lcov -o html --doc --tests -- --test-threads 1
+          RUSTC_BOOTSTRAP=1 cargo tarpaulin -o xml -o lcov -o html --doc --tests -- --test-threads 1 --no-default-features
 
       - name: Upload coverage report (xml)
         uses: actions/upload-artifact@v4
@@ -282,8 +282,8 @@ jobs:
 
       - name: Create Documentation for vsomeip-sys
         working-directory: ${{github.workspace}}
-        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p vsomeip-sys --no-deps
+        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p vsomeip-sys --no-deps --no-default-features
 
       - name: Create Documentation for up-transport-vsomeip
         working-directory: ${{github.workspace}}
-        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p up-transport-vsomeip --no-deps
+        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p up-transport-vsomeip --no-deps --no-default-features
