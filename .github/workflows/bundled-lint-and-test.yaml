@@ -11,7 +11,7 @@
 #  SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************/
 
-name: Lint and Test
+name: Lint and Test - Bundled
 
 env:
   VSOMEIP_INSTALL_PATH: vsomeip-install

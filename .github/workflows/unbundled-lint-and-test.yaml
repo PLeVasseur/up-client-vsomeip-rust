@@ -11,7 +11,7 @@
 #  SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************/
 
-name: Lint and Test
+name: Lint and Test - Unbundled
 
 env:
   VSOMEIP_RELEASE_URL: https://github.com/COVESA/vsomeip/archive/refs/tags/
@@ -119,10 +119,10 @@ jobs:
 
   lint:
     name: Lint
-    needs: download_and_decompress
+    needs: obtain_and_build_vsomeip
     runs-on: ubuntu-latest
     env:
-      CACHE_KEY: ${{ needs.download_and_decompress.outputs.cache_key }}
+      CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
 
     steps:
       - uses: actions/checkout@v4
@@ -173,10 +173,10 @@ jobs:
 
   test:
     name: Test
-    needs: download_and_decompress
+    needs: obtain_and_build_vsomeip
     runs-on: ubuntu-latest
     env:
-      CACHE_KEY: ${{ needs.download_and_decompress.outputs.cache_key }}
+      CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
 
     steps:
       - uses: actions/checkout@v4
@@ -256,10 +256,10 @@ jobs:
 
   build-docs:
     name: Build documentation
-    needs: download_and_decompress
+    needs: obtain_and_build_vsomeip
     runs-on: ubuntu-latest
     env:
-      CACHE_KEY: ${{ needs.download_and_decompress.outputs.cache_key }}
+      CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
 
     steps:
       - uses: actions/checkout@v4
