@@ -19,7 +19,7 @@ VSOMEIP_LIB_PATH=<path/to/vsomeip/lib> GENERIC_CPP_STDLIB_PATH=<path/to/generic/
 If you are running a Linux-based OS on x86_64, it's possible these look like:
 
 ```
-GENERIC_CPP_STDLIB_PATH = /usr/include/c++/11
+GENERIC_CPP_STDLIB_PATH=/usr/include/c++/11
 ARCH_SPECIFIC_CPP_STDLIB_PATH=/usr/include/x86_64-linux-gnu/c++/11
 ```
 

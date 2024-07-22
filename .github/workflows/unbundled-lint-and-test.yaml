@@ -219,7 +219,7 @@ jobs:
       - name: Run tests and report code coverage
         run: |
           # enable nightly features so that we can also include Doctests
-          RUSTC_BOOTSTRAP=1 cargo tarpaulin --no-default-features -o xml -o lcov -o html --doc --tests -- --test-threads 1 
+          LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib RUSTC_BOOTSTRAP=1 cargo tarpaulin --no-default-features -o xml -o lcov -o html --doc --tests -- --test-threads 1 
 
       - name: Upload coverage report (xml)
         uses: actions/upload-artifact@v4

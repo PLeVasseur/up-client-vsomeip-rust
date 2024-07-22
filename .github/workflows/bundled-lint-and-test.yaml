@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install C++ dependencies
-        run: sudo apt-get install -y build-essential cmake libboost-all-dev
+        run: sudo apt-get install -y build-essential cmake libboost-all-dev libclang-dev
 
       - name: Set environment variables
         run: |
@@ -81,7 +81,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install C++ dependencies
-        run: sudo apt-get install -y build-essential cmake libboost-all-dev
+        run: sudo apt-get install -y build-essential cmake libboost-all-dev libclang-dev
 
       - name: Set environment variables
         run: |
@@ -111,7 +111,7 @@ jobs:
       - name: Run tests and report code coverage
         run: |
           # enable nightly features so that we can also include Doctests
-          RUSTC_BOOTSTRAP=1 cargo tarpaulin -o xml -o lcov -o html --doc --tests -- --test-threads 1
+          LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib RUSTC_BOOTSTRAP=1 cargo tarpaulin -o xml -o lcov -o html --doc --tests -- --test-threads 1
 
       - name: Upload coverage report (xml)
         uses: actions/upload-artifact@v4
@@ -145,7 +145,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install C++ dependencies
-        run: sudo apt-get install -y build-essential cmake libboost-all-dev
+        run: sudo apt-get install -y build-essential cmake libboost-all-dev libclang-dev
 
       - name: Set environment variables
         run: |
