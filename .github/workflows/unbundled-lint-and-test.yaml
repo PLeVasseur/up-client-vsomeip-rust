@@ -283,3 +283,7 @@ jobs:
       - name: Create Documentation for vsomeip-sys
         working-directory: ${{github.workspace}}
         run: RUSTDOCFLAGS=-Dwarnings cargo doc -p vsomeip-sys --no-deps --no-default-features
+
+      - name: Create Documentation for up-transport-vsomeip
+        working-directory: ${{github.workspace}}
+        run: RUSTDOCFLAGS=-Dwarnings cargo doc -p up-transport-vsomeip --no-deps --no-default-features
