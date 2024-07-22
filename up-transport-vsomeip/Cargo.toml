@@ -23,6 +23,10 @@ rust-version.workspace = true
 version.workspace = true
 readme = "README.md"
 
+[features]
+default = ["bundled"]
+bundled = ["vsomeip-sys/bundled"]
+
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
