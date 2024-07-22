@@ -53,7 +53,7 @@ fn vsomeip_lib_path() -> String {
     let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH")
         .expect("You must supply the path to a vsomeip library install, e.g. /usr/local");
     let vsomeip_lib_path = PathBuf::from(&vsomeip_install_path).join("lib");
-    format!("{}", vsomeip_lib_path)
+    format!("{}", vsomeip_lib_path.display())
 }
 
 fn main() -> miette::Result<()> {
