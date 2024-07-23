@@ -41,7 +41,6 @@ impl UTransport for UPTransportVsomeip {
     ) -> Result<(), UStatus> {
         self.transport_inner
             .unregister_listener(source_filter, sink_filter, listener)
-            .await
     }
 
     async fn receive(

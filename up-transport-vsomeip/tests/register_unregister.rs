@@ -35,7 +35,7 @@ mod tests {
     //     assert!(client.is_ok());
     // }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
 
@@ -78,7 +78,7 @@ mod tests {
         assert!(unreg_res.is_ok());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_request() {
         test_lib::before_test();
 
@@ -128,7 +128,7 @@ mod tests {
         assert!(unreg_res.is_ok());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_response() {
         test_lib::before_test();
 
@@ -180,7 +180,7 @@ mod tests {
         assert!(unreg_res.is_ok());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 

@@ -390,7 +390,10 @@ impl VsomeipMessageToUMessage {
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
-                "Unable to build UMessage from vsomeip message",
+                format!(
+                    "Unable to build UMessage from vsomeip message: {:?}",
+                    umsg_res.err().unwrap()
+                ),
             ));
         };
 
@@ -460,7 +463,10 @@ impl VsomeipMessageToUMessage {
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
-                "Unable to build UMessage from vsomeip message",
+                format!(
+                    "Unable to build UMessage from vsomeip message: {:?}",
+                    umsg_res.err().unwrap()
+                ),
             ));
         };
 
@@ -515,7 +521,10 @@ impl VsomeipMessageToUMessage {
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
-                "Unable to build UMessage from vsomeip message",
+                format!(
+                    "Unable to build UMessage from vsomeip message: {:?}",
+                    umsg_res.err().unwrap()
+                ),
             ));
         };
 

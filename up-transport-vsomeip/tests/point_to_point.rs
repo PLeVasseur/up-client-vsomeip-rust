@@ -24,10 +24,9 @@ use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{
     UCode, UListener, UMessage, UMessageBuilder, UMessageType, UStatus, UTransport, UUri, UUID,
 };
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_transport_vsomeip::{UPTransportVsomeip, UeId};
 
 const TEST_DURATION: u64 = 1000;
-const TEST_SLACK: usize = 1;
 
 const STREAMER_UE_ID: u16 = 0x9876;
 
@@ -155,7 +154,7 @@ impl UListener for PointToPointListener {
             .enum_value_or(UMESSAGE_TYPE_UNSPECIFIED)
         {
             UMESSAGE_TYPE_UNSPECIFIED => {
-                panic!("Not supported message type: UNSPECIFIED");
+                panic!("Not supported message type: UNSPECIFIED:\n{:?}", msg);
             }
             UMessageType::UMESSAGE_TYPE_PUBLISH => {
                 panic!("uProtocol PUBLISH received. This shouldn't happen!");
@@ -191,6 +190,7 @@ impl UListener for PointToPointListener {
                 };
 
                 let _ = client.send(forwarding_request).await.inspect_err(|err| {
+                    error!("err: Unable to send response: {err:?}");
                     panic!("Unable to send response: {err:?}");
                 });
 
@@ -380,7 +380,7 @@ fn any_from_authority(authority_name: &str) -> UUri {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn point_to_point() {
     env_logger::init();
 
@@ -422,7 +422,7 @@ async fn point_to_point() {
     let client_res = UPTransportVsomeip::new_with_config(
         &CLIENT_AUTHORITY_NAME.to_string(),
         &CLIENT_AUTHORITY_NAME.to_string(),
-        STREAMER_UE_ID,
+        CLIENT_UE_ID as UeId,
         &client_config.unwrap(),
     );
 
@@ -456,7 +456,7 @@ async fn point_to_point() {
     let service_res = UPTransportVsomeip::new_with_config(
         &SERVICE_AUTHORITY_NAME.to_string(),
         &SERVICE_AUTHORITY_NAME.to_string(),
-        STREAMER_UE_ID,
+        SERVICE_UE_ID as UeId,
         &service_config.unwrap(),
     );
 
@@ -544,8 +544,11 @@ async fn point_to_point() {
         response_listener_check.received_response()
     );
 
-    assert!(iterations - request_listener_check.received_request() <= TEST_SLACK);
-    assert!(iterations - point_to_point_listener_check.received_request() <= TEST_SLACK);
-    assert!(iterations - point_to_point_listener_check.received_response() <= TEST_SLACK);
-    assert!(iterations - response_listener_check.received_response() <= TEST_SLACK);
+    assert_eq!(iterations, request_listener_check.received_request());
+    assert_eq!(iterations, point_to_point_listener_check.received_request());
+    assert_eq!(
+        iterations,
+        point_to_point_listener_check.received_response()
+    );
+    assert_eq!(iterations, response_listener_check.received_response());
 }

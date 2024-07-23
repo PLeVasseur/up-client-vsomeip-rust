@@ -144,7 +144,7 @@ fn any_uuri() -> UUri {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn client_service() {
     env_logger::init();
     // console_subscriber::init();
@@ -294,6 +294,6 @@ async fn client_service() {
         response_listener_check.received_response()
     );
 
-    assert_eq!(request_listener_check.received_request(), iterations);
-    assert_eq!(response_listener_check.received_response(), iterations);
+    assert_eq!(iterations, request_listener_check.received_request());
+    assert_eq!(iterations, response_listener_check.received_response());
 }

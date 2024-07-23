@@ -19,7 +19,6 @@ use tokio::time::Instant;
 use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
-const TEST_SLACK: usize = 1;
 const TEST_DURATION: u64 = 1000;
 
 pub struct SubscriberListener {
@@ -59,7 +58,7 @@ impl UListener for SubscriberListener {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn publisher_subscriber() {
     env_logger::init();
 
@@ -160,5 +159,5 @@ async fn publisher_subscriber() {
     println!("subscriber:");
     subscriber.print_rwlock_times().await;
 
-    assert!(iterations - subscriber_listener_check.received_publish() <= TEST_SLACK);
+    assert_eq!(iterations, subscriber_listener_check.received_publish());
 }

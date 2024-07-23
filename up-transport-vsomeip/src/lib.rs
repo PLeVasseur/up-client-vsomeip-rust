@@ -12,7 +12,6 @@
  ********************************************************************************/
 
 use crate::transport_inner::transport_inner_handle::UPTransportVsomeipInnerHandle;
-use crate::transport_inner::UPTransportVsomeipInner;
 use log::trace;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -27,31 +26,31 @@ mod utils;
 mod vsomeip_config;
 
 /// A [up_rust::UUri::authority_name]
-type AuthorityName = String;
+pub type AuthorityName = String;
 /// A [up_rust::UUri::ue_id]
-type UeId = u16;
+pub type UeId = u16;
 /// A [vsomeip_sys::vsomeip::application]'s numeric identifier
-type ClientId = u16;
+pub type ClientId = u16;
 /// A [vsomeip_sys::vsomeip::application]'s string-form identifier
-type ApplicationName = String;
+pub type ApplicationName = String;
 
 /// A [up_rust::UAttributes::reqid]
-type ReqId = UUID;
+pub type ReqId = UUID;
 /// A request ID used with vsomeip. See [vsomeip_sys::vsomeip::request_t]
-type RequestId = u32;
+pub type RequestId = u32;
 /// A session ID used with vsomeip. See [vsomeip_sys::vsomeip::session_t]
-type SessionId = u16;
+pub type SessionId = u16;
 
 /// A service ID used with vsomeip. See [vsomeip_sys::vsomeip::service_t]
-type ServiceId = u16;
+pub type ServiceId = u16;
 /// An instance ID used with vsomeip. See [vsomeip_sys::vsomeip::instance_t]
-type InstanceId = u16;
+pub type InstanceId = u16;
 /// A method ID used with vsomeip. See [vsomeip_sys::vsomeip::method_t]
-type MethodId = u16;
+pub type MethodId = u16;
 /// An event ID used with vsomeip. See [vsomeip_sys::vsomeip::event_t]
-type EventId = u16;
+pub type EventId = u16;
 /// Represents the id of an extern "C" fn used with which to register with vsomeip to listen for messages
-type ListenerId = usize;
+type MessageHandlerId = usize;
 
 /// UTransport implementation over top of the C++ vsomeip library
 ///
@@ -62,7 +61,7 @@ type ListenerId = usize;
 /// and the "engine" of the innner transport to allow mocking of them.
 pub struct UPTransportVsomeip {
     /// Internally held inner implementation
-    transport_inner: Arc<dyn UPTransportVsomeipInner>,
+    transport_inner: Arc<UPTransportVsomeipInnerHandle>,
 }
 
 impl UPTransportVsomeip {
@@ -122,7 +121,7 @@ impl UPTransportVsomeip {
     ) -> Result<Self, UStatus> {
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        let transport_inner: Arc<dyn UPTransportVsomeipInner> = Arc::new({
+        let transport_inner: Arc<UPTransportVsomeipInnerHandle> = Arc::new({
             if let Some(config_path) = optional_config_path {
                 let config_path = config_path.as_path();
                 let transport_inner_res = UPTransportVsomeipInnerHandle::new_with_config(

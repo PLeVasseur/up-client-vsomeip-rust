@@ -18,6 +18,8 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use up_rust::{UCode, UStatus};
 
+// TODO: Should attach the received Request in full so that when we're shutting down
+//  the transport we can emit messages back to clients noting the error
 type UeRequestCorrelation = HashMap<RequestId, ReqId>;
 type MeRequestCorrelation = HashMap<ReqId, RequestId>;
 type ClientIdSessionIdTracking = HashMap<ClientId, SessionId>;
