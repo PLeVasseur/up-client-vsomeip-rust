@@ -26,7 +26,7 @@ use vsomeip_sys::vsomeip;
 generate_available_state_handler_extern_c_fns!(1000);
 
 #[async_trait]
-pub trait MockableApplicationAvailableRegistry: Send + Sync {
+pub trait ApplicationStateAvailabilityHandlerRegistry: Send + Sync {
     fn get_state_handler(
         &self,
         state_handler_id: usize,
@@ -35,21 +35,23 @@ pub trait MockableApplicationAvailableRegistry: Send + Sync {
     fn find_available_state_handler_id(&self) -> Result<usize, UStatus>;
 }
 
-pub struct ApplicationStateAvailabilityRegistry;
+pub struct ApplicationStateAvailabilityHandlerExternFnRegistry;
 
-impl ApplicationStateAvailabilityRegistry {
-    pub fn new_trait_obj() -> Arc<dyn MockableApplicationAvailableRegistry> {
+impl ApplicationStateAvailabilityHandlerExternFnRegistry {
+    pub fn new_trait_obj() -> Arc<dyn ApplicationStateAvailabilityHandlerRegistry> {
         static INIT: Once = Once::new();
 
         INIT.call_once(|| {
             available_state_handler_proc_macro::initialize_sender_receiver();
         });
 
-        Arc::new(ApplicationStateAvailabilityRegistry)
+        Arc::new(ApplicationStateAvailabilityHandlerExternFnRegistry)
     }
 }
 
-impl MockableApplicationAvailableRegistry for ApplicationStateAvailabilityRegistry {
+impl ApplicationStateAvailabilityHandlerRegistry
+    for ApplicationStateAvailabilityHandlerExternFnRegistry
+{
     fn get_state_handler(
         &self,
         state_handler_id: usize,

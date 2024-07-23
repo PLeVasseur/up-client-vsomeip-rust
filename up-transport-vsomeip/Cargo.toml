@@ -48,4 +48,5 @@ futures = "0.3.30"
 
 [dev-dependencies]
 env_logger = { version = "0.11.3" }
+hello-world-protos = { path = "../example-utils/hello-world-protos" }
 test-case = { version = "3.3" }

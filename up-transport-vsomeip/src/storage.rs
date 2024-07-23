@@ -11,18 +11,19 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-pub mod application_state_handler_registry;
-pub mod listener_registry;
+pub mod application_registry;
+pub mod application_state_availability_handler_registry;
 pub mod message_handler_registry;
 pub mod rpc_correlation;
 pub mod vsomeip_offered_requested;
 
 use crate::storage::{
-    application_state_handler_registry::{
-        ApplicationStateAvailabilityRegistry, MockableApplicationAvailableRegistry,
+    application_registry::ApplicationRegistry,
+    application_state_availability_handler_registry::{
+        ApplicationStateAvailabilityHandlerExternFnRegistry,
+        ApplicationStateAvailabilityHandlerRegistry,
     },
-    listener_registry::ListenerRegistry,
-    message_handler_registry::{MessageHandlerRegistry, MockableMessageHandlerRegistry},
+    message_handler_registry::MessageHandlerRegistry,
     rpc_correlation::RpcCorrelation,
     vsomeip_offered_requested::VsomeipOfferedRequested,
 };
@@ -30,8 +31,6 @@ use crate::{AuthorityName, UeId};
 use std::sync::Arc;
 
 /// Trait to make testing of [crate::UPTransportVsomeip] more decoupled and simpler.
-///
-/// Holds all state necessary for the functioning of a [crate::transport_inner::UPTransportVsomeipInner]
 pub trait UPTransportVsomeipStorage: Send + Sync {
     /// Returns the [up_rust::UUri::authority_name] local authority of this device
     fn get_local_authority(&self) -> AuthorityName;
@@ -43,16 +42,16 @@ pub trait UPTransportVsomeipStorage: Send + Sync {
     /// Returns this uEntity's [up_rust::UUri::ue_id]
     fn get_ue_id(&self) -> UeId;
 
-    /// Returns [ListenerRegistry] for manipulating the state of listeners
-    fn get_listener_registry(&self) -> Arc<ListenerRegistry>;
+    /// Returns [ApplicationRegistry] for manipulating the state of applications
+    fn get_application_registry(&self) -> Arc<ApplicationRegistry>;
 
-    /// Returns [MockableMessageHandlerRegistry] for manipulating the state of extern "C" fn
+    /// Returns [MessageHandlerRegistry] for manipulating the state of extern "C" fn
     /// registry that is needed to create callbacks to give to vsomeip library
-    fn get_message_handler_registry(&self) -> Arc<dyn MockableMessageHandlerRegistry>;
+    fn get_message_handler_registry(&self) -> Arc<MessageHandlerRegistry>;
 
     fn get_application_state_handler_registry(
         &self,
-    ) -> Arc<dyn MockableApplicationAvailableRegistry>;
+    ) -> Arc<dyn ApplicationStateAvailabilityHandlerRegistry>;
 
     /// Returns [RpcCorrelation] for manipulating the state regarding RPC Request to Response
     /// flows
@@ -67,9 +66,9 @@ pub struct UPTransportVsomeipInnerHandleStorage {
     ue_id: UeId,
     local_authority: AuthorityName,
     remote_authority: AuthorityName,
-    message_handler_registry: Arc<dyn MockableMessageHandlerRegistry>,
-    application_state_handler_registry: Arc<dyn MockableApplicationAvailableRegistry>,
-    listener_registry: Arc<ListenerRegistry>,
+    message_handler_registry: Arc<MessageHandlerRegistry>,
+    application_state_handler_registry: Arc<dyn ApplicationStateAvailabilityHandlerRegistry>,
+    application_registry: Arc<ApplicationRegistry>,
     rpc_correlation: Arc<RpcCorrelation>,
     vsomeip_offered_requested: Arc<VsomeipOfferedRequested>,
 }
@@ -80,17 +79,16 @@ impl UPTransportVsomeipInnerHandleStorage {
         remote_authority: AuthorityName,
         ue_id: UeId,
     ) -> Self {
-        let message_handler_registry = MessageHandlerRegistry::new_trait_obj();
         let application_state_handler_registry =
-            ApplicationStateAvailabilityRegistry::new_trait_obj();
+            ApplicationStateAvailabilityHandlerExternFnRegistry::new_trait_obj();
 
         Self {
             ue_id,
             local_authority,
             remote_authority,
-            message_handler_registry,
+            message_handler_registry: Arc::new(MessageHandlerRegistry::new()),
             application_state_handler_registry,
-            listener_registry: Arc::new(ListenerRegistry::new()),
+            application_registry: Arc::new(ApplicationRegistry::new()),
             rpc_correlation: Arc::new(RpcCorrelation::new()),
             vsomeip_offered_requested: Arc::new(VsomeipOfferedRequested::new()),
         }
@@ -110,17 +108,17 @@ impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
         self.ue_id
     }
 
-    fn get_listener_registry(&self) -> Arc<ListenerRegistry> {
-        self.listener_registry.clone()
+    fn get_application_registry(&self) -> Arc<ApplicationRegistry> {
+        self.application_registry.clone()
     }
 
-    fn get_message_handler_registry(&self) -> Arc<dyn MockableMessageHandlerRegistry> {
+    fn get_message_handler_registry(&self) -> Arc<MessageHandlerRegistry> {
         self.message_handler_registry.clone()
     }
 
     fn get_application_state_handler_registry(
         &self,
-    ) -> Arc<dyn MockableApplicationAvailableRegistry> {
+    ) -> Arc<dyn ApplicationStateAvailabilityHandlerRegistry> {
         self.application_state_handler_registry.clone()
     }
 

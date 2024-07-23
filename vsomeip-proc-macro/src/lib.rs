@@ -34,12 +34,12 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
     let mut generated_fns = quote! {};
     let mut match_arms = Vec::with_capacity(num_fns);
-    let mut free_listener_ids_init = quote! {
+    let mut message_handler_ids_init = quote! {
         let mut set = HashSet::with_capacity(#num_fns);
     };
 
     for i in 0..num_fns {
-        let extern_fn_name = format_ident!("extern_on_msg_wrapper_{}", i);
+        let extern_fn_name = format_ident!("extern_fn_message_handler_{}", i);
 
         let fn_code = quote! {
             #[no_mangle]
@@ -56,7 +56,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
         };
         match_arms.push(match_arm);
 
-        free_listener_ids_init.extend(quote! {
+        message_handler_ids_init.extend(quote! {
             set.insert(#i);
         });
     }
@@ -66,15 +66,15 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             use super::*;
 
             lazy_static! {
-                pub(super) static ref FREE_LISTENER_IDS: TimedStdRwLock<HashSet<usize>> = {
-                    #free_listener_ids_init
+                pub(super) static ref FREE_MESSAGE_HANDLER_IDS: TimedStdRwLock<HashSet<usize>> = {
+                    #message_handler_ids_init
                     TimedStdRwLock::new(set)
                 };
             }
 
             #generated_fns
 
-            fn call_shared_extern_fn(listener_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
+            fn call_shared_extern_fn(message_handler_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
                 // Ensure the runtime is initialized and get a handle to it
                 let runtime = get_runtime();
 
@@ -87,13 +87,13 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 // Use the runtime to run the async function within the LocalSet
                 local_set.spawn_local(async move {
-                    let transport_storage_res = ProcMacroMessageHandlerAccess::get_listener_id_transport(listener_id);
+                    let transport_storage_res = ProcMacroMessageHandlerAccess::get_message_handler_id_transport(message_handler_id);
 
                     let transport_storage = {
                         match transport_storage_res {
                             Some(transport_storage) => transport_storage.clone(),
                             None => {
-                                warn!("No transport storage found for listener_id: {listener_id}");
+                                warn!("No transport storage found for message_handler_id: {message_handler_id}");
                                 return;
                             }
                         }
@@ -127,12 +127,12 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                     trace!("Was able to convert to UMessage");
 
-                    trace!("Calling listener registered under {}", listener_id);
+                    trace!("Calling listener registered under {}", message_handler_id);
 
                     // Separate the scope for accessing the registry for listener
                     let listener = {
-                        let registry = transport_storage.get_listener_registry().clone();
-                        match registry.get_listener_for_listener_id(listener_id) {
+                        let registry = transport_storage.get_message_handler_registry().clone();
+                        match registry.get_listener_for_message_handler_id(message_handler_id) {
                             Some(listener) => {
                                 // Send the listener and umsg back to the main thread
                                 if tx.send((listener, umsg)).is_err() {
@@ -140,7 +140,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                                 }
                             },
                             None => {
-                                error!("Listener not found for ID {}", listener_id);
+                                error!("Listener not found for ID {}", message_handler_id);
                                 return;
                             }
                         }
@@ -172,11 +172,11 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 listener.on_receive(umsg).await;
             }
 
-            pub(super) fn get_extern_fn(listener_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
-                trace!("get_extern_fn with listener_id: {}", listener_id);
-                match listener_id {
+            pub(super) fn get_extern_fn(message_handler_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {
+                trace!("get_extern_fn with message_handler_id: {}", message_handler_id);
+                match message_handler_id{
                     #(#match_arms)*
-                    _ => panic!("Listener ID out of range"),
+                    _ => panic!("MessageHandlerId out of range: {message_handler_id}"),
                 }
             }
         }
