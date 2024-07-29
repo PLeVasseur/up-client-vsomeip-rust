@@ -361,7 +361,7 @@ impl UPTransportVsomeipInnerHandle {
         UAttributesValidators::get_validator_for_attributes(attributes)
             .validate(attributes)
             .map_err(|e| {
-                UStatus::fail_with_code(UCode::INTERNAL, format!("Invalid uAttributes, err: {e:?}"))
+                UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid uAttributes, err: {e:?}"))
             })?;
 
         trace!("Sending message with attributes: {:?}", attributes);
