@@ -101,7 +101,7 @@ pub(crate) fn get_callback_runtime_handle(
         Err(_) => panic!("the sender dropped"),
     };
 
-    return (runtime_handle, thread_handle, shutdown_tx);
+    (runtime_handle, thread_handle, shutdown_tx)
 }
 
 const DEFAULT_NUM_THREADS: u8 = 10;
