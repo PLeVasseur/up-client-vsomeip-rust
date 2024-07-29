@@ -18,7 +18,6 @@ use bimap::BiMap;
 use cxx::SharedPtr;
 use lazy_static::lazy_static;
 use log::{debug, error, info, trace, warn};
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error;
@@ -26,34 +25,12 @@ use std::fmt::{Display, Formatter};
 use std::ops::DerefMut;
 use std::sync::RwLock;
 use std::sync::{mpsc, Arc, Weak};
-use tokio::runtime::Runtime;
 use tokio::task::LocalSet;
 use up_rust::{ComparableListener, UListener, UUri};
 use up_rust::{UCode, UMessage, UStatus};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
 use vsomeip_sys::glue::{make_message_wrapper, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
-
-const THREAD_NUM: usize = 10;
-
-lazy_static! {
-    /// A [tokio::runtime::Runtime] onto which to run [up_rust::UListener] within the context of
-    /// the callbacks registered with vsomeip when a message is received
-    static ref CB_RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(THREAD_NUM)
-        .enable_all()
-        .build()
-        .expect("Unable to create callback runtime");
-}
-
-static RUNTIME: Lazy<Arc<Runtime>> =
-    Lazy::new(|| Arc::new(Runtime::new().expect("Failed to create Tokio runtime")));
-
-/// Stand-alone [tokio::runtime::Runtime] used to run async code within single thread context
-/// within the callback registered with vsomeip
-fn get_runtime() -> Arc<Runtime> {
-    Arc::clone(&RUNTIME)
-}
 
 generate_message_handler_extern_c_fns!(10000);
 

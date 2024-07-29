@@ -27,13 +27,12 @@ use crate::transport_inner::{
 use crate::utils::{any_uuri, any_uuri_fixed_authority_id};
 use crate::vsomeip_config::extract_applications;
 use crate::{ApplicationName, AuthorityName, ClientId, UeId};
-use lazy_static::lazy_static;
 use log::{error, info, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
-use tokio::runtime::Runtime;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
@@ -41,17 +40,6 @@ use tokio::time::timeout;
 use up_rust::{
     ComparableListener, UAttributesValidators, UCode, UListener, UMessage, UStatus, UUri,
 };
-
-const THREAD_NUM: usize = 10;
-lazy_static! {
-    /// A [tokio::runtime::Runtime] onto which to run [up_rust::UListener] within the context of
-    /// the callbacks registered with vsomeip when a message is received
-    static ref CB_RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(THREAD_NUM)
-        .enable_all()
-        .build()
-        .expect("Unable to create callback runtime");
-}
 
 pub(crate) struct UPTransportVsomeipInnerHandle {
     storage: Arc<dyn UPTransportVsomeipStorage>,
@@ -65,6 +53,7 @@ impl UPTransportVsomeipInnerHandle {
         local_authority_name: &AuthorityName,
         remote_authority_name: &AuthorityName,
         ue_id: UeId,
+        runtime_handle: Handle,
     ) -> Result<Self, UStatus> {
         trace!("Starting UPTransportVsomeipInnerHandle, new, ue_id: {ue_id}");
 
@@ -72,6 +61,7 @@ impl UPTransportVsomeipInnerHandle {
             local_authority_name.clone(),
             remote_authority_name.clone(),
             ue_id,
+            runtime_handle.clone(),
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(ue_id, None);
@@ -91,6 +81,7 @@ impl UPTransportVsomeipInnerHandle {
         remote_authority_name: &AuthorityName,
         ue_id: UeId,
         config_path: &Path,
+        runtime_handle: Handle,
     ) -> Result<Self, UStatus> {
         trace!("Starting UPTransportVsomeipInnerHandle, new_with_config, ue_id: {ue_id}");
 
@@ -98,6 +89,7 @@ impl UPTransportVsomeipInnerHandle {
             local_authority_name.clone(),
             remote_authority_name.clone(),
             ue_id,
+            runtime_handle,
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(ue_id, Some(config_path));
@@ -106,40 +98,7 @@ impl UPTransportVsomeipInnerHandle {
 
         Ok(Self {
             engine,
-            storage,
-            point_to_point_listener,
-            config_path,
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_supply_storage(
-        storage: Arc<dyn UPTransportVsomeipStorage>,
-    ) -> Result<Self, UStatus> {
-        let engine = UPTransportVsomeipInnerEngine::new(storage.get_ue_id(), None);
-        let point_to_point_listener = RwLock::new(None);
-        let config_path = None;
-
-        Ok(Self {
-            engine,
-            storage,
-            point_to_point_listener,
-            config_path,
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn new_with_config_supply_storage(
-        config_path: &Path,
-        storage: Arc<dyn UPTransportVsomeipStorage>,
-    ) -> Result<Self, UStatus> {
-        let engine = UPTransportVsomeipInnerEngine::new(storage.get_ue_id(), Some(config_path));
-        let point_to_point_listener = RwLock::new(None);
-        let config_path = Some(config_path.to_path_buf());
-
-        Ok(Self {
-            engine,
-            storage,
+            storage: storage.clone(),
             point_to_point_listener,
             config_path,
         })
@@ -299,24 +258,29 @@ impl UPTransportVsomeipInnerHandle {
 
         // Using block_in_place to perform async operation in sync context
         let send_to_engine_res = task::block_in_place(|| {
-            CB_RUNTIME.block_on(Self::send_to_engine_with_status(
-                &self.engine.transport_command_sender,
-                TransportCommand::UnregisterListener(
-                    src,
-                    sink,
-                    registration_type.clone(),
-                    app_name,
-                    tx,
-                ),
-            ))
+            self.storage
+                .get_runtime_handle()
+                .block_on(Self::send_to_engine_with_status(
+                    &self.engine.transport_command_sender,
+                    TransportCommand::UnregisterListener(
+                        src,
+                        sink,
+                        registration_type.clone(),
+                        app_name,
+                        tx,
+                    ),
+                ))
         });
 
         trace!("after attempting to block_on");
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        let await_engine_res =
-            task::block_in_place(|| CB_RUNTIME.block_on(Self::await_engine("unregister", rx)));
+        let await_engine_res = task::block_in_place(|| {
+            self.storage
+                .get_runtime_handle()
+                .block_on(Self::await_engine("unregister", rx))
+        });
         if let Err(warn) = await_engine_res {
             warn!("{warn}");
         }
@@ -340,7 +304,11 @@ impl UPTransportVsomeipInnerHandle {
         match client_usage {
             ClientUsage::ClientIdInUse => {}
             ClientUsage::ClientIdNotInUse(client_id) => {
-                task::block_in_place(|| CB_RUNTIME.block_on(self.shutdown_vsomeip_app(client_id)))?;
+                task::block_in_place(|| {
+                    self.storage
+                        .get_runtime_handle()
+                        .block_on(self.shutdown_vsomeip_app(client_id))
+                })?;
             }
         }
 
@@ -357,7 +325,10 @@ impl UPTransportVsomeipInnerHandle {
         UAttributesValidators::get_validator_for_attributes(attributes)
             .validate(attributes)
             .map_err(|e| {
-                UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!("Invalid uAttributes, err: {e:?}"))
+                UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    format!("Invalid uAttributes, err: {e:?}"),
+                )
             })?;
 
         trace!("Sending message with attributes: {:?}", attributes);
@@ -548,10 +519,8 @@ impl UPTransportVsomeipInnerHandle {
 
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = any_uuri();
-            let sink_filter = any_uuri_fixed_authority_id(
-                &self.storage.get_local_authority(),
-                app_config.id,
-            );
+            let sink_filter =
+                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), app_config.id);
             let listener_config = (
                 source_filter.clone(),
                 Some(sink_filter.clone()),
@@ -628,10 +597,8 @@ impl UPTransportVsomeipInnerHandle {
 
         for app_config in &application_configs {
             let source_filter = any_uuri();
-            let sink_filter = any_uuri_fixed_authority_id(
-                &self.storage.get_local_authority(),
-                app_config.id,
-            );
+            let sink_filter =
+                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), app_config.id);
 
             let registration_type = {
                 let reg_type_res = determine_registration_type(
@@ -666,22 +633,27 @@ impl UPTransportVsomeipInnerHandle {
             let (tx, rx) = oneshot::channel();
 
             let send_to_engine_res = task::block_in_place(|| {
-                CB_RUNTIME.block_on(Self::send_to_engine_with_status(
-                    &self.engine.transport_command_sender,
-                    TransportCommand::UnregisterListener(
-                        source_filter.clone(),
-                        Some(sink_filter.clone()),
-                        registration_type,
-                        app_name,
-                        tx,
-                    ),
-                ))
+                self.storage
+                    .get_runtime_handle()
+                    .block_on(Self::send_to_engine_with_status(
+                        &self.engine.transport_command_sender,
+                        TransportCommand::UnregisterListener(
+                            source_filter.clone(),
+                            Some(sink_filter.clone()),
+                            registration_type,
+                            app_name,
+                            tx,
+                        ),
+                    ))
             });
             if let Err(err) = send_to_engine_res {
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
-            let await_engine_res =
-                task::block_in_place(|| CB_RUNTIME.block_on(Self::await_engine("unregister", rx)));
+            let await_engine_res = task::block_in_place(|| {
+                self.storage
+                    .get_runtime_handle()
+                    .block_on(Self::await_engine("unregister", rx))
+            });
             if let Err(warn) = await_engine_res {
                 warn!("{warn}");
                 continue;
@@ -709,7 +681,9 @@ impl UPTransportVsomeipInnerHandle {
                 ClientUsage::ClientIdInUse => {}
                 ClientUsage::ClientIdNotInUse(client_id) => {
                     let shutdown_res = task::block_in_place(|| {
-                        CB_RUNTIME.block_on(self.shutdown_vsomeip_app(client_id))
+                        self.storage
+                            .get_runtime_handle()
+                            .block_on(self.shutdown_vsomeip_app(client_id))
                     });
                     if let Err(warn) = shutdown_res {
                         warn!("{warn}");
@@ -735,7 +709,12 @@ impl UPTransportVsomeipInnerHandle {
         );
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::StartVsomeipApp(client_id, app_name.clone(), self.storage.clone(), tx),
+            TransportCommand::StartVsomeipApp(
+                client_id,
+                app_name.clone(),
+                self.storage.clone(),
+                tx,
+            ),
         )
         .await;
         if let Err(err) = send_to_engine_res {
@@ -822,28 +801,4 @@ impl Drop for UPTransportVsomeipInnerHandle {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-
-    #[tokio::test]
-    async fn test_new_supply_storage() {
-        env_logger::init();
-
-        let mockable_storage =
-            UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
-
-        let _ = UPTransportVsomeipInnerHandle::new_supply_storage(Arc::new(mockable_storage));
-    }
-
-    #[tokio::test]
-    async fn test_new_with_config_supply_storage() {
-        let mockable_storage =
-            UPTransportVsomeipInnerHandleStorage::new("".to_string(), "".to_string(), 10);
-
-        let _ = UPTransportVsomeipInnerHandle::new_with_config_supply_storage(
-            Path::new("/does/not/exist"),
-            Arc::new(mockable_storage),
-        );
-    }
-}
+mod tests {}

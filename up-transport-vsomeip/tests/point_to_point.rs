@@ -396,6 +396,7 @@ async fn point_to_point() {
         &PTP_AUTHORITY_NAME.to_string(),
         STREAMER_UE_ID,
         &abs_vsomeip_config_path.unwrap(),
+        None,
     );
     let Ok(point_to_point_client) = point_to_point_client_res else {
         panic!("Unable to establish UTransport");
@@ -424,6 +425,7 @@ async fn point_to_point() {
         &CLIENT_AUTHORITY_NAME.to_string(),
         CLIENT_UE_ID as UeId,
         &client_config.unwrap(),
+        None,
     );
 
     let Ok(client) = client_res else {
@@ -458,6 +460,7 @@ async fn point_to_point() {
         &SERVICE_AUTHORITY_NAME.to_string(),
         SERVICE_UE_ID as UeId,
         &service_config.unwrap(),
+        None,
     );
 
     let Ok(service) = service_res else {
@@ -483,6 +486,7 @@ async fn point_to_point() {
         &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
         &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
         OTHER_CLIENT_STREAMER_UE_ID,
+        None,
     )
     .unwrap();
 

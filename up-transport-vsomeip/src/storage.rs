@@ -29,9 +29,12 @@ use crate::storage::{
 };
 use crate::{AuthorityName, UeId};
 use std::sync::Arc;
+use tokio::runtime::Handle;
 
 /// Trait to make testing of [crate::UPTransportVsomeip] more decoupled and simpler.
 pub trait UPTransportVsomeipStorage: Send + Sync {
+    fn get_runtime_handle(&self) -> Handle;
+
     /// Returns the [up_rust::UUri::authority_name] local authority of this device
     fn get_local_authority(&self) -> AuthorityName;
 
@@ -66,6 +69,7 @@ pub struct UPTransportVsomeipInnerHandleStorage {
     ue_id: UeId,
     local_authority: AuthorityName,
     remote_authority: AuthorityName,
+    runtime_handle: Handle,
     message_handler_registry: Arc<MessageHandlerRegistry>,
     application_state_handler_registry: Arc<dyn ApplicationStateAvailabilityHandlerRegistry>,
     application_registry: Arc<ApplicationRegistry>,
@@ -78,6 +82,7 @@ impl UPTransportVsomeipInnerHandleStorage {
         local_authority: AuthorityName,
         remote_authority: AuthorityName,
         ue_id: UeId,
+        runtime_handle: Handle,
     ) -> Self {
         let application_state_handler_registry =
             ApplicationStateAvailabilityHandlerExternFnRegistry::new_trait_obj();
@@ -86,6 +91,7 @@ impl UPTransportVsomeipInnerHandleStorage {
             ue_id,
             local_authority,
             remote_authority,
+            runtime_handle,
             message_handler_registry: Arc::new(MessageHandlerRegistry::new()),
             application_state_handler_registry,
             application_registry: Arc::new(ApplicationRegistry::new()),
@@ -96,6 +102,9 @@ impl UPTransportVsomeipInnerHandleStorage {
 }
 
 impl UPTransportVsomeipStorage for UPTransportVsomeipInnerHandleStorage {
+    fn get_runtime_handle(&self) -> Handle {
+        self.runtime_handle.clone()
+    }
     fn get_local_authority(&self) -> AuthorityName {
         self.local_authority.clone()
     }

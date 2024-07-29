@@ -19,7 +19,11 @@ use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri};
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        self.transport_inner.send(message).await
+        if let Some(transport_inner) = self.transport_inner.as_ref() {
+            transport_inner.send(message).await
+        } else {
+            panic!("transport_inner not initialized");
+        }
     }
 
     async fn register_listener(
@@ -28,9 +32,13 @@ impl UTransport for UPTransportVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        self.transport_inner
-            .register_listener(source_filter, sink_filter, listener)
-            .await
+        if let Some(transport_inner) = self.transport_inner.as_ref() {
+            transport_inner
+                .register_listener(source_filter, sink_filter, listener)
+                .await
+        } else {
+            panic!("transport_inner not initialized");
+        }
     }
 
     async fn unregister_listener(
@@ -39,8 +47,11 @@ impl UTransport for UPTransportVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        self.transport_inner
-            .unregister_listener(source_filter, sink_filter, listener)
+        if let Some(transport_inner) = self.transport_inner.as_ref() {
+            transport_inner.unregister_listener(source_filter, sink_filter, listener)
+        } else {
+            panic!("transport_inner not initialized");
+        }
     }
 
     async fn receive(

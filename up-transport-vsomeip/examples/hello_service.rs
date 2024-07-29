@@ -100,6 +100,7 @@ async fn main() -> Result<(), UStatus> {
             &CLIENT_AUTHORITY.to_string(),
             HELLO_SERVICE_UE_ID as UeId,
             &vsomeip_config.unwrap(),
+            None,
         )
         .unwrap(),
     );
