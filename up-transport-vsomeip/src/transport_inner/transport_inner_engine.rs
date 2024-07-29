@@ -45,7 +45,7 @@ pub enum TransportCommand {
         RegistrationType,
         MessageHandlerFnPtr,
         ApplicationName,
-        Arc<dyn UPTransportVsomeipStorage>,
+        Arc<UPTransportVsomeipStorage>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     UnregisterListener(
@@ -59,14 +59,14 @@ pub enum TransportCommand {
         UMessage,
         RegistrationType,
         ApplicationName,
-        Arc<dyn UPTransportVsomeipStorage>,
+        Arc<UPTransportVsomeipStorage>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
     StartVsomeipApp(
         ClientId,
         ApplicationName,
-        Arc<dyn UPTransportVsomeipStorage>,
+        Arc<UPTransportVsomeipStorage>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     StopVsomeipApp(
@@ -122,7 +122,7 @@ impl UPTransportVsomeipInnerEngine {
     fn create_app(
         app_name: &ApplicationName,
         config_path: Option<&Path>,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
     ) -> Result<(), UStatus> {
         let app_name = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
@@ -411,7 +411,7 @@ impl UPTransportVsomeipInnerEngine {
         sink_filter: Option<UUri>,
         registration_type: RegistrationType,
         msg_handler: MessageHandlerFnPtr,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -713,7 +713,7 @@ impl UPTransportVsomeipInnerEngine {
 
     async fn send_internal(
         umsg: UMessage,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -806,7 +806,7 @@ impl UPTransportVsomeipInnerEngine {
     async fn start_vsomeip_app_internal(
         client_id: ClientId,
         app_name: ApplicationName,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         config_path: Option<PathBuf>,
     ) -> Result<(), UStatus> {
         trace!(

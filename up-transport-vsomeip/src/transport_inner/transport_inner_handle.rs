@@ -15,7 +15,7 @@ use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
 use crate::storage::message_handler_registry::{ClientUsage, GetMessageHandlerError};
-use crate::storage::{UPTransportVsomeipInnerHandleStorage, UPTransportVsomeipStorage};
+use crate::storage::UPTransportVsomeipStorage;
 use crate::transport_inner::transport_inner_engine::{
     TransportCommand, UPTransportVsomeipInnerEngine,
 };
@@ -42,7 +42,7 @@ use up_rust::{
 };
 
 pub(crate) struct UPTransportVsomeipInnerHandle {
-    storage: Arc<dyn UPTransportVsomeipStorage>,
+    storage: Arc<UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipInnerEngine,
     point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
     config_path: Option<PathBuf>,
@@ -57,7 +57,7 @@ impl UPTransportVsomeipInnerHandle {
     ) -> Result<Self, UStatus> {
         trace!("Starting UPTransportVsomeipInnerHandle, new, ue_id: {ue_id}");
 
-        let storage = Arc::new(UPTransportVsomeipInnerHandleStorage::new(
+        let storage = Arc::new(UPTransportVsomeipStorage::new(
             local_authority_name.clone(),
             remote_authority_name.clone(),
             ue_id,
@@ -85,7 +85,7 @@ impl UPTransportVsomeipInnerHandle {
     ) -> Result<Self, UStatus> {
         trace!("Starting UPTransportVsomeipInnerHandle, new_with_config, ue_id: {ue_id}");
 
-        let storage = Arc::new(UPTransportVsomeipInnerHandleStorage::new(
+        let storage = Arc::new(UPTransportVsomeipStorage::new(
             local_authority_name.clone(),
             remote_authority_name.clone(),
             ue_id,

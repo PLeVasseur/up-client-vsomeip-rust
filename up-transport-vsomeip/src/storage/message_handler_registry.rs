@@ -35,7 +35,7 @@ use vsomeip_sys::vsomeip;
 generate_message_handler_extern_c_fns!(10000);
 
 type MessageHandlerIdToTransportStorage =
-    HashMap<MessageHandlerId, Weak<dyn UPTransportVsomeipStorage + Send + Sync>>;
+    HashMap<MessageHandlerId, Weak<UPTransportVsomeipStorage>>;
 lazy_static! {
     /// A mapping from extern "C" fn [MessageHandlerId] onto [std::sync::Weak] references to [UPTransportVsomeipStorage]
     ///
@@ -58,7 +58,7 @@ impl ProcMacroMessageHandlerAccess {
     /// * `message_handler_id`
     fn get_message_handler_id_transport(
         message_handle_id: MessageHandlerId,
-    ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
+    ) -> Option<Arc<UPTransportVsomeipStorage>> {
         let message_handler_id_transport_shim =
             MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.read().unwrap();
         let transport = message_handler_id_transport_shim.get(&message_handle_id)?;
@@ -144,7 +144,7 @@ impl MessageHandlerRegistry {
     pub fn get_message_handler(
         &self,
         client_id: ClientId,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         listener_config: (UUri, Option<UUri>, ComparableListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
@@ -433,10 +433,10 @@ impl MessageHandlerRegistry {
     fn insert_message_handler_id_transport(
         message_handler_id_to_transport_storage: &mut HashMap<
             MessageHandlerId,
-            Weak<dyn UPTransportVsomeipStorage + Send + Sync>,
+            Weak<UPTransportVsomeipStorage>,
         >,
         listener_id: usize,
-        transport: Arc<dyn UPTransportVsomeipStorage + Send + Sync>,
+        transport: Arc<UPTransportVsomeipStorage>,
     ) -> Result<(), UStatus> {
         if let std::collections::hash_map::Entry::Vacant(e) =
             message_handler_id_to_transport_storage.entry(listener_id)
@@ -457,7 +457,7 @@ impl MessageHandlerRegistry {
     fn remove_message_handler_id_transport(
         message_handler_id_to_transport_storage: &mut HashMap<
             usize,
-            Weak<(dyn UPTransportVsomeipStorage + Send + Sync + 'static)>,
+            Weak<UPTransportVsomeipStorage>,
         >,
         listener_id: usize,
     ) -> Result<(), UStatus> {
