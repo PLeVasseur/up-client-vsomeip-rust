@@ -170,6 +170,7 @@ async fn client_service() {
         &service_authority_name.to_string(),
         streamer_ue_id,
         &client_config.unwrap(),
+        None,
     );
 
     let Ok(client) = client_res else {
@@ -219,6 +220,7 @@ async fn client_service() {
         &client_authority_name.to_string(),
         streamer_ue_id,
         &service_config.unwrap(),
+        None,
     );
 
     let Ok(service) = service_res else {

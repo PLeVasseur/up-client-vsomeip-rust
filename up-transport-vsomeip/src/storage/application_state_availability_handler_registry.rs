@@ -11,12 +11,12 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::utils::TimedStdRwLock;
 use async_trait::async_trait;
 use crossbeam_channel::{Receiver, Sender};
 use lazy_static::lazy_static;
 use log::{error, trace};
 use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 use std::sync::{Arc, Once};
 use up_rust::{UCode, UStatus};
 use vsomeip_proc_macro::generate_available_state_handler_extern_c_fns;
@@ -63,7 +63,9 @@ impl ApplicationStateAvailabilityHandlerRegistry
 
     fn free_state_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus> {
         let mut free_state_handler_ids =
-            available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS.write();
+            available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS
+                .write()
+                .unwrap();
         free_state_handler_ids.insert(state_handler_id);
 
         trace!("free_state_handler_id: {state_handler_id}");
@@ -73,7 +75,9 @@ impl ApplicationStateAvailabilityHandlerRegistry
 
     fn find_available_state_handler_id(&self) -> Result<usize, UStatus> {
         let mut free_state_handler_ids =
-            available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS.write();
+            available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS
+                .write()
+                .unwrap();
         if let Some(&id) = free_state_handler_ids.iter().next() {
             free_state_handler_ids.remove(&id);
             trace!("find_available_listener_id: {id}");

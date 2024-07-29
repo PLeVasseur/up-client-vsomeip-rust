@@ -35,7 +35,7 @@ impl UMessageToVsomeipMessage {
     //  what will be done
     pub async fn umsg_publish_to_vsomeip_notification(
         umsg: &UMessage,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let Some(source) = umsg.attributes.source.as_ref() else {
@@ -98,7 +98,7 @@ impl UMessageToVsomeipMessage {
 
     pub async fn umsg_request_to_vsomeip_message(
         umsg: &UMessage,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
@@ -174,7 +174,7 @@ impl UMessageToVsomeipMessage {
 
     pub async fn umsg_response_to_vsomeip_message(
         umsg: &UMessage,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
         let Some(source) = umsg.attributes.source.as_ref() else {
@@ -281,7 +281,7 @@ impl VsomeipMessageToUMessage {
     pub async fn convert_vsomeip_msg_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
     ) -> Result<UMessage, UStatus> {
         let msg_type = vsomeip_message.get_message_base_pinned().get_message_type();
@@ -348,7 +348,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_request_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: &Arc<UPTransportVsomeipStorage>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -418,7 +418,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_response_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: &Arc<UPTransportVsomeipStorage>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -476,7 +476,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_error_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<dyn UPTransportVsomeipStorage>,
+        transport_storage: &Arc<UPTransportVsomeipStorage>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {

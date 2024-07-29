@@ -66,38 +66,33 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             use super::*;
 
             lazy_static! {
-                pub(super) static ref FREE_MESSAGE_HANDLER_IDS: TimedStdRwLock<HashSet<usize>> = {
+                pub(super) static ref FREE_MESSAGE_HANDLER_IDS: RwLock<HashSet<usize>> = {
                     #message_handler_ids_init
-                    TimedStdRwLock::new(set)
+                    RwLock::new(set)
                 };
             }
 
             #generated_fns
 
             fn call_shared_extern_fn(message_handler_id: usize, vsomeip_msg: &SharedPtr<vsomeip::message>) {
-                // Ensure the runtime is initialized and get a handle to it
-                let runtime = get_runtime();
-
-                // Create a LocalSet for running !Send futures
-                let local_set = LocalSet::new();
+                let transport_storage_res = ProcMacroMessageHandlerAccess::get_message_handler_id_transport(message_handler_id);
+                let transport_storage = {
+                    match transport_storage_res {
+                        Some(transport_storage) => transport_storage.clone(),
+                        None => {
+                            warn!("No transport storage found for message_handler_id: {message_handler_id}");
+                            return;
+                        }
+                    }
+                };
+                let runtime_handle = transport_storage.get_runtime_handle();
 
                 let vsomeip_msg = make_message_wrapper(vsomeip_msg.clone()).get_shared_ptr();
-
                 let (tx, rx) = mpsc::channel();
-
+                // Create a LocalSet for running !Send futures
+                let local_set = LocalSet::new();
                 // Use the runtime to run the async function within the LocalSet
                 local_set.spawn_local(async move {
-                    let transport_storage_res = ProcMacroMessageHandlerAccess::get_message_handler_id_transport(message_handler_id);
-
-                    let transport_storage = {
-                        match transport_storage_res {
-                            Some(transport_storage) => transport_storage.clone(),
-                            None => {
-                                warn!("No transport storage found for message_handler_id: {message_handler_id}");
-                                return;
-                            }
-                        }
-                    };
 
                     let cloned_vsomeip_msg = vsomeip_msg.clone();
                     let mut vsomeip_msg_wrapper = make_message_wrapper(cloned_vsomeip_msg);
@@ -146,7 +141,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                         }
                     };
                 });
-                runtime.block_on(local_set);
+                runtime_handle.block_on(local_set);
 
                 trace!("Reached bottom of call_shared_extern_fn");
 
@@ -160,7 +155,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 };
 
                 // Spawn shared_async_fn on the multi-threaded executor
-                CB_RUNTIME.spawn(async move {
+                runtime_handle.spawn(async move {
                     trace!("Within spawned thread -- calling shared_async_fn");
                     shared_async_fn(listener, umsg).await;
                     trace!("Within spawned thread -- finished shared_async_fn");
@@ -224,8 +219,8 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             // recently changed the inside of this, afterwards, got compiler error
             let (sender, receiver) = crossbeam_channel::bounded(1000);
 
-            AVAILABLE_STATE_SENDERS.write().insert(#i, Some(sender));
-            AVAILABLE_STATE_RECEIVERS.write().insert(#i, Some(receiver));
+            AVAILABLE_STATE_SENDERS.write().unwrap().insert(#i, Some(sender));
+            AVAILABLE_STATE_RECEIVERS.write().unwrap().insert(#i, Some(receiver));
         });
     }
 
@@ -234,12 +229,12 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             use super::*;
 
             lazy_static! {
-                pub(super) static ref FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS: TimedStdRwLock<HashSet<usize>> = {
+                pub(super) static ref FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS: RwLock<HashSet<usize>> = {
                     #free_available_state_handler_extern_fn_ids
-                    TimedStdRwLock::new(set)
+                    RwLock::new(set)
                 };
-                static ref AVAILABLE_STATE_SENDERS: TimedStdRwLock<HashMap<usize, Option<Sender<vsomeip::state_type_e>>>> = TimedStdRwLock::new(HashMap::new());
-                static ref AVAILABLE_STATE_RECEIVERS: TimedStdRwLock<HashMap<usize, Option<Receiver<vsomeip::state_type_e>>>> = TimedStdRwLock::new(HashMap::new());
+                static ref AVAILABLE_STATE_SENDERS: RwLock<HashMap<usize, Option<Sender<vsomeip::state_type_e>>>> = RwLock::new(HashMap::new());
+                static ref AVAILABLE_STATE_RECEIVERS: RwLock<HashMap<usize, Option<Receiver<vsomeip::state_type_e>>>> = RwLock::new(HashMap::new());
             }
 
             #generated_fns
@@ -248,7 +243,7 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             //  this channel OR we timeout
             fn call_shared_extern_fn(available_handler_id: usize, available_state: vsomeip::state_type_e) {
 
-                let available_state_senders = AVAILABLE_STATE_SENDERS.read();
+                let available_state_senders = AVAILABLE_STATE_SENDERS.read().unwrap();
 
                 match available_state_senders.get(&available_handler_id) {
                     None => {
@@ -276,7 +271,7 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
                     _ => panic!("available_handler_id out of range"),
                 };
 
-                let available_state_receivers = AVAILABLE_STATE_RECEIVERS.read();
+                let available_state_receivers = AVAILABLE_STATE_RECEIVERS.read().unwrap();
 
                 let receiver = {
                     match available_state_receivers.get(&available_handler_id) {

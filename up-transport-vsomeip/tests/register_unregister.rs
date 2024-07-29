@@ -40,7 +40,8 @@ mod tests {
         test_lib::before_test();
 
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10).unwrap();
+            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+                .unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -83,7 +84,8 @@ mod tests {
         test_lib::before_test();
 
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10).unwrap();
+            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+                .unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -133,7 +135,8 @@ mod tests {
         test_lib::before_test();
 
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10).unwrap();
+            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+                .unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -189,6 +192,7 @@ mod tests {
             &"me_authority".to_string(),
             10,
             Path::new("vsomeip_configs/example_ustreamer.json"),
+            None,
         )
         .unwrap();
 

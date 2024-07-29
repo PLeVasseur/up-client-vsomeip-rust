@@ -81,6 +81,7 @@ async fn publisher_subscriber() {
         &authority_name.to_string(),
         &"me_authority".to_string(),
         subscriber_ue_id,
+        None,
     );
 
     let Ok(subscriber) = subscriber_res else {
@@ -106,6 +107,7 @@ async fn publisher_subscriber() {
         &authority_name.to_string(),
         &"me_authority".to_string(),
         ue_id,
+        None,
     );
 
     let Ok(publisher) = publisher_res else {
@@ -152,12 +154,6 @@ async fn publisher_subscriber() {
         "subscriber_listener_check.received_publish(): {}",
         subscriber_listener_check.received_publish()
     );
-
-    println!("publisher:");
-    publisher.print_rwlock_times().await;
-
-    println!("subscriber:");
-    subscriber.print_rwlock_times().await;
 
     assert_eq!(iterations, subscriber_listener_check.received_publish());
 }
