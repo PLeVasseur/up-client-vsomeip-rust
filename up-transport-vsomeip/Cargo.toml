@@ -26,7 +26,6 @@ readme = "README.md"
 [features]
 default = ["bundled"]
 bundled = ["vsomeip-sys/bundled"]
-timing = []
 
 [dependencies]
 async-trait = { workspace = true }

@@ -35,9 +35,9 @@ pub type ClientId = u16;
 pub type ApplicationName = String;
 
 /// A [up_rust::UAttributes::reqid]
-pub type ReqId = UUID;
+pub type UProtocolReqId = UUID;
 /// A request ID used with vsomeip. See [vsomeip_sys::vsomeip::request_t]
-pub type RequestId = u32;
+pub type SomeIpRequestId = u32;
 /// A session ID used with vsomeip. See [vsomeip_sys::vsomeip::session_t]
 pub type SessionId = u16;
 
@@ -151,11 +151,6 @@ impl UPTransportVsomeip {
             }
         });
         Ok(Self { transport_inner })
-    }
-
-    /// Prints the lock wait times for state. Useful when debugging or testing.
-    pub async fn print_rwlock_times(&self) {
-        self.transport_inner.print_rwlock_times().await;
     }
 }
 

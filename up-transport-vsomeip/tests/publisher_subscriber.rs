@@ -153,11 +153,5 @@ async fn publisher_subscriber() {
         subscriber_listener_check.received_publish()
     );
 
-    println!("publisher:");
-    publisher.print_rwlock_times().await;
-
-    println!("subscriber:");
-    subscriber.print_rwlock_times().await;
-
     assert_eq!(iterations, subscriber_listener_check.received_publish());
 }

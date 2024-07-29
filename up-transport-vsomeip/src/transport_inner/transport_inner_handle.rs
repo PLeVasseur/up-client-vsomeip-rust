@@ -24,13 +24,14 @@ use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, UP_CLIENT_VSOMEIP_TAG,
 };
-use crate::utils::{any_uuri, any_uuri_fixed_authority_id, TimedStdRwLock};
+use crate::utils::{any_uuri, any_uuri_fixed_authority_id};
 use crate::vsomeip_config::extract_applications;
 use crate::{ApplicationName, AuthorityName, ClientId, UeId};
 use lazy_static::lazy_static;
 use log::{error, info, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -55,7 +56,7 @@ lazy_static! {
 pub(crate) struct UPTransportVsomeipInnerHandle {
     storage: Arc<dyn UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipInnerEngine,
-    point_to_point_listener: TimedStdRwLock<Option<Arc<dyn UListener>>>,
+    point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
     config_path: Option<PathBuf>,
 }
 
@@ -74,7 +75,7 @@ impl UPTransportVsomeipInnerHandle {
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(ue_id, None);
-        let point_to_point_listener = TimedStdRwLock::new(None);
+        let point_to_point_listener = RwLock::new(None);
         let config_path = None;
 
         Ok(Self {
@@ -100,7 +101,7 @@ impl UPTransportVsomeipInnerHandle {
         ));
 
         let engine = UPTransportVsomeipInnerEngine::new(ue_id, Some(config_path));
-        let point_to_point_listener = TimedStdRwLock::new(None);
+        let point_to_point_listener = RwLock::new(None);
         let config_path = Some(config_path.to_path_buf());
 
         Ok(Self {
@@ -116,7 +117,7 @@ impl UPTransportVsomeipInnerHandle {
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(storage.get_ue_id(), None);
-        let point_to_point_listener = TimedStdRwLock::new(None);
+        let point_to_point_listener = RwLock::new(None);
         let config_path = None;
 
         Ok(Self {
@@ -133,7 +134,7 @@ impl UPTransportVsomeipInnerHandle {
         storage: Arc<dyn UPTransportVsomeipStorage>,
     ) -> Result<Self, UStatus> {
         let engine = UPTransportVsomeipInnerEngine::new(storage.get_ue_id(), Some(config_path));
-        let point_to_point_listener = TimedStdRwLock::new(None);
+        let point_to_point_listener = RwLock::new(None);
         let config_path = Some(config_path.to_path_buf());
 
         Ok(Self {
@@ -411,34 +412,6 @@ impl UPTransportVsomeipInnerHandle {
         }
         Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
-    pub(crate) async fn print_rwlock_times(&self) {
-        #[cfg(feature = "timing")]
-        {
-            println!("point_to_point_listener");
-            println!("reads: {:?}", self.point_to_point_listener.read_durations());
-            println!(
-                "writes: {:?}",
-                self.point_to_point_listener.write_durations()
-            );
-        }
-
-        self.get_storage()
-            .get_message_handler_registry()
-            .print_rwlock_times()
-            .await;
-        self.get_storage()
-            .get_rpc_correlation()
-            .print_rwlock_times()
-            .await;
-        self.get_storage()
-            .get_message_handler_registry()
-            .print_rwlock_times()
-            .await;
-        self.get_storage()
-            .get_application_registry()
-            .print_rwlock_times()
-            .await;
-    }
 
     async fn register_for_returning_response_if_point_to_point_listener_and_sending_request(
         &self,
@@ -447,7 +420,7 @@ impl UPTransportVsomeipInnerHandle {
         message_type: RegistrationType,
     ) -> Result<bool, UStatus> {
         let maybe_point_to_point_listener = {
-            let point_to_point_listener = self.point_to_point_listener.read();
+            let point_to_point_listener = self.point_to_point_listener.read().unwrap();
             (*point_to_point_listener).as_ref().cloned()
         };
 
@@ -555,7 +528,7 @@ impl UPTransportVsomeipInnerHandle {
         trace!("Got vsomeip application_configs: {application_configs:?}");
 
         {
-            let mut point_to_point_listener = self.point_to_point_listener.write();
+            let mut point_to_point_listener = self.point_to_point_listener.write().unwrap();
             if point_to_point_listener.is_some() {
                 return Err(UStatus::fail_with_code(
                     UCode::ALREADY_EXISTS,
@@ -638,7 +611,7 @@ impl UPTransportVsomeipInnerHandle {
 
     fn unregister_point_to_point_listener(&self) -> Result<(), UStatus> {
         let ptp_comp_listener = {
-            let point_to_point_listener = self.point_to_point_listener.read();
+            let point_to_point_listener = self.point_to_point_listener.read().unwrap();
             let Some(ref point_to_point_listener) = *point_to_point_listener else {
                 return Err(UStatus::fail_with_code(
                     UCode::ALREADY_EXISTS,

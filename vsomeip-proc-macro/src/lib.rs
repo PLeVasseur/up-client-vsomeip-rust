@@ -66,9 +66,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
             use super::*;
 
             lazy_static! {
-                pub(super) static ref FREE_MESSAGE_HANDLER_IDS: TimedStdRwLock<HashSet<usize>> = {
+                pub(super) static ref FREE_MESSAGE_HANDLER_IDS: RwLock<HashSet<usize>> = {
                     #message_handler_ids_init
-                    TimedStdRwLock::new(set)
+                    RwLock::new(set)
                 };
             }
 
@@ -224,8 +224,8 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             // recently changed the inside of this, afterwards, got compiler error
             let (sender, receiver) = crossbeam_channel::bounded(1000);
 
-            AVAILABLE_STATE_SENDERS.write().insert(#i, Some(sender));
-            AVAILABLE_STATE_RECEIVERS.write().insert(#i, Some(receiver));
+            AVAILABLE_STATE_SENDERS.write().unwrap().insert(#i, Some(sender));
+            AVAILABLE_STATE_RECEIVERS.write().unwrap().insert(#i, Some(receiver));
         });
     }
 
@@ -234,12 +234,12 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             use super::*;
 
             lazy_static! {
-                pub(super) static ref FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS: TimedStdRwLock<HashSet<usize>> = {
+                pub(super) static ref FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS: RwLock<HashSet<usize>> = {
                     #free_available_state_handler_extern_fn_ids
-                    TimedStdRwLock::new(set)
+                    RwLock::new(set)
                 };
-                static ref AVAILABLE_STATE_SENDERS: TimedStdRwLock<HashMap<usize, Option<Sender<vsomeip::state_type_e>>>> = TimedStdRwLock::new(HashMap::new());
-                static ref AVAILABLE_STATE_RECEIVERS: TimedStdRwLock<HashMap<usize, Option<Receiver<vsomeip::state_type_e>>>> = TimedStdRwLock::new(HashMap::new());
+                static ref AVAILABLE_STATE_SENDERS: RwLock<HashMap<usize, Option<Sender<vsomeip::state_type_e>>>> = RwLock::new(HashMap::new());
+                static ref AVAILABLE_STATE_RECEIVERS: RwLock<HashMap<usize, Option<Receiver<vsomeip::state_type_e>>>> = RwLock::new(HashMap::new());
             }
 
             #generated_fns
@@ -248,7 +248,7 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
             //  this channel OR we timeout
             fn call_shared_extern_fn(available_handler_id: usize, available_state: vsomeip::state_type_e) {
 
-                let available_state_senders = AVAILABLE_STATE_SENDERS.read();
+                let available_state_senders = AVAILABLE_STATE_SENDERS.read().unwrap();
 
                 match available_state_senders.get(&available_handler_id) {
                     None => {
@@ -276,7 +276,7 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
                     _ => panic!("available_handler_id out of range"),
                 };
 
-                let available_state_receivers = AVAILABLE_STATE_RECEIVERS.read();
+                let available_state_receivers = AVAILABLE_STATE_RECEIVERS.read().unwrap();
 
                 let receiver = {
                     match available_state_receivers.get(&available_handler_id) {

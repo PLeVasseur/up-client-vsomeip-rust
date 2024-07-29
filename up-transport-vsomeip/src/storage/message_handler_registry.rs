@@ -13,7 +13,6 @@
 
 use crate::message_conversions::VsomeipMessageToUMessage;
 use crate::storage::UPTransportVsomeipStorage;
-use crate::utils::TimedStdRwLock;
 use crate::{ClientId, MessageHandlerId};
 use bimap::BiMap;
 use cxx::SharedPtr;
@@ -25,6 +24,7 @@ use std::collections::HashSet;
 use std::error;
 use std::fmt::{Display, Formatter};
 use std::ops::DerefMut;
+use std::sync::RwLock;
 use std::sync::{mpsc, Arc, Weak};
 use tokio::runtime::Runtime;
 use tokio::task::LocalSet;
@@ -65,8 +65,8 @@ lazy_static! {
     /// Used within the context of the proc macro crate (vsomeip-proc-macro) generated [call_shared_extern_fn]
     /// to obtain the state of the transport needed to perform ingestion of vsomeip messages from
     /// within callback functions registered with vsomeip
-    static ref MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE: TimedStdRwLock<MessageHandlerIdToTransportStorage> =
-        TimedStdRwLock::new(HashMap::new());
+    static ref MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE: RwLock<MessageHandlerIdToTransportStorage> =
+        RwLock::new(HashMap::new());
 }
 
 /// A facade struct from which the proc macro crate (vsomeip-proc-macro) generated `call_shared_extern_fn`
@@ -82,7 +82,8 @@ impl ProcMacroMessageHandlerAccess {
     fn get_message_handler_id_transport(
         message_handle_id: MessageHandlerId,
     ) -> Option<Arc<dyn UPTransportVsomeipStorage + Send + Sync>> {
-        let message_handler_id_transport_shim = MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.read();
+        let message_handler_id_transport_shim =
+            MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.read().unwrap();
         let transport = message_handler_id_transport_shim.get(&message_handle_id)?;
 
         transport.upgrade()
@@ -148,17 +149,17 @@ type MessageHandlerIdAndListenerConfig =
 type MessageHandlerIdToClientId = HashMap<MessageHandlerId, ClientId>;
 type ClientIdToMessageHandlerId = HashMap<ClientId, HashSet<MessageHandlerId>>;
 pub struct MessageHandlerRegistry {
-    message_handler_id_and_listener_config: TimedStdRwLock<MessageHandlerIdAndListenerConfig>,
-    message_handler_id_to_client_id: TimedStdRwLock<MessageHandlerIdToClientId>,
-    client_id_to_message_handler_id: TimedStdRwLock<ClientIdToMessageHandlerId>,
+    message_handler_id_and_listener_config: RwLock<MessageHandlerIdAndListenerConfig>,
+    message_handler_id_to_client_id: RwLock<MessageHandlerIdToClientId>,
+    client_id_to_message_handler_id: RwLock<ClientIdToMessageHandlerId>,
 }
 
 impl MessageHandlerRegistry {
     pub fn new() -> Self {
         Self {
-            message_handler_id_and_listener_config: TimedStdRwLock::new(BiMap::new()),
-            message_handler_id_to_client_id: TimedStdRwLock::new(HashMap::new()),
-            client_id_to_message_handler_id: TimedStdRwLock::new(HashMap::new()),
+            message_handler_id_and_listener_config: RwLock::new(BiMap::new()),
+            message_handler_id_to_client_id: RwLock::new(HashMap::new()),
+            client_id_to_message_handler_id: RwLock::new(HashMap::new()),
         }
     }
 
@@ -171,14 +172,17 @@ impl MessageHandlerRegistry {
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
         let mut message_handler_id_to_transport_storage =
-            MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.write();
-        let mut free_message_handler_ids =
-            message_handler_proc_macro::FREE_MESSAGE_HANDLER_IDS.write();
+            MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.write().unwrap();
+        let mut free_message_handler_ids = message_handler_proc_macro::FREE_MESSAGE_HANDLER_IDS
+            .write()
+            .unwrap();
 
         let mut message_handler_id_and_listener_config =
-            self.message_handler_id_and_listener_config.write();
-        let mut message_handler_id_to_client_id = self.message_handler_id_to_client_id.write();
-        let mut client_id_to_message_handler_id = self.client_id_to_message_handler_id.write();
+            self.message_handler_id_and_listener_config.write().unwrap();
+        let mut message_handler_id_to_client_id =
+            self.message_handler_id_to_client_id.write().unwrap();
+        let mut client_id_to_message_handler_id =
+            self.client_id_to_message_handler_id.write().unwrap();
 
         let (source_filter, sink_filter, comparable_listener) = listener_config;
 
@@ -308,14 +312,17 @@ impl MessageHandlerRegistry {
     ) -> Result<ClientUsage, UStatus> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
         let mut message_handler_id_to_transport_storage =
-            MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.write();
-        let mut free_message_handler_ids =
-            message_handler_proc_macro::FREE_MESSAGE_HANDLER_IDS.write();
+            MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.write().unwrap();
+        let mut free_message_handler_ids = message_handler_proc_macro::FREE_MESSAGE_HANDLER_IDS
+            .write()
+            .unwrap();
 
         let mut message_handler_id_and_listener_config =
-            self.message_handler_id_and_listener_config.write();
-        let mut message_handler_id_to_client_id = self.message_handler_id_to_client_id.write();
-        let mut client_id_to_message_handler_id = self.client_id_to_message_handler_id.write();
+            self.message_handler_id_and_listener_config.write().unwrap();
+        let mut message_handler_id_to_client_id =
+            self.message_handler_id_to_client_id.write().unwrap();
+        let mut client_id_to_message_handler_id =
+            self.client_id_to_message_handler_id.write().unwrap();
 
         let message_handler_id = Self::get_message_handler_id_for_listener_config(
             message_handler_id_and_listener_config.deref_mut(),
@@ -398,7 +405,7 @@ impl MessageHandlerRegistry {
     /// Get all [MessageHandlerId]s
     fn get_message_handler_ids(&self) -> Vec<usize> {
         let message_handler_id_and_listener_config =
-            self.message_handler_id_and_listener_config.read();
+            self.message_handler_id_and_listener_config.read().unwrap();
 
         message_handler_id_and_listener_config
             .left_values()
@@ -425,7 +432,8 @@ impl MessageHandlerRegistry {
         &self,
         message_handler_id: usize,
     ) -> Option<Arc<dyn UListener>> {
-        let listener_id_and_listener_config = self.message_handler_id_and_listener_config.read();
+        let listener_id_and_listener_config =
+            self.message_handler_id_and_listener_config.read().unwrap();
 
         let (_, _, comp_listener) =
             listener_id_and_listener_config.get_by_left(&message_handler_id)?;
@@ -438,7 +446,7 @@ impl MessageHandlerRegistry {
         message_handler_id: usize,
     ) -> Option<(UUri, Option<UUri>, ComparableListener)> {
         let message_handler_id_and_listener_config =
-            self.message_handler_id_and_listener_config.read();
+            self.message_handler_id_and_listener_config.read().unwrap();
 
         let (src, sink, comp_listener) =
             message_handler_id_and_listener_config.get_by_left(&message_handler_id)?;
@@ -641,56 +649,6 @@ impl MessageHandlerRegistry {
         }
 
         0
-    }
-
-    pub async fn print_rwlock_times(&self) {
-        #[cfg(feature = "timing")]
-        {
-            println!("FREE_LISTENER_IDS:");
-            println!("reads: {:?}", FREE_LISTENER_IDS.read_durations());
-            println!("writes: {:?}", FREE_LISTENER_IDS.write_durations());
-
-            println!("LISTENER_ID_TRANSPORT_SHIM:");
-            println!(
-                "reads: {:?}",
-                LISTENER_ID_TO_TRANSPORT_STORAGE.read_durations()
-            );
-            println!(
-                "writes: {:?}",
-                LISTENER_ID_TO_TRANSPORT_STORAGE.write_durations()
-            );
-
-            println!("listener_id_and_listener_config:");
-            println!(
-                "reads: {:?}",
-                self.message_handler_id_and_listener_config.read_durations()
-            );
-            println!(
-                "writes: {:?}",
-                self.message_handler_id_and_listener_config
-                    .write_durations()
-            );
-
-            println!("listener_id_to_client_id:");
-            println!(
-                "reads: {:?}",
-                self.message_handler_id_to_client_id.read_durations()
-            );
-            println!(
-                "writes: {:?}",
-                self.message_handler_id_to_client_id.write_durations()
-            );
-
-            println!("client_id_to_listener_id:");
-            println!(
-                "reads: {:?}",
-                self.client_id_to_message_handler_id.read_durations()
-            );
-            println!(
-                "writes: {:?}",
-                self.client_id_to_message_handler_id.write_durations()
-            );
-        }
     }
 }
 

@@ -1,24 +1,24 @@
-use crate::utils::TimedStdRwLock;
 use crate::{ApplicationName, ClientId};
 use bimap::BiMap;
 use log::trace;
+use std::sync::RwLock;
 use up_rust::{UCode, UStatus};
 
 type ClientAndAppName = BiMap<ClientId, ApplicationName>;
 pub struct ApplicationRegistry {
-    client_and_app_name: TimedStdRwLock<ClientAndAppName>,
+    client_and_app_name: RwLock<ClientAndAppName>,
 }
 
 impl ApplicationRegistry {
     pub fn new() -> Self {
         Self {
-            client_and_app_name: TimedStdRwLock::new(BiMap::new()),
+            client_and_app_name: RwLock::new(BiMap::new()),
         }
     }
 
     /// Get [ApplicationName] for a [ClientId]
     pub fn get_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
-        let client_and_app_name = self.client_and_app_name.read();
+        let client_and_app_name = self.client_and_app_name.read().unwrap();
 
         trace!("client_and_app_name: {client_and_app_name:?}");
 
@@ -33,7 +33,7 @@ impl ApplicationRegistry {
         client_id: ClientId,
         app_name: ApplicationName,
     ) -> Result<(), UStatus> {
-        let mut client_and_app_name = self.client_and_app_name.write();
+        let mut client_and_app_name = self.client_and_app_name.write().unwrap();
 
         trace!("before insert_client_and_app_name: {client_and_app_name:?}");
 
@@ -54,20 +54,10 @@ impl ApplicationRegistry {
 
     /// Remove [ApplicationName] based on [ClientId]
     pub fn remove_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
-        let mut client_and_app_name = self.client_and_app_name.write();
+        let mut client_and_app_name = self.client_and_app_name.write().unwrap();
 
         let (_client_id, app_name) = client_and_app_name.remove_by_left(&client_id)?;
 
         Some(app_name.clone())
-    }
-
-    /// Prints lock wait times
-    pub async fn print_rwlock_times(&self) {
-        #[cfg(feature = "timing")]
-        {
-            println!("client_and_app_name:");
-            println!("reads: {:?}", self.client_and_app_name.read_durations());
-            println!("writes: {:?}", self.client_and_app_name.write_durations());
-        }
     }
 }

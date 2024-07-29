@@ -11,39 +11,39 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::utils::TimedStdRwLock;
-use crate::{ClientId, ReqId, RequestId, SessionId};
+use crate::{ClientId, SessionId, SomeIpRequestId, UProtocolReqId};
 use log::trace;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::RwLock;
 use up_rust::{UCode, UStatus};
 
 // TODO: Should attach the received Request in full so that when we're shutting down
 //  the transport we can emit messages back to clients noting the error
-type UeRequestCorrelation = HashMap<RequestId, ReqId>;
-type MeRequestCorrelation = HashMap<ReqId, RequestId>;
+type UeRequestCorrelation = HashMap<SomeIpRequestId, UProtocolReqId>;
+type MeRequestCorrelation = HashMap<UProtocolReqId, SomeIpRequestId>;
 type ClientIdSessionIdTracking = HashMap<ClientId, SessionId>;
 
 /// Request, Response correlation and associated functions
 pub struct RpcCorrelation {
-    ue_request_correlation: TimedStdRwLock<UeRequestCorrelation>,
-    me_request_correlation: TimedStdRwLock<MeRequestCorrelation>,
-    client_id_session_id_tracking: TimedStdRwLock<ClientIdSessionIdTracking>,
+    ue_request_correlation: RwLock<UeRequestCorrelation>,
+    me_request_correlation: RwLock<MeRequestCorrelation>,
+    client_id_session_id_tracking: RwLock<ClientIdSessionIdTracking>,
 }
 
 impl RpcCorrelation {
     /// Create a new [RpcCorrelation]
     pub fn new() -> Self {
         Self {
-            ue_request_correlation: TimedStdRwLock::new(HashMap::new()),
-            me_request_correlation: TimedStdRwLock::new(HashMap::new()),
-            client_id_session_id_tracking: TimedStdRwLock::new(HashMap::new()),
+            ue_request_correlation: RwLock::new(HashMap::new()),
+            me_request_correlation: RwLock::new(HashMap::new()),
+            client_id_session_id_tracking: RwLock::new(HashMap::new()),
         }
     }
 
     /// Get a current [SessionId] based on a [ClientId]
     pub fn retrieve_session_id(&self, client_id: ClientId) -> SessionId {
-        let mut client_id_session_id_tracking = self.client_id_session_id_tracking.write();
+        let mut client_id_session_id_tracking = self.client_id_session_id_tracking.write().unwrap();
 
         let current_sesion_id = client_id_session_id_tracking.entry(client_id).or_insert(1);
         let returned_session_id = *current_sesion_id;
@@ -51,13 +51,13 @@ impl RpcCorrelation {
         returned_session_id
     }
 
-    /// Insert an mE [RequestId] and uE [ReqId] for later correlation
+    /// Insert an mE [SomeIpRequestId] and uE [UProtocolReqId] for later correlation
     pub fn insert_ue_request_correlation(
         &self,
-        app_request_id: RequestId,
-        req_id: &ReqId,
+        app_request_id: SomeIpRequestId,
+        req_id: &UProtocolReqId,
     ) -> Result<(), UStatus> {
-        let mut ue_request_correlation = self.ue_request_correlation.write();
+        let mut ue_request_correlation = self.ue_request_correlation.write().unwrap();
         match ue_request_correlation.entry(app_request_id) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
@@ -75,9 +75,12 @@ impl RpcCorrelation {
         }
     }
 
-    /// Remove a uE [ReqId] based on an mE [RequestId] for correlation
-    pub fn remove_ue_request_correlation(&self, request_id: RequestId) -> Result<ReqId, UStatus> {
-        let mut ue_request_correlation = self.ue_request_correlation.write();
+    /// Remove a uE [UProtocolReqId] based on an mE [SomeIpRequestId] for correlation
+    pub fn remove_ue_request_correlation(
+        &self,
+        request_id: SomeIpRequestId,
+    ) -> Result<UProtocolReqId, UStatus> {
+        let mut ue_request_correlation = self.ue_request_correlation.write().unwrap();
 
         let Some(req_id) = ue_request_correlation.remove(&request_id) else {
             return Err(UStatus::fail_with_code(
@@ -92,13 +95,13 @@ impl RpcCorrelation {
         Ok(req_id)
     }
 
-    /// Insert a uE [ReqId] and mE [RequestId] for later correlation
+    /// Insert a uE [UProtocolReqId] and mE [SomeIpRequestId] for later correlation
     pub fn insert_me_request_correlation(
         &self,
-        req_id: ReqId,
-        request_id: RequestId,
+        req_id: UProtocolReqId,
+        request_id: SomeIpRequestId,
     ) -> Result<(), UStatus> {
-        let mut me_request_correlation = self.me_request_correlation.write();
+        let mut me_request_correlation = self.me_request_correlation.write().unwrap();
         match me_request_correlation.entry(req_id.clone()) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
@@ -116,9 +119,12 @@ impl RpcCorrelation {
         }
     }
 
-    /// Remove an mE [RequestId] based on a uE [ReqId] for correlation
-    pub fn remove_me_request_correlation(&self, req_id: &ReqId) -> Result<RequestId, UStatus> {
-        let mut me_request_correlation = self.me_request_correlation.write();
+    /// Remove an mE [SomeIpRequestId] based on a uE [UProtocolReqId] for correlation
+    pub fn remove_me_request_correlation(
+        &self,
+        req_id: &UProtocolReqId,
+    ) -> Result<SomeIpRequestId, UStatus> {
+        let mut me_request_correlation = self.me_request_correlation.write().unwrap();
 
         let Some(request_id) = me_request_correlation.remove(req_id) else {
             return Err(UStatus::fail_with_code(
@@ -131,36 +137,6 @@ impl RpcCorrelation {
         };
 
         Ok(request_id)
-    }
-
-    /// Prints lock wait times
-    pub async fn print_rwlock_times(&self) {
-        #[cfg(feature = "timing")]
-        {
-            println!("ue_request_correlation:");
-            println!("reads: {:?}", self.ue_request_correlation.read_durations());
-            println!(
-                "writes: {:?}",
-                self.ue_request_correlation.write_durations()
-            );
-
-            println!("me_request_correlation:");
-            println!("reads: {:?}", self.me_request_correlation.read_durations());
-            println!(
-                "writes: {:?}",
-                self.me_request_correlation.write_durations()
-            );
-
-            println!("client_id_session_id_tracking:");
-            println!(
-                "reads: {:?}",
-                self.client_id_session_id_tracking.read_durations()
-            );
-            println!(
-                "writes: {:?}",
-                self.client_id_session_id_tracking.write_durations()
-            );
-        }
     }
 }
 

@@ -11,9 +11,9 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::utils::TimedStdRwLock;
 use crate::{EventId, InstanceId, MethodId, ServiceId};
 use std::collections::HashSet;
+use std::sync::RwLock;
 
 type OfferedServices = HashSet<(ServiceId, InstanceId, MethodId)>;
 type RequestedServices = HashSet<(ServiceId, InstanceId, MethodId)>;
@@ -22,20 +22,20 @@ type RequestedEvents = HashSet<(ServiceId, InstanceId, MethodId)>;
 
 /// vsomeip services, events: offered and requested
 pub struct VsomeipOfferedRequested {
-    offered_services: TimedStdRwLock<OfferedServices>,
-    requested_services: TimedStdRwLock<RequestedServices>,
-    offered_events: TimedStdRwLock<OfferedEvents>,
-    requested_events: TimedStdRwLock<RequestedEvents>,
+    offered_services: RwLock<OfferedServices>,
+    requested_services: RwLock<RequestedServices>,
+    offered_events: RwLock<OfferedEvents>,
+    requested_events: RwLock<RequestedEvents>,
 }
 
 impl VsomeipOfferedRequested {
     /// Create a [VsomeipOfferedRequested]
     pub fn new() -> Self {
         Self {
-            offered_services: TimedStdRwLock::new(HashSet::new()),
-            requested_services: TimedStdRwLock::new(HashSet::new()),
-            offered_events: TimedStdRwLock::new(HashSet::new()),
-            requested_events: TimedStdRwLock::new(HashSet::new()),
+            offered_services: RwLock::new(HashSet::new()),
+            requested_services: RwLock::new(HashSet::new()),
+            offered_events: RwLock::new(HashSet::new()),
+            requested_events: RwLock::new(HashSet::new()),
         }
     }
 
@@ -48,6 +48,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.offered_services
             .read()
+            .unwrap()
             .contains(&(service_id, instance_id, method_id))
     }
 
@@ -60,6 +61,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.offered_services
             .write()
+            .unwrap()
             .insert((service_id, instance_id, method_id))
     }
 
@@ -72,6 +74,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.requested_services
             .read()
+            .unwrap()
             .contains(&(service_id, instance_id, method_id))
     }
 
@@ -84,6 +87,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.requested_services
             .write()
+            .unwrap()
             .insert((service_id, instance_id, method_id))
     }
 
@@ -96,6 +100,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.offered_events
             .read()
+            .unwrap()
             .contains(&(service_id, instance_id, event_id))
     }
 
@@ -108,6 +113,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.offered_events
             .write()
+            .unwrap()
             .insert((service_id, instance_id, event_id))
     }
 
@@ -120,6 +126,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.requested_events
             .read()
+            .unwrap()
             .contains(&(service_id, instance_id, event_id))
     }
 
@@ -132,6 +139,7 @@ impl VsomeipOfferedRequested {
     ) -> bool {
         self.requested_events
             .write()
+            .unwrap()
             .insert((service_id, instance_id, event_id))
     }
 }
