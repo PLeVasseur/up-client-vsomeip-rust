@@ -54,11 +54,11 @@ impl RpcCorrelation {
     /// Insert an mE [SomeIpRequestId] and uE [UProtocolReqId] for later correlation
     pub fn insert_ue_request_correlation(
         &self,
-        app_request_id: SomeIpRequestId,
-        req_id: &UProtocolReqId,
+        someip_request_id: SomeIpRequestId,
+        uprotocol_req_id: &UProtocolReqId,
     ) -> Result<(), UStatus> {
         let mut ue_request_correlation = self.ue_request_correlation.write().unwrap();
-        match ue_request_correlation.entry(app_request_id) {
+        match ue_request_correlation.entry(someip_request_id) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
                 format!(
@@ -67,9 +67,9 @@ impl RpcCorrelation {
             )),
             Entry::Vacant(vac) => {
                 trace!("(app_request_id, req_id)  inserted for later correlation in UE_REQUEST_CORRELATION: ({}, {})",
-                    app_request_id, req_id.to_hyphenated_string(),
+                    someip_request_id, uprotocol_req_id.to_hyphenated_string(),
                 );
-                vac.insert(req_id.clone());
+                vac.insert(uprotocol_req_id.clone());
                 Ok(())
             }
         }
@@ -78,31 +78,31 @@ impl RpcCorrelation {
     /// Remove a uE [UProtocolReqId] based on an mE [SomeIpRequestId] for correlation
     pub fn remove_ue_request_correlation(
         &self,
-        request_id: SomeIpRequestId,
+        someip_request_id: SomeIpRequestId,
     ) -> Result<UProtocolReqId, UStatus> {
         let mut ue_request_correlation = self.ue_request_correlation.write().unwrap();
 
-        let Some(req_id) = ue_request_correlation.remove(&request_id) else {
+        let Some(uprotocol_req_id) = ue_request_correlation.remove(&someip_request_id) else {
             return Err(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
                 format!(
                     "Corresponding reqid not found for this SOME/IP RESPONSE: {}",
-                    request_id
+                    someip_request_id
                 ),
             ));
         };
 
-        Ok(req_id)
+        Ok(uprotocol_req_id)
     }
 
     /// Insert a uE [UProtocolReqId] and mE [SomeIpRequestId] for later correlation
     pub fn insert_me_request_correlation(
         &self,
-        req_id: UProtocolReqId,
-        request_id: SomeIpRequestId,
+        uprotocol_req_id: UProtocolReqId,
+        someip_request_id: SomeIpRequestId,
     ) -> Result<(), UStatus> {
         let mut me_request_correlation = self.me_request_correlation.write().unwrap();
-        match me_request_correlation.entry(req_id.clone()) {
+        match me_request_correlation.entry(uprotocol_req_id.clone()) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
                 UCode::ALREADY_EXISTS,
                 format!(
@@ -111,9 +111,9 @@ impl RpcCorrelation {
             )),
             Entry::Vacant(vac) => {
                 trace!("(req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
-                    req_id.to_hyphenated_string(), request_id
+                    uprotocol_req_id.to_hyphenated_string(), someip_request_id
                 );
-                vac.insert(request_id);
+                vac.insert(someip_request_id);
                 Ok(())
             }
         }
@@ -122,21 +122,21 @@ impl RpcCorrelation {
     /// Remove an mE [SomeIpRequestId] based on a uE [UProtocolReqId] for correlation
     pub fn remove_me_request_correlation(
         &self,
-        req_id: &UProtocolReqId,
+        uprotocol_req_id: &UProtocolReqId,
     ) -> Result<SomeIpRequestId, UStatus> {
         let mut me_request_correlation = self.me_request_correlation.write().unwrap();
 
-        let Some(request_id) = me_request_correlation.remove(req_id) else {
+        let Some(someip_request_id) = me_request_correlation.remove(uprotocol_req_id) else {
             return Err(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
                 format!(
                     "Corresponding SOME/IP Request ID not found for this Request UMessage's reqid: {}",
-                    req_id.to_hyphenated_string()
+                    uprotocol_req_id.to_hyphenated_string()
                 ),
             ));
         };
 
-        Ok(request_id)
+        Ok(someip_request_id)
     }
 }
 

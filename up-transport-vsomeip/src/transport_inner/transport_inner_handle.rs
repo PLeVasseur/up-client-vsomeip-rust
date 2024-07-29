@@ -183,10 +183,6 @@ impl UPTransportVsomeipInnerHandle {
         })
     }
 
-    fn get_storage(&self) -> Arc<dyn UPTransportVsomeipStorage> {
-        self.storage.clone()
-    }
-
     pub(crate) async fn register_listener(
         &self,
         source_filter: &UUri,
@@ -196,7 +192,7 @@ impl UPTransportVsomeipInnerHandle {
         let registration_type = determine_registration_type(
             source_filter,
             &sink_filter.cloned(),
-            self.get_storage().get_ue_id(),
+            self.storage.get_ue_id(),
         )?;
 
         trace!("registration_type: {registration_type:?}");
@@ -207,7 +203,7 @@ impl UPTransportVsomeipInnerHandle {
 
         let app_name_res = {
             if let Some(app_name) = self
-                .get_storage()
+                .storage
                 .get_application_registry()
                 .get_app_name_for_client_id(registration_type.client_id())
             {
@@ -226,11 +222,11 @@ impl UPTransportVsomeipInnerHandle {
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
         let Ok(msg_handler) = self
-            .get_storage()
+            .storage
             .get_message_handler_registry()
             .get_message_handler(
                 registration_type.client_id(),
-                self.get_storage(),
+                self.storage.clone(),
                 listener_config,
             )
         else {
@@ -249,7 +245,7 @@ impl UPTransportVsomeipInnerHandle {
                 registration_type,
                 msg_handler,
                 app_name,
-                self.get_storage(),
+                self.storage.clone(),
                 tx,
             ),
         )
@@ -273,7 +269,7 @@ impl UPTransportVsomeipInnerHandle {
         let registration_type_res = determine_registration_type(
             source_filter,
             &sink_filter.cloned(),
-            self.get_storage().get_ue_id(),
+            self.storage.get_ue_id(),
         );
         let Ok(registration_type) = registration_type_res else {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
@@ -284,7 +280,7 @@ impl UPTransportVsomeipInnerHandle {
         }
 
         let app_name_res = self
-            .get_storage()
+            .storage
             .get_application_registry()
             .get_app_name_for_client_id(registration_type.client_id());
 
@@ -328,7 +324,7 @@ impl UPTransportVsomeipInnerHandle {
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
         let client_usage_res = self
-            .get_storage()
+            .storage
             .get_message_handler_registry()
             .release_message_handler(listener_config);
 
@@ -378,7 +374,7 @@ impl UPTransportVsomeipInnerHandle {
         trace!("inside send(), message_type: {message_type:?}");
         let app_name_res = {
             if let Some(app_name) = self
-                .get_storage()
+                .storage
                 .get_application_registry()
                 .get_app_name_for_client_id(message_type.client_id())
             {
@@ -404,7 +400,7 @@ impl UPTransportVsomeipInnerHandle {
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::Send(message, message_type, app_name, self.get_storage(), tx),
+            TransportCommand::Send(message, message_type, app_name, self.storage.clone(), tx),
         )
         .await;
         if let Err(err) = send_to_engine_res {
@@ -451,11 +447,11 @@ impl UPTransportVsomeipInnerHandle {
         let listener_config = (source_filter.clone(), sink_filter.clone(), comp_listener);
         let message_type = RegistrationType::Response(message_type.client_id());
         let msg_handler_res = self
-            .get_storage()
+            .storage
             .get_message_handler_registry()
             .get_message_handler(
                 message_type.client_id(),
-                self.get_storage(),
+                self.storage.clone(),
                 listener_config,
             );
 
@@ -480,7 +476,7 @@ impl UPTransportVsomeipInnerHandle {
         };
 
         let Some(app_name) = self
-            .get_storage()
+            .storage
             .get_application_registry()
             .get_app_name_for_client_id(message_type.client_id())
         else {
@@ -496,7 +492,7 @@ impl UPTransportVsomeipInnerHandle {
                 message_type,
                 msg_handler,
                 app_name,
-                self.get_storage(),
+                self.storage.clone(),
                 tx,
             ),
         )
@@ -553,7 +549,7 @@ impl UPTransportVsomeipInnerHandle {
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = any_uuri();
             let sink_filter = any_uuri_fixed_authority_id(
-                &self.get_storage().get_local_authority(),
+                &self.storage.get_local_authority(),
                 app_config.id,
             );
             let listener_config = (
@@ -562,11 +558,11 @@ impl UPTransportVsomeipInnerHandle {
                 comp_listener,
             );
             let Ok(msg_handler) = self
-                .get_storage()
+                .storage
                 .get_message_handler_registry()
                 .get_message_handler(
                     registration_type.client_id(),
-                    self.get_storage(),
+                    self.storage.clone(),
                     listener_config,
                 )
             else {
@@ -585,7 +581,7 @@ impl UPTransportVsomeipInnerHandle {
                     registration_type.clone(),
                     msg_handler,
                     app_config.name.clone(),
-                    self.get_storage(),
+                    self.storage.clone(),
                     tx,
                 ),
             )
@@ -633,7 +629,7 @@ impl UPTransportVsomeipInnerHandle {
         for app_config in &application_configs {
             let source_filter = any_uuri();
             let sink_filter = any_uuri_fixed_authority_id(
-                &self.get_storage().get_local_authority(),
+                &self.storage.get_local_authority(),
                 app_config.id,
             );
 
@@ -641,7 +637,7 @@ impl UPTransportVsomeipInnerHandle {
                 let reg_type_res = determine_registration_type(
                     &source_filter.clone(),
                     &Some(sink_filter.clone()),
-                    self.get_storage().get_ue_id(),
+                    self.storage.get_ue_id(),
                 );
                 match reg_type_res {
                     Ok(registration_type) => registration_type,
@@ -655,7 +651,7 @@ impl UPTransportVsomeipInnerHandle {
 
             let app_name = {
                 match self
-                    .get_storage()
+                    .storage
                     .get_application_registry()
                     .get_app_name_for_client_id(registration_type.client_id())
                 {
@@ -697,7 +693,7 @@ impl UPTransportVsomeipInnerHandle {
 
             let listener_config = (source_filter, Some(sink_filter), ptp_comp_listener.clone());
             let client_usage_res = self
-                .get_storage()
+                .storage
                 .get_message_handler_registry()
                 .release_message_handler(listener_config);
 
@@ -739,7 +735,7 @@ impl UPTransportVsomeipInnerHandle {
         );
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::StartVsomeipApp(client_id, app_name.clone(), self.get_storage(), tx),
+            TransportCommand::StartVsomeipApp(client_id, app_name.clone(), self.storage.clone(), tx),
         )
         .await;
         if let Err(err) = send_to_engine_res {
@@ -753,12 +749,12 @@ impl UPTransportVsomeipInnerHandle {
                 format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
             ))
         } else {
-            self.get_storage()
+            self.storage
                 .get_application_registry()
                 .insert_client_and_app_name(client_id, app_name.clone())?;
 
             let check_app_res = self
-                .get_storage()
+                .storage
                 .get_application_registry()
                 .get_app_name_for_client_id(client_id);
             match check_app_res {
@@ -776,7 +772,7 @@ impl UPTransportVsomeipInnerHandle {
 
     async fn shutdown_vsomeip_app(&self, client_id: ClientId) -> Result<(), UStatus> {
         let Some(app_name) = self
-            .get_storage()
+            .storage
             .get_application_registry()
             .remove_app_name_for_client_id(client_id)
         else {
@@ -802,10 +798,10 @@ impl UPTransportVsomeipInnerHandle {
 
 impl Drop for UPTransportVsomeipInnerHandle {
     fn drop(&mut self) {
-        let ue_id = self.get_storage().get_ue_id();
+        let ue_id = self.storage.get_ue_id();
         trace!("Running Drop for UPTransportVsomeipInnerHandle, ue_id: {ue_id}");
 
-        let storage = self.get_storage().clone();
+        let storage = self.storage.clone();
         let all_listener_configs = storage
             .get_message_handler_registry()
             .get_all_listener_configs();
