@@ -11,7 +11,7 @@ use up_transport_vsomeip::UPTransportVsomeip;
 use up_transport_vsomeip::UeId;
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
-const HELLO_INSTANCE_ID: u16 = 0x0001;
+const HELLO_INSTANCE_ID: u32 = 0x0001;
 const HELLO_METHOD_ID: u16 = 0x7FFF;
 
 /// IMPORTANT: should match vsomeip::DEFAULT_MAJOR in (interface/vsomeip/constants.hpp):
@@ -20,8 +20,7 @@ const HELLO_SERVICE_MAJOR: u8 = 1;
 const _HELLO_SERVICE_MINOR: u32 = 0;
 
 const HELLO_SERVICE_AUTHORITY: &str = "linux";
-const HELLO_SERVICE_UE_ID: u32 =
-    ((HELLO_INSTANCE_ID as u32) << 16 | HELLO_SERVICE_ID as u32) as u32;
+const HELLO_SERVICE_UE_ID: u32 = (HELLO_INSTANCE_ID << 16u32) | HELLO_SERVICE_ID as u32;
 const _HELLO_SERVICE_UE_VERSION_MAJOR: u8 = HELLO_SERVICE_MAJOR;
 const HELLO_SERVICE_RESOURCE_ID: u16 = HELLO_METHOD_ID;
 

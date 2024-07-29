@@ -27,7 +27,6 @@ use up_rust::{
 use up_transport_vsomeip::{UPTransportVsomeip, UeId};
 
 const TEST_DURATION: u64 = 1000;
-const TEST_SLACK: usize = 0;
 
 const STREAMER_UE_ID: u16 = 0x9876;
 
@@ -545,8 +544,11 @@ async fn point_to_point() {
         response_listener_check.received_response()
     );
 
-    assert!(iterations - request_listener_check.received_request() <= TEST_SLACK);
-    assert!(iterations - point_to_point_listener_check.received_request() <= TEST_SLACK);
-    assert!(iterations - point_to_point_listener_check.received_response() <= TEST_SLACK);
-    assert!(iterations - response_listener_check.received_response() <= TEST_SLACK);
+    assert_eq!(iterations, request_listener_check.received_request());
+    assert_eq!(iterations, point_to_point_listener_check.received_request());
+    assert_eq!(
+        iterations,
+        point_to_point_listener_check.received_response()
+    );
+    assert_eq!(iterations, response_listener_check.received_response());
 }

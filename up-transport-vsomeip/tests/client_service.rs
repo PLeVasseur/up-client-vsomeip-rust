@@ -24,7 +24,6 @@ use up_rust::{
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 1000;
-const TEST_SLACK: usize = 0;
 
 pub struct ResponseListener {
     received_response: AtomicUsize,
@@ -295,6 +294,6 @@ async fn client_service() {
         response_listener_check.received_response()
     );
 
-    assert!(iterations - request_listener_check.received_request() <= TEST_SLACK);
-    assert!(iterations - response_listener_check.received_response() <= TEST_SLACK);
+    assert_eq!(iterations, request_listener_check.received_request());
+    assert_eq!(iterations, response_listener_check.received_response());
 }
