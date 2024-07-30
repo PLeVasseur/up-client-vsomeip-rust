@@ -371,7 +371,7 @@ impl UPTransportVsomeipInnerHandle {
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::Send(message, message_type, app_name, self.storage.clone(), tx),
+            TransportCommand::Send(message, message_type, app_name, self.storage.clone(), self.storage.clone(), tx),
         )
         .await;
         if let Err(err) = send_to_engine_res {

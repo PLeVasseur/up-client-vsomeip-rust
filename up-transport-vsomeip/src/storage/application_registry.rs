@@ -5,11 +5,11 @@ use std::sync::RwLock;
 use up_rust::{UCode, UStatus};
 
 type ClientAndAppName = BiMap<ClientId, ApplicationName>;
-pub struct ApplicationRegistry {
+pub struct InMemoryApplicationRegistry {
     client_and_app_name: RwLock<ClientAndAppName>,
 }
 
-impl ApplicationRegistry {
+impl InMemoryApplicationRegistry {
     pub fn new() -> Self {
         Self {
             client_and_app_name: RwLock::new(BiMap::new()),

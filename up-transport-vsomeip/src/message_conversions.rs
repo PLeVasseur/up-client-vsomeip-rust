@@ -23,6 +23,8 @@ use up_rust::{UCode, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{make_message_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
+use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
@@ -35,7 +37,7 @@ impl UMessageToVsomeipMessage {
     //  what will be done
     pub async fn umsg_publish_to_vsomeip_notification(
         umsg: &UMessage,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let Some(source) = umsg.attributes.source.as_ref() else {
@@ -59,8 +61,7 @@ impl UMessageToVsomeipMessage {
 
         // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
         //  the UPClientVsomeip?
-        if !transport_storage
-            .get_vsomeip_offered_requested()
+        if !vsomeip_offered_requested_registry
             .is_event_offered(service_id, instance_id, event_id)
         {
             application_wrapper.get_pinned().offer_service(
@@ -86,8 +87,7 @@ impl UMessageToVsomeipMessage {
             // service and event are "understood" by other applications
             // Leaving sleep for now till thinking of some better idea
             tokio::time::sleep(Duration::from_nanos(5)).await;
-            transport_storage
-                .get_vsomeip_offered_requested()
+            vsomeip_offered_requested_registry
                 .insert_event_offered(service_id, instance_id, event_id);
         }
 
@@ -98,10 +98,12 @@ impl UMessageToVsomeipMessage {
 
     pub async fn umsg_request_to_vsomeip_message(
         umsg: &UMessage,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
-    ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+    ) -> Result<UniquePtr<MessageWrapper>, UStatus>
+    where
+    {
         let Some(source) = umsg.attributes.source.as_ref() else {
             return Err(UStatus::fail_with_code(
                 UCode::INVALID_ARGUMENT,
@@ -147,8 +149,7 @@ impl UMessageToVsomeipMessage {
             )
         })?;
         let app_client_id = application_wrapper.get_pinned().get_client();
-        let app_session_id = transport_storage
-            .get_rpc_correlation()
+        let app_session_id = rpc_correlation_registry
             .retrieve_session_id(app_client_id);
         let request_id = create_request_id(app_client_id, app_session_id);
         trace!("{} - client_id: {} session_id: {} request_id: {} service_id: {} app_client_id: {} app_session_id: {}",
@@ -161,8 +162,7 @@ impl UMessageToVsomeipMessage {
                 app_request_id, req_id.to_hyphenated_string(),
             );
 
-        transport_storage
-            .get_rpc_correlation()
+        rpc_correlation_registry
             .insert_ue_request_correlation(app_request_id, req_id)?;
 
         vsomeip_msg
@@ -174,7 +174,7 @@ impl UMessageToVsomeipMessage {
 
     pub async fn umsg_response_to_vsomeip_message(
         umsg: &UMessage,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
         let Some(source) = umsg.attributes.source.as_ref() else {
@@ -218,8 +218,7 @@ impl UMessageToVsomeipMessage {
             req_id.to_hyphenated_string()
         );
 
-        let request_id = transport_storage
-            .get_rpc_correlation()
+        let request_id = rpc_correlation_registry
             .remove_me_request_correlation(req_id)?;
 
         trace!(
@@ -409,7 +408,6 @@ impl VsomeipMessageToUMessage {
             );
 
         transport_storage
-            .get_rpc_correlation()
             .insert_me_request_correlation(req_id.clone(), request_id)?;
 
         Ok(umsg)
@@ -453,7 +451,6 @@ impl VsomeipMessageToUMessage {
             request_id
         );
         let req_id = transport_storage
-            .get_rpc_correlation()
             .remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
@@ -511,7 +508,6 @@ impl VsomeipMessageToUMessage {
             request_id
         );
         let req_id = transport_storage
-            .get_rpc_correlation()
             .remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)

@@ -27,32 +27,28 @@ generate_available_state_handler_extern_c_fns!(1000);
 
 #[async_trait]
 pub trait ApplicationStateAvailabilityHandlerRegistry: Send + Sync {
-    fn get_state_handler(
+    fn get_application_state_availability_handler(
         &self,
         state_handler_id: usize,
     ) -> (AvailableStateHandlerFnPtr, Receiver<vsomeip::state_type_e>);
-    fn free_state_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus>;
-    fn find_available_state_handler_id(&self) -> Result<usize, UStatus>;
+    fn free_application_state_availability_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus>;
+    fn find_application_state_availability_handler_id(&self) -> Result<usize, UStatus>;
 }
 
-pub struct ApplicationStateAvailabilityHandlerExternFnRegistry;
+pub struct InMemoryApplicationStateAvailabilityHandlerRegistry;
 
-impl ApplicationStateAvailabilityHandlerExternFnRegistry {
-    pub fn new_trait_obj() -> Arc<dyn ApplicationStateAvailabilityHandlerRegistry> {
+impl InMemoryApplicationStateAvailabilityHandlerRegistry {
+    pub fn new_trait_obj() -> Arc<InMemoryApplicationStateAvailabilityHandlerRegistry> {
         static INIT: Once = Once::new();
 
         INIT.call_once(|| {
             available_state_handler_proc_macro::initialize_sender_receiver();
         });
 
-        Arc::new(ApplicationStateAvailabilityHandlerExternFnRegistry)
+        Arc::new(InMemoryApplicationStateAvailabilityHandlerRegistry)
     }
-}
 
-impl ApplicationStateAvailabilityHandlerRegistry
-    for ApplicationStateAvailabilityHandlerExternFnRegistry
-{
-    fn get_state_handler(
+    pub(crate) fn get_state_handler(
         &self,
         state_handler_id: usize,
     ) -> (AvailableStateHandlerFnPtr, Receiver<vsomeip::state_type_e>) {
@@ -61,7 +57,7 @@ impl ApplicationStateAvailabilityHandlerRegistry
         (AvailableStateHandlerFnPtr(extern_fn), receiver)
     }
 
-    fn free_state_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus> {
+    pub(crate) fn free_state_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus> {
         let mut free_state_handler_ids =
             available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS
                 .write()
@@ -73,7 +69,7 @@ impl ApplicationStateAvailabilityHandlerRegistry
         Ok(())
     }
 
-    fn find_available_state_handler_id(&self) -> Result<usize, UStatus> {
+    pub(crate) fn find_available_state_handler_id(&self) -> Result<usize, UStatus> {
         let mut free_state_handler_ids =
             available_state_handler_proc_macro::FREE_AVAILABLE_STATE_HANDLER_EXTERN_FN_IDS
                 .write()

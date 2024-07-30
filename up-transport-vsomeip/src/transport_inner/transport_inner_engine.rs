@@ -13,11 +13,11 @@
 
 use crate::determine_message_type::RegistrationType;
 use crate::message_conversions::UMessageToVsomeipMessage;
-use crate::storage::UPTransportVsomeipStorage;
+use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_START_APP,
-    UP_CLIENT_VSOMEIP_TAG,
+    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_TAG,
 };
 use crate::utils::{split_u32_to_u16, split_u32_to_u8};
 use crate::{ApplicationName, ClientId, UeId};
@@ -36,6 +36,8 @@ use vsomeip_sys::glue::{
     MessageHandlerFnPtr, RuntimeWrapper,
 };
 use vsomeip_sys::vsomeip;
+use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 
 pub enum TransportCommand {
     // Primary purpose of a UTransport
@@ -45,7 +47,7 @@ pub enum TransportCommand {
         RegistrationType,
         MessageHandlerFnPtr,
         ApplicationName,
-        Arc<UPTransportVsomeipStorage>,
+        Arc<dyn VsomeipOfferedRequestedRegistry>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     UnregisterListener(
@@ -53,20 +55,22 @@ pub enum TransportCommand {
         Option<UUri>,
         RegistrationType,
         ApplicationName,
+        // TODO: Include Arc<dyn VsomeipOfferedRequestedRegistry> here to unregister?
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
         UMessage,
         RegistrationType,
         ApplicationName,
-        Arc<UPTransportVsomeipStorage>,
+        Arc<dyn RpcCorrelationRegistry>,
+        Arc<dyn VsomeipOfferedRequestedRegistry>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
     StartVsomeipApp(
         ClientId,
         ApplicationName,
-        Arc<UPTransportVsomeipStorage>,
+        Arc<dyn ApplicationStateAvailabilityHandlerRegistry>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     StopVsomeipApp(
@@ -122,7 +126,9 @@ impl UPTransportVsomeipInnerEngine {
     fn create_app(
         app_name: &ApplicationName,
         config_path: Option<&Path>,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        application_state_availability_handler_registry: Arc<
+            dyn ApplicationStateAvailabilityHandlerRegistry,
+        >,
     ) -> Result<(), UStatus> {
         let app_name = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
@@ -139,12 +145,10 @@ impl UPTransportVsomeipInnerEngine {
             ));
         }
 
-        let state_handler_id = transport_storage
-            .get_application_state_handler_registry()
-            .find_available_state_handler_id()?;
-        let (available_state_handler_fn_ptr, receiver) = transport_storage
-            .get_application_state_handler_registry()
-            .get_state_handler(state_handler_id);
+        let state_handler_id =
+            application_state_availability_handler_registry.find_application_state_availability_handler_id()?;
+        let (available_state_handler_fn_ptr, receiver) =
+            application_state_availability_handler_registry.get_application_state_availability_handler(state_handler_id);
 
         let app_name_init = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
@@ -219,9 +223,8 @@ impl UPTransportVsomeipInnerEngine {
                 info!("app_state: {app_state:?}");
 
                 application_wrapper.get_pinned().unregister_state_handler();
-                transport_storage
-                    .get_application_state_handler_registry()
-                    .free_state_handler_id(state_handler_id)?;
+                application_state_availability_handler_registry
+                    .free_application_state_availability_handler_id(state_handler_id)?;
             }
         }
 
@@ -246,7 +249,7 @@ impl UPTransportVsomeipInnerEngine {
                     registration_type,
                     msg_handler,
                     app_name,
-                    transport_storage,
+                    vsomeip_offered_requested_registry,
                     return_channel,
                 ) => {
                     trace!(
@@ -276,7 +279,7 @@ impl UPTransportVsomeipInnerEngine {
                         sink,
                         registration_type,
                         msg_handler,
-                        transport_storage,
+                        vsomeip_offered_requested_registry,
                         &mut application_wrapper,
                         &runtime_wrapper,
                     )
@@ -322,8 +325,10 @@ impl UPTransportVsomeipInnerEngine {
                     umsg,
                     message_type,
                     app_name,
-                    transport_storage,
+                    rpc_correlation_registry,
+                    vsomeip_offered_requested_registry,
                     return_channel,
+
                 ) => {
                     trace!(
                         "{}:{} - Attempting to send UMessage: {:?}",
@@ -359,7 +364,8 @@ impl UPTransportVsomeipInnerEngine {
 
                     let res = Self::send_internal(
                         umsg,
-                        transport_storage,
+                        rpc_correlation_registry,
+                        vsomeip_offered_requested_registry,
                         &mut application_wrapper,
                         &runtime_wrapper,
                     )
@@ -369,7 +375,7 @@ impl UPTransportVsomeipInnerEngine {
                 TransportCommand::StartVsomeipApp(
                     client_id,
                     app_name,
-                    transport_storage,
+                    application_state_availability_handler_registry,
                     return_channel,
                 ) => {
                     trace!(
@@ -382,7 +388,7 @@ impl UPTransportVsomeipInnerEngine {
                     let new_app_res = Self::start_vsomeip_app_internal(
                         client_id,
                         app_name.clone(),
-                        transport_storage,
+                        application_state_availability_handler_registry,
                         config_path.clone(),
                     )
                     .await;
@@ -411,7 +417,7 @@ impl UPTransportVsomeipInnerEngine {
         sink_filter: Option<UUri>,
         registration_type: RegistrationType,
         msg_handler: MessageHandlerFnPtr,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         _runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -444,8 +450,7 @@ impl UPTransportVsomeipInnerEngine {
                     event_id
                 );
 
-                if !transport_storage
-                    .get_vsomeip_offered_requested()
+                if !vsomeip_offered_requested_registry
                     .is_event_requested(service_id, instance_id, event_id)
                 {
                     application_wrapper.get_pinned().request_service(
@@ -467,8 +472,7 @@ impl UPTransportVsomeipInnerEngine {
                         vsomeip::ANY_MAJOR,
                         event_id,
                     );
-                    transport_storage
-                        .get_vsomeip_offered_requested()
+                    vsomeip_offered_requested_registry
                         .insert_event_requested(service_id, instance_id, event_id);
                 }
 
@@ -514,8 +518,7 @@ impl UPTransportVsomeipInnerEngine {
                     method_id
                 );
 
-                if !transport_storage
-                    .get_vsomeip_offered_requested()
+                if !vsomeip_offered_requested_registry
                     .is_service_offered(service_id, instance_id, method_id)
                 {
                     application_wrapper.get_pinned().offer_service(
@@ -525,8 +528,7 @@ impl UPTransportVsomeipInnerEngine {
                         // vsomeip::ANY_MAJOR,
                         vsomeip::DEFAULT_MINOR,
                     );
-                    transport_storage
-                        .get_vsomeip_offered_requested()
+                    vsomeip_offered_requested_registry
                         .insert_service_offered(service_id, instance_id, method_id);
                 }
 
@@ -556,8 +558,7 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                if !transport_storage
-                    .get_vsomeip_offered_requested()
+                if !vsomeip_offered_requested_registry
                     .is_service_requested(service_id, instance_id, method_id)
                 {
                     application_wrapper.get_pinned().request_service(
@@ -567,8 +568,7 @@ impl UPTransportVsomeipInnerEngine {
                         vsomeip::ANY_MINOR,
                     );
 
-                    transport_storage
-                        .get_vsomeip_offered_requested()
+                    vsomeip_offered_requested_registry
                         .insert_service_requested(service_id, instance_id, method_id);
                 }
 
@@ -613,7 +613,7 @@ impl UPTransportVsomeipInnerEngine {
         trace!(
             "{}:{} - Attempting to unregister: source_filter: {:?} & sink_filter: {:?}",
             UP_CLIENT_VSOMEIP_TAG,
-            UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+            UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
             source_filter,
             sink_filter
         );
@@ -623,7 +623,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistering for Publish style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
                 let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
@@ -638,7 +638,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
                 Ok(())
             }
@@ -646,7 +646,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistering for Request style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
@@ -668,7 +668,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
 
                 Ok(())
@@ -677,7 +677,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistering for Response style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
                 let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
@@ -699,7 +699,7 @@ impl UPTransportVsomeipInnerEngine {
                 trace!(
                     "{}:{} - Unregistered vsomeip message handler.",
                     UP_CLIENT_VSOMEIP_TAG,
-                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
 
                 Ok(())
@@ -713,7 +713,8 @@ impl UPTransportVsomeipInnerEngine {
 
     async fn send_internal(
         umsg: UMessage,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
+        vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -752,7 +753,7 @@ impl UPTransportVsomeipInnerEngine {
                 let (service_id, instance_id, event_id) =
                     UMessageToVsomeipMessage::umsg_publish_to_vsomeip_notification(
                         &umsg,
-                        transport_storage,
+                        vsomeip_offered_requested_registry,
                         application_wrapper,
                     )
                     .await?;
@@ -768,7 +769,7 @@ impl UPTransportVsomeipInnerEngine {
             UMessageType::UMESSAGE_TYPE_REQUEST => {
                 let vsomeip_msg = UMessageToVsomeipMessage::umsg_request_to_vsomeip_message(
                     &umsg,
-                    transport_storage,
+                    rpc_correlation_registry,
                     application_wrapper,
                     runtime_wrapper,
                 )
@@ -781,7 +782,7 @@ impl UPTransportVsomeipInnerEngine {
             UMessageType::UMESSAGE_TYPE_RESPONSE => {
                 let vsomeip_msg = UMessageToVsomeipMessage::umsg_response_to_vsomeip_message(
                     &umsg,
-                    transport_storage,
+                    rpc_correlation_registry,
                     runtime_wrapper,
                 )
                 .await?;
@@ -806,7 +807,9 @@ impl UPTransportVsomeipInnerEngine {
     async fn start_vsomeip_app_internal(
         client_id: ClientId,
         app_name: ApplicationName,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        application_state_availability_handler_registry: Arc<
+            dyn ApplicationStateAvailabilityHandlerRegistry,
+        >,
         config_path: Option<PathBuf>,
     ) -> Result<(), UStatus> {
         trace!(
@@ -817,7 +820,11 @@ impl UPTransportVsomeipInnerEngine {
             app_name
         );
 
-        Self::create_app(&app_name, config_path.as_deref(), transport_storage)?;
+        Self::create_app(
+            &app_name,
+            config_path.as_deref(),
+            application_state_availability_handler_registry,
+        )?;
         trace!(
             "{}:{} - After starting app for client_id: {} app_name: {}",
             UP_CLIENT_VSOMEIP_TAG,

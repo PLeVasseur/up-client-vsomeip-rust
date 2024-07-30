@@ -25,14 +25,46 @@ type MeRequestCorrelation = HashMap<UProtocolReqId, SomeIpRequestId>;
 type ClientIdSessionIdTracking = HashMap<ClientId, SessionId>;
 
 /// Request, Response correlation and associated functions
-pub struct RpcCorrelation {
+pub trait RpcCorrelationRegistry: Send + Sync {
+    /// Get a current [SessionId] based on a [ClientId]
+    fn retrieve_session_id(&self, client_id: ClientId) -> SessionId;
+
+    /// Insert an mE [SomeIpRequestId] and uE [UProtocolReqId] for later correlation
+    fn insert_ue_request_correlation(
+        &self,
+        someip_request_id: SomeIpRequestId,
+        uprotocol_req_id: &UProtocolReqId,
+    ) -> Result<(), UStatus>;
+
+    /// Remove a uE [UProtocolReqId] based on an mE [SomeIpRequestId] for correlation
+    fn remove_ue_request_correlation(
+        &self,
+        someip_request_id: SomeIpRequestId,
+    ) -> Result<UProtocolReqId, UStatus>;
+
+    /// Insert a uE [UProtocolReqId] and mE [SomeIpRequestId] for later correlation
+    fn insert_me_request_correlation(
+        &self,
+        uprotocol_req_id: UProtocolReqId,
+        someip_request_id: SomeIpRequestId,
+    ) -> Result<(), UStatus>;
+
+    /// Remove an mE [SomeIpRequestId] based on a uE [UProtocolReqId] for correlation
+    fn remove_me_request_correlation(
+        &self,
+        uprotocol_req_id: &UProtocolReqId,
+    ) -> Result<SomeIpRequestId, UStatus>;
+}
+
+/// Request, Response correlation and associated functions
+pub struct InMemoryRpcCorrelationRegistry {
     ue_request_correlation: RwLock<UeRequestCorrelation>,
     me_request_correlation: RwLock<MeRequestCorrelation>,
     client_id_session_id_tracking: RwLock<ClientIdSessionIdTracking>,
 }
 
-impl RpcCorrelation {
-    /// Create a new [RpcCorrelation]
+impl InMemoryRpcCorrelationRegistry {
+    /// Create a new [InMemoryRpcCorrelationRegistry]
     pub fn new() -> Self {
         Self {
             ue_request_correlation: RwLock::new(HashMap::new()),
