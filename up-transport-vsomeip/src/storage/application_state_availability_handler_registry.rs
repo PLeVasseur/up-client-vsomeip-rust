@@ -31,7 +31,10 @@ pub trait ApplicationStateAvailabilityHandlerRegistry: Send + Sync {
         &self,
         state_handler_id: usize,
     ) -> (AvailableStateHandlerFnPtr, Receiver<vsomeip::state_type_e>);
-    fn free_application_state_availability_handler_id(&self, state_handler_id: usize) -> Result<(), UStatus>;
+    fn free_application_state_availability_handler_id(
+        &self,
+        state_handler_id: usize,
+    ) -> Result<(), UStatus>;
     fn find_application_state_availability_handler_id(&self) -> Result<usize, UStatus>;
 }
 

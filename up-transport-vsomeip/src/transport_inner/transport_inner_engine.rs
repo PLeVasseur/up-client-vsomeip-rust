@@ -14,6 +14,8 @@
 use crate::determine_message_type::RegistrationType;
 use crate::message_conversions::UMessageToVsomeipMessage;
 use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
+use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::transport_inner::{
     UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP, UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_START_APP,
@@ -36,8 +38,6 @@ use vsomeip_sys::glue::{
     MessageHandlerFnPtr, RuntimeWrapper,
 };
 use vsomeip_sys::vsomeip;
-use crate::storage::rpc_correlation::RpcCorrelationRegistry;
-use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 
 pub enum TransportCommand {
     // Primary purpose of a UTransport
@@ -145,10 +145,11 @@ impl UPTransportVsomeipInnerEngine {
             ));
         }
 
-        let state_handler_id =
-            application_state_availability_handler_registry.find_application_state_availability_handler_id()?;
+        let state_handler_id = application_state_availability_handler_registry
+            .find_application_state_availability_handler_id()?;
         let (available_state_handler_fn_ptr, receiver) =
-            application_state_availability_handler_registry.get_application_state_availability_handler(state_handler_id);
+            application_state_availability_handler_registry
+                .get_application_state_availability_handler(state_handler_id);
 
         let app_name_init = app_name.to_string();
         let config_path = config_path.map(|p| p.to_path_buf());
@@ -328,7 +329,6 @@ impl UPTransportVsomeipInnerEngine {
                     rpc_correlation_registry,
                     vsomeip_offered_requested_registry,
                     return_channel,
-
                 ) => {
                     trace!(
                         "{}:{} - Attempting to send UMessage: {:?}",
@@ -450,9 +450,11 @@ impl UPTransportVsomeipInnerEngine {
                     event_id
                 );
 
-                if !vsomeip_offered_requested_registry
-                    .is_event_requested(service_id, instance_id, event_id)
-                {
+                if !vsomeip_offered_requested_registry.is_event_requested(
+                    service_id,
+                    instance_id,
+                    event_id,
+                ) {
                     application_wrapper.get_pinned().request_service(
                         service_id,
                         instance_id,
@@ -472,8 +474,11 @@ impl UPTransportVsomeipInnerEngine {
                         vsomeip::ANY_MAJOR,
                         event_id,
                     );
-                    vsomeip_offered_requested_registry
-                        .insert_event_requested(service_id, instance_id, event_id);
+                    vsomeip_offered_requested_registry.insert_event_requested(
+                        service_id,
+                        instance_id,
+                        event_id,
+                    );
                 }
 
                 (*application_wrapper).register_message_handler_fn_ptr_safe(
@@ -518,9 +523,11 @@ impl UPTransportVsomeipInnerEngine {
                     method_id
                 );
 
-                if !vsomeip_offered_requested_registry
-                    .is_service_offered(service_id, instance_id, method_id)
-                {
+                if !vsomeip_offered_requested_registry.is_service_offered(
+                    service_id,
+                    instance_id,
+                    method_id,
+                ) {
                     application_wrapper.get_pinned().offer_service(
                         service_id,
                         instance_id,
@@ -528,8 +535,11 @@ impl UPTransportVsomeipInnerEngine {
                         // vsomeip::ANY_MAJOR,
                         vsomeip::DEFAULT_MINOR,
                     );
-                    vsomeip_offered_requested_registry
-                        .insert_service_offered(service_id, instance_id, method_id);
+                    vsomeip_offered_requested_registry.insert_service_offered(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    );
                 }
 
                 (*application_wrapper).register_message_handler_fn_ptr_safe(
@@ -558,9 +568,11 @@ impl UPTransportVsomeipInnerEngine {
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
 
-                if !vsomeip_offered_requested_registry
-                    .is_service_requested(service_id, instance_id, method_id)
-                {
+                if !vsomeip_offered_requested_registry.is_service_requested(
+                    service_id,
+                    instance_id,
+                    method_id,
+                ) {
                     application_wrapper.get_pinned().request_service(
                         service_id,
                         instance_id,
@@ -568,8 +580,11 @@ impl UPTransportVsomeipInnerEngine {
                         vsomeip::ANY_MINOR,
                     );
 
-                    vsomeip_offered_requested_registry
-                        .insert_service_requested(service_id, instance_id, method_id);
+                    vsomeip_offered_requested_registry.insert_service_requested(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    );
                 }
 
                 trace!(
