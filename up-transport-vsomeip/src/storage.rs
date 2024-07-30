@@ -17,6 +17,10 @@ pub mod message_handler_registry;
 pub mod rpc_correlation;
 pub mod vsomeip_offered_requested;
 
+use crate::storage::application_registry::ApplicationRegistry;
+use crate::storage::message_handler_registry::{
+    ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
+};
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::storage::{
@@ -25,19 +29,19 @@ use crate::storage::{
         ApplicationStateAvailabilityHandlerRegistry,
         InMemoryApplicationStateAvailabilityHandlerRegistry,
     },
-    message_handler_registry::MessageHandlerRegistry,
+    message_handler_registry::InMemoryMessageHandlerRegistry,
     rpc_correlation::InMemoryRpcCorrelationRegistry,
     vsomeip_offered_requested::InMemoryVsomeipOfferedRequestedRegistry,
 };
 use crate::{
-    AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId, SomeIpRequestId,
-    UProtocolReqId, UeId,
+    ApplicationName, AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId,
+    SomeIpRequestId, UProtocolReqId, UeId,
 };
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::UStatus;
-use vsomeip_sys::glue::AvailableStateHandlerFnPtr;
+use up_rust::{ComparableListener, UListener, UStatus, UUri};
+use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
 pub struct UPTransportVsomeipStorage {
@@ -45,7 +49,7 @@ pub struct UPTransportVsomeipStorage {
     local_authority: AuthorityName,
     remote_authority: AuthorityName,
     runtime_handle: Handle,
-    message_handler_registry: Arc<MessageHandlerRegistry>,
+    message_handler_registry: Arc<InMemoryMessageHandlerRegistry>,
     application_state_handler_registry: Arc<InMemoryApplicationStateAvailabilityHandlerRegistry>,
     application_registry: Arc<InMemoryApplicationRegistry>,
     rpc_correlation: Arc<InMemoryRpcCorrelationRegistry>,
@@ -67,7 +71,7 @@ impl UPTransportVsomeipStorage {
             local_authority,
             remote_authority,
             runtime_handle,
-            message_handler_registry: Arc::new(MessageHandlerRegistry::new()),
+            message_handler_registry: Arc::new(InMemoryMessageHandlerRegistry::new()),
             application_state_handler_registry,
             application_registry: Arc::new(InMemoryApplicationRegistry::new()),
             rpc_correlation: Arc::new(InMemoryRpcCorrelationRegistry::new()),
@@ -88,14 +92,6 @@ impl UPTransportVsomeipStorage {
 
     pub fn get_ue_id(&self) -> UeId {
         self.ue_id
-    }
-
-    pub fn get_application_registry(&self) -> Arc<InMemoryApplicationRegistry> {
-        self.application_registry.clone()
-    }
-
-    pub fn get_message_handler_registry(&self) -> Arc<MessageHandlerRegistry> {
-        self.message_handler_registry.clone()
     }
 }
 
@@ -241,5 +237,61 @@ impl VsomeipOfferedRequestedRegistry for UPTransportVsomeipStorage {
     ) -> bool {
         self.vsomeip_offered_requested
             .insert_event_requested(service_id, instance_id, event_id)
+    }
+}
+
+impl ApplicationRegistry for UPTransportVsomeipStorage {
+    fn get_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
+        self.application_registry
+            .get_app_name_for_client_id(client_id)
+    }
+
+    fn insert_client_and_app_name(
+        &self,
+        client_id: ClientId,
+        app_name: ApplicationName,
+    ) -> Result<(), UStatus> {
+        self.application_registry
+            .insert_client_and_app_name(client_id, app_name)
+    }
+
+    fn remove_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
+        self.application_registry
+            .remove_app_name_for_client_id(client_id)
+    }
+}
+
+impl MessageHandlerRegistry for UPTransportVsomeipStorage {
+    fn get_message_handler(
+        &self,
+        client_id: ClientId,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
+        listener_config: (UUri, Option<UUri>, ComparableListener),
+    ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
+        self.message_handler_registry.get_message_handler(
+            client_id,
+            transport_storage,
+            listener_config,
+        )
+    }
+
+    fn release_message_handler(
+        &self,
+        listener_config: (UUri, Option<UUri>, ComparableListener),
+    ) -> Result<ClientUsage, UStatus> {
+        self.message_handler_registry
+            .release_message_handler(listener_config)
+    }
+
+    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)> {
+        self.message_handler_registry.get_all_listener_configs()
+    }
+
+    fn get_listener_for_message_handler_id(
+        &self,
+        message_handler_id: usize,
+    ) -> Option<Arc<dyn UListener>> {
+        self.message_handler_registry
+            .get_listener_for_message_handler_id(message_handler_id)
     }
 }

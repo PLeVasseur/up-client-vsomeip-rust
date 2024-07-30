@@ -126,7 +126,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                     // Separate the scope for accessing the registry for listener
                     let listener = {
-                        let registry = transport_storage.get_message_handler_registry().clone();
+                        let registry = transport_storage.clone();
                         match registry.get_listener_for_message_handler_id(message_handler_id) {
                             Some(listener) => {
                                 // Send the listener and umsg back to the main thread

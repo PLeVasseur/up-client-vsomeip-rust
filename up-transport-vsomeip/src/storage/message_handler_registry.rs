@@ -59,9 +59,9 @@ impl ProcMacroMessageHandlerAccess {
     fn get_message_handler_id_transport(
         message_handle_id: MessageHandlerId,
     ) -> Option<Arc<UPTransportVsomeipStorage>> {
-        let message_handler_id_transport_shim =
+        let message_handler_id_transport_storage =
             MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.read().unwrap();
-        let transport = message_handler_id_transport_shim.get(&message_handle_id)?;
+        let transport = message_handler_id_transport_storage.get(&message_handle_id)?;
 
         transport.upgrade()
     }
@@ -121,17 +121,42 @@ pub enum ClientUsage {
     ClientIdNotInUse(ClientId),
 }
 
+pub trait MessageHandlerRegistry {
+    /// Gets an unused [MessageHandlerFnPtr] to hand over to a vsomeip application
+    fn get_message_handler(
+        &self,
+        client_id: ClientId,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
+        listener_config: (UUri, Option<UUri>, ComparableListener),
+    ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError>;
+
+    /// Release a given message handler
+    fn release_message_handler(
+        &self,
+        listener_config: (UUri, Option<UUri>, ComparableListener),
+    ) -> Result<ClientUsage, UStatus>;
+
+    /// Get all listener configs
+    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)>;
+
+    /// Get trait object [UListener] for a [MessageHandlerId]
+    fn get_listener_for_message_handler_id(
+        &self,
+        message_handler_id: usize,
+    ) -> Option<Arc<dyn UListener>>;
+}
+
 type MessageHandlerIdAndListenerConfig =
     BiMap<MessageHandlerId, (UUri, Option<UUri>, ComparableListener)>;
 type MessageHandlerIdToClientId = HashMap<MessageHandlerId, ClientId>;
 type ClientIdToMessageHandlerId = HashMap<ClientId, HashSet<MessageHandlerId>>;
-pub struct MessageHandlerRegistry {
+pub struct InMemoryMessageHandlerRegistry {
     message_handler_id_and_listener_config: RwLock<MessageHandlerIdAndListenerConfig>,
     message_handler_id_to_client_id: RwLock<MessageHandlerIdToClientId>,
     client_id_to_message_handler_id: RwLock<ClientIdToMessageHandlerId>,
 }
 
-impl MessageHandlerRegistry {
+impl InMemoryMessageHandlerRegistry {
     pub fn new() -> Self {
         Self {
             message_handler_id_and_listener_config: RwLock::new(BiMap::new()),
@@ -405,7 +430,7 @@ impl MessageHandlerRegistry {
     }
 
     /// Get trait object [UListener] for a [MessageHandlerId]
-    fn get_listener_for_message_handler_id(
+    pub fn get_listener_for_message_handler_id(
         &self,
         message_handler_id: usize,
     ) -> Option<Arc<dyn UListener>> {

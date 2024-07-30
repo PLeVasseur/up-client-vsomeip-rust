@@ -5,6 +5,22 @@ use std::sync::RwLock;
 use up_rust::{UCode, UStatus};
 
 type ClientAndAppName = BiMap<ClientId, ApplicationName>;
+
+pub trait ApplicationRegistry {
+    /// Get [ApplicationName] for a [ClientId]
+    fn get_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName>;
+
+    /// Insert a [ClientId] and [ApplicationName]
+    fn insert_client_and_app_name(
+        &self,
+        client_id: ClientId,
+        app_name: ApplicationName,
+    ) -> Result<(), UStatus>;
+
+    /// Remove [ApplicationName] based on [ClientId]
+    fn remove_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName>;
+}
+
 pub struct InMemoryApplicationRegistry {
     client_and_app_name: RwLock<ClientAndAppName>,
 }

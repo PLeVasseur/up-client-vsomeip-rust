@@ -14,7 +14,10 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::storage::message_handler_registry::{ClientUsage, GetMessageHandlerError};
+use crate::storage::application_registry::ApplicationRegistry;
+use crate::storage::message_handler_registry::{
+    ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
+};
 use crate::storage::UPTransportVsomeipStorage;
 use crate::transport_inner::transport_inner_engine::{
     TransportCommand, UPTransportVsomeipInnerEngine,
@@ -163,7 +166,6 @@ impl UPTransportVsomeipInnerHandle {
         let app_name_res = {
             if let Some(app_name) = self
                 .storage
-                .get_application_registry()
                 .get_app_name_for_client_id(registration_type.client_id())
             {
                 Ok(app_name)
@@ -180,15 +182,11 @@ impl UPTransportVsomeipInnerHandle {
 
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-        let Ok(msg_handler) = self
-            .storage
-            .get_message_handler_registry()
-            .get_message_handler(
-                registration_type.client_id(),
-                self.storage.clone(),
-                listener_config,
-            )
-        else {
+        let Ok(msg_handler) = self.storage.get_message_handler(
+            registration_type.client_id(),
+            self.storage.clone(),
+            listener_config,
+        ) else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 "Unable to get message handler for register_listener",
@@ -240,7 +238,6 @@ impl UPTransportVsomeipInnerHandle {
 
         let app_name_res = self
             .storage
-            .get_application_registry()
             .get_app_name_for_client_id(registration_type.client_id());
 
         let Some(app_name) = app_name_res else {
@@ -287,10 +284,7 @@ impl UPTransportVsomeipInnerHandle {
 
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-        let client_usage_res = self
-            .storage
-            .get_message_handler_registry()
-            .release_message_handler(listener_config);
+        let client_usage_res = self.storage.release_message_handler(listener_config);
 
         // TODO: We should probably also remove entries from:
         //  * rpc_correlation -> send an error
@@ -346,7 +340,6 @@ impl UPTransportVsomeipInnerHandle {
         let app_name_res = {
             if let Some(app_name) = self
                 .storage
-                .get_application_registry()
                 .get_app_name_for_client_id(message_type.client_id())
             {
                 Ok(app_name)
@@ -424,14 +417,11 @@ impl UPTransportVsomeipInnerHandle {
         let comp_listener = ComparableListener::new(Arc::clone(&listener));
         let listener_config = (source_filter.clone(), sink_filter.clone(), comp_listener);
         let message_type = RegistrationType::Response(message_type.client_id());
-        let msg_handler_res = self
-            .storage
-            .get_message_handler_registry()
-            .get_message_handler(
-                message_type.client_id(),
-                self.storage.clone(),
-                listener_config,
-            );
+        let msg_handler_res = self.storage.get_message_handler(
+            message_type.client_id(),
+            self.storage.clone(),
+            listener_config,
+        );
 
         let msg_handler = {
             match msg_handler_res {
@@ -455,7 +445,6 @@ impl UPTransportVsomeipInnerHandle {
 
         let Some(app_name) = self
             .storage
-            .get_application_registry()
             .get_app_name_for_client_id(message_type.client_id())
         else {
             panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
@@ -533,15 +522,11 @@ impl UPTransportVsomeipInnerHandle {
                 Some(sink_filter.clone()),
                 comp_listener,
             );
-            let Ok(msg_handler) = self
-                .storage
-                .get_message_handler_registry()
-                .get_message_handler(
-                    registration_type.client_id(),
-                    self.storage.clone(),
-                    listener_config,
-                )
-            else {
+            let Ok(msg_handler) = self.storage.get_message_handler(
+                registration_type.client_id(),
+                self.storage.clone(),
+                listener_config,
+            ) else {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
                     "Unable to get message handler for register_point_to_point_listener",
@@ -626,7 +611,6 @@ impl UPTransportVsomeipInnerHandle {
             let app_name = {
                 match self
                     .storage
-                    .get_application_registry()
                     .get_app_name_for_client_id(registration_type.client_id())
                 {
                     None => {
@@ -671,10 +655,7 @@ impl UPTransportVsomeipInnerHandle {
             //  * vsomep_offered_requested -> unoffer / unrequest
 
             let listener_config = (source_filter, Some(sink_filter), ptp_comp_listener.clone());
-            let client_usage_res = self
-                .storage
-                .get_message_handler_registry()
-                .release_message_handler(listener_config);
+            let client_usage_res = self.storage.release_message_handler(listener_config);
 
             // TODO: We should probably also remove entries from:
             //  * rpc_correlation -> send an error
@@ -736,13 +717,9 @@ impl UPTransportVsomeipInnerHandle {
             ))
         } else {
             self.storage
-                .get_application_registry()
                 .insert_client_and_app_name(client_id, app_name.clone())?;
 
-            let check_app_res = self
-                .storage
-                .get_application_registry()
-                .get_app_name_for_client_id(client_id);
+            let check_app_res = self.storage.get_app_name_for_client_id(client_id);
             match check_app_res {
                 None => {
                     error!("Unable to find app_name for client_id: {client_id}");
@@ -757,11 +734,7 @@ impl UPTransportVsomeipInnerHandle {
     }
 
     async fn shutdown_vsomeip_app(&self, client_id: ClientId) -> Result<(), UStatus> {
-        let Some(app_name) = self
-            .storage
-            .get_application_registry()
-            .remove_app_name_for_client_id(client_id)
-        else {
+        let Some(app_name) = self.storage.remove_app_name_for_client_id(client_id) else {
             return Err(UStatus::fail_with_code(
                 UCode::NOT_FOUND,
                 format!("Unable to find app_name for client_id: {client_id}"),
@@ -788,9 +761,7 @@ impl Drop for UPTransportVsomeipInnerHandle {
         trace!("Running Drop for UPTransportVsomeipInnerHandle, ue_id: {ue_id}");
 
         let storage = self.storage.clone();
-        let all_listener_configs = storage
-            .get_message_handler_registry()
-            .get_all_listener_configs();
+        let all_listener_configs = storage.get_all_listener_configs();
         for listener_config in all_listener_configs {
             let (src_filter, sink_filter, comp_listener) = listener_config;
             let listener = comp_listener.into_inner();
