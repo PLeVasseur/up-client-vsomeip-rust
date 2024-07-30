@@ -13,7 +13,6 @@
 
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::storage::UPTransportVsomeipStorage;
 use crate::utils::{create_request_id, split_u32_to_u16, split_u32_to_u8};
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
@@ -277,7 +276,7 @@ impl VsomeipMessageToUMessage {
     pub async fn convert_vsomeip_msg_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
     ) -> Result<UMessage, UStatus> {
         let msg_type = vsomeip_message.get_message_base_pinned().get_message_type();
@@ -297,7 +296,7 @@ impl VsomeipMessageToUMessage {
                 Self::convert_vsomeip_mt_request_to_umsg(
                     authority_name,
                     mechatronics_authority_name,
-                    &transport_storage,
+                    &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
                 )
@@ -315,7 +314,7 @@ impl VsomeipMessageToUMessage {
                 Self::convert_vsomeip_mt_response_to_umsg(
                     authority_name,
                     mechatronics_authority_name,
-                    &transport_storage,
+                    &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
                 )
@@ -325,7 +324,7 @@ impl VsomeipMessageToUMessage {
                 Self::convert_vsomeip_mt_error_to_umsg(
                     authority_name,
                     mechatronics_authority_name,
-                    &transport_storage,
+                    &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
                 )
@@ -344,7 +343,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_request_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -404,7 +403,7 @@ impl VsomeipMessageToUMessage {
                 req_id.to_hyphenated_string(), request_id
             );
 
-        transport_storage.insert_me_request_correlation(req_id.clone(), request_id)?;
+        rpc_correlation_registry.insert_me_request_correlation(req_id.clone(), request_id)?;
 
         Ok(umsg)
     }
@@ -412,7 +411,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_response_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -446,7 +445,7 @@ impl VsomeipMessageToUMessage {
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
             request_id
         );
-        let req_id = transport_storage.remove_ue_request_correlation(request_id)?;
+        let req_id = rpc_correlation_registry.remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(UCode::OK.value())
@@ -468,7 +467,7 @@ impl VsomeipMessageToUMessage {
     async fn convert_vsomeip_mt_error_to_umsg(
         authority_name: &AuthorityName,
         mechatronics_authority_name: &AuthorityName,
-        transport_storage: &Arc<UPTransportVsomeipStorage>,
+        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -502,7 +501,7 @@ impl VsomeipMessageToUMessage {
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
             request_id
         );
-        let req_id = transport_storage.remove_ue_request_correlation(request_id)?;
+        let req_id = rpc_correlation_registry.remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(UCode::INTERNAL.value())
