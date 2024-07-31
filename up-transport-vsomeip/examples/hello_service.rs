@@ -51,7 +51,7 @@ impl UListener for ServiceRequestResponder {
                 ::protobuf::EnumOrUnknown::new(UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY);
         }
 
-        let hello_request = msg.extract_protobuf_payload::<HelloRequest>();
+        let hello_request = msg.extract_protobuf::<HelloRequest>();
 
         let hello_request = match hello_request {
             Ok(hello_request) => {
@@ -73,10 +73,6 @@ impl UListener for ServiceRequestResponder {
             .build_with_wrapped_protobuf_payload(&hello_response)
             .unwrap();
         self.client.send(response_msg).await.unwrap();
-    }
-
-    async fn on_error(&self, err: UStatus) {
-        println!("ServiceRequestResponder: Encountered an error: {err:?}");
     }
 }
 

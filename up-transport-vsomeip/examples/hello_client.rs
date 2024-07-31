@@ -44,15 +44,11 @@ impl UListener for ServiceResponseListener {
                 ::protobuf::EnumOrUnknown::new(UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY);
         }
 
-        let Ok(hello_response) = msg.extract_protobuf_payload::<HelloResponse>() else {
+        let Ok(hello_response) = msg.extract_protobuf::<HelloResponse>() else {
             panic!("Unable to parse into HelloResponse");
         };
 
         println!("Here we received response: {hello_response:?}");
-    }
-
-    async fn on_error(&self, err: UStatus) {
-        println!("ServiceResponseListener: Encountered an error: {err:?}");
     }
 }
 

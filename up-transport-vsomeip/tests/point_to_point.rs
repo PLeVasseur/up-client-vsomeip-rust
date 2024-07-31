@@ -211,7 +211,7 @@ impl UListener for PointToPointListener {
                 );
 
                 let original_id: Result<UUID, _> =
-                    msg_with_correct_payload_format.extract_protobuf_payload();
+                    msg_with_correct_payload_format.extract_protobuf();
 
                 let original_id = {
                     match original_id {
@@ -255,10 +255,6 @@ impl UListener for PointToPointListener {
             }
         }
     }
-
-    async fn on_error(&self, err: UStatus) {
-        info!("{:?}", err);
-    }
 }
 
 pub struct ResponseListener {
@@ -281,10 +277,6 @@ impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
         info!("ResponseListener: Received Response:\n{:?}", msg);
         self.received_response.fetch_add(1, Ordering::SeqCst);
-    }
-
-    async fn on_error(&self, err: UStatus) {
-        info!("{:?}", err);
     }
 }
 
@@ -320,8 +312,7 @@ impl UListener for RequestListener {
 
         info!("Corrected Request:\n{:?}", msg_with_correct_payload_format);
 
-        let original_id: Result<UUID, _> =
-            msg_with_correct_payload_format.extract_protobuf_payload();
+        let original_id: Result<UUID, _> = msg_with_correct_payload_format.extract_protobuf();
 
         let original_id = {
             match original_id {
@@ -336,7 +327,7 @@ impl UListener for RequestListener {
 
         let response_msg =
             UMessageBuilder::response_for_request(&msg_with_correct_payload_format.attributes)
-                .with_comm_status(UCode::OK.value())
+                .with_comm_status(UCode::OK)
                 .build_with_protobuf_payload(&original_id);
 
         info!("response_msg: {response_msg:?}");
@@ -354,10 +345,6 @@ impl UListener for RequestListener {
                 panic!("Unable to send response_msg: {:?}", err);
             }
         }
-    }
-
-    async fn on_error(&self, err: UStatus) {
-        info!("{:?}", err);
     }
 }
 fn any_uuri() -> UUri {

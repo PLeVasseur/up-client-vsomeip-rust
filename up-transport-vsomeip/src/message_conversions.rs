@@ -17,7 +17,6 @@ use crate::utils::{create_request_id, split_u32_to_u16, split_u32_to_u8};
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
 use log::trace;
-use protobuf::Enum;
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::{UCode, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UUri};
@@ -448,7 +447,7 @@ impl VsomeipMessageToUMessage {
         let req_id = rpc_correlation_registry.remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
-            .with_comm_status(UCode::OK.value())
+            .with_comm_status(UCode::OK)
             .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
 
         let Ok(umsg) = umsg_res else {
@@ -504,7 +503,7 @@ impl VsomeipMessageToUMessage {
         let req_id = rpc_correlation_registry.remove_ue_request_correlation(request_id)?;
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
-            .with_comm_status(UCode::INTERNAL.value())
+            .with_comm_status(UCode::INTERNAL)
             .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
 
         let Ok(umsg) = umsg_res else {

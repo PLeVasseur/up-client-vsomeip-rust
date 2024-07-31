@@ -63,10 +63,6 @@ impl UListener for ResponseListener {
 
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
-
-    async fn on_error(&self, err: UStatus) {
-        info!("{:?}", err);
-    }
 }
 pub struct RequestListener {
     client: Weak<UPTransportVsomeip>,
@@ -113,7 +109,7 @@ impl UListener for RequestListener {
         let response_payload_bytes = response_payload_string.into_bytes();
 
         let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
-            .with_comm_status(UCode::OK.value())
+            .with_comm_status(UCode::OK)
             .build_with_payload(response_payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
         let Ok(response_msg) = response_msg else {
             panic!(
@@ -127,10 +123,6 @@ impl UListener for RequestListener {
                 panic!("Unable to send response_msg: {:?}", err);
             }
         }
-    }
-
-    async fn on_error(&self, err: UStatus) {
-        info!("{:?}", err);
     }
 }
 

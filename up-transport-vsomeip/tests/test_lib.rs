@@ -25,8 +25,4 @@ impl UListener for PrintingListener {
     async fn on_receive(&self, msg: UMessage) {
         println!("{:?}", msg);
     }
-
-    async fn on_error(&self, err: UStatus) {
-        println!("{:?}", err);
-    }
 }

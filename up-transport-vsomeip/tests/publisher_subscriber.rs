@@ -52,10 +52,6 @@ impl UListener for SubscriberListener {
 
         info!("We received payload_string: {payload_string}");
     }
-
-    async fn on_error(&self, err: UStatus) {
-        trace!("{:?}", err);
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
