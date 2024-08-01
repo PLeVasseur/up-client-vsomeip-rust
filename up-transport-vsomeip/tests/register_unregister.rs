@@ -39,8 +39,15 @@ mod tests {
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
 
+        let client_uri = UUri {
+            authority_name: "foo".to_string(),
+            ue_id: 10,
+            ue_version_major: 1,
+            resource_id: 0,
+            ..Default::default()
+        };
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
                 .unwrap();
 
         let source_filter = UUri {
@@ -83,8 +90,15 @@ mod tests {
     async fn test_registering_unregistering_request() {
         test_lib::before_test();
 
+        let client_uri = UUri {
+            authority_name: "foo".to_string(),
+            ue_id: 10,
+            ue_version_major: 1,
+            resource_id: 0,
+            ..Default::default()
+        };
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
                 .unwrap();
 
         let source_filter = UUri {
@@ -134,8 +148,15 @@ mod tests {
     async fn test_registering_unregistering_response() {
         test_lib::before_test();
 
+        let client_uri = UUri {
+            authority_name: "foo".to_string(),
+            ue_id: 10,
+            ue_version_major: 1,
+            resource_id: 0,
+            ..Default::default()
+        };
         let client =
-            UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10, None)
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
                 .unwrap();
 
         let source_filter = UUri {
@@ -187,10 +208,16 @@ mod tests {
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 
+        let client_uri = UUri {
+            authority_name: "foo".to_string(),
+            ue_id: 10,
+            ue_version_major: 1,
+            resource_id: 0,
+            ..Default::default()
+        };
         let client = UPTransportVsomeip::new_with_config(
-            &"foo".to_string(),
+            client_uri,
             &"me_authority".to_string(),
-            10,
             Path::new("vsomeip_configs/example_ustreamer.json"),
             None,
         )

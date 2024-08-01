@@ -12,7 +12,6 @@
  ********************************************************************************/
 
 pub mod transport_inner_engine;
-pub mod transport_inner_handle;
 
 pub const UP_CLIENT_VSOMEIP_TAG: &str = "UPClientVsomeipInner";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP: &str = "app_event_loop";
@@ -25,4 +24,4 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL: &str =
 pub const UP_CLIENT_VSOMEIP_FN_TAG_START_APP: &str = "start_app";
 pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
 
-const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
+pub const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;

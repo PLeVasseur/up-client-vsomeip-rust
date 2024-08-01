@@ -331,8 +331,7 @@ impl InMemoryMessageHandlerRegistry {
             listener_config,
         )
         .ok_or(
-            // TODO: Update this to include listener_config when we update to up-rust on crates.io with ComparableListener Debug impl
-            UStatus::fail_with_code(UCode::NOT_FOUND, "No listener_id for listener_config"), // UStatus::fail_with_code(UCode::NOT_FOUND, format!("No listener_id for listener_config: {listener_config:?}"))
+            UStatus::fail_with_code(UCode::NOT_FOUND, "No listener_id for listener_config")
         )?;
 
         if let Err(warn) =

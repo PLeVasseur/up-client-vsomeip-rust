@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 use log::{error, info, trace};
-use protobuf::{Enum, EnumOrUnknown};
+use protobuf::EnumOrUnknown;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{
-    UCode, UListener, UMessage, UMessageBuilder, UMessageType, UStatus, UTransport, UUri, UUID,
+    UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID,
 };
 use up_transport_vsomeip::{UPTransportVsomeip, UeId};
 
@@ -347,16 +347,6 @@ impl UListener for RequestListener {
         }
     }
 }
-fn any_uuri() -> UUri {
-    UUri {
-        authority_name: "*".to_string(), // any authority
-        ue_id: 0x0000_FFFF,              // any instance, any service
-        ue_version_major: 0xFF,          // any
-        resource_id: 0xFFFF,             // any
-        ..Default::default()
-    }
-}
-
 fn any_from_authority(authority_name: &str) -> UUri {
     UUri {
         authority_name: authority_name.to_string(),
@@ -378,10 +368,16 @@ async fn point_to_point() {
     let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
     info!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
 
+    let point_to_point_uri = UUri {
+        authority_name: PTP_AUTHORITY_NAME.to_string(),
+        ue_id: STREAMER_UE_ID,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
     let point_to_point_client_res = UPTransportVsomeip::new_with_config(
+        point_to_point_uri,
         &PTP_AUTHORITY_NAME.to_string(),
-        &PTP_AUTHORITY_NAME.to_string(),
-        STREAMER_UE_ID,
         &abs_vsomeip_config_path.unwrap(),
         None,
     );
@@ -390,7 +386,7 @@ async fn point_to_point() {
     };
     let point_to_point_client = Arc::new(point_to_point_client);
 
-    let source = any_uuri();
+    let source = UUri::any();
     let sink = any_from_authority(PTP_AUTHORITY_NAME);
 
     let point_to_point_listener_check =
@@ -407,6 +403,9 @@ async fn point_to_point() {
     let client_config = canonicalize(client_config).ok();
     info!("client_config: {client_config:?}");
 
+    let client_uri = UUri {
+
+    };
     let client_res = UPTransportVsomeip::new_with_config(
         &CLIENT_AUTHORITY_NAME.to_string(),
         &CLIENT_AUTHORITY_NAME.to_string(),
@@ -462,7 +461,7 @@ async fn point_to_point() {
     let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(&any_uuri(), Some(&service_uuri()), request_listener.clone())
+        .register_listener(&UUri::any(), Some(&service_uuri()), request_listener.clone())
         .await;
 
     if let Err(err) = reg_service_1 {

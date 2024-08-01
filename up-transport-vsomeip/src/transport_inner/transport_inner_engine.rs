@@ -85,10 +85,10 @@ pub struct UPTransportVsomeipInnerEngine {
 }
 
 impl UPTransportVsomeipInnerEngine {
-    pub fn new(ue_id: UeId, config_path: Option<&Path>) -> Self {
+    pub fn new(uri: UUri, config_path: Option<&Path>) -> Self {
         let (tx, rx) = channel(10000);
 
-        Self::start_event_loop(ue_id, rx, config_path);
+        Self::start_event_loop(uri, rx, config_path);
 
         Self {
             transport_command_sender: tx,
@@ -96,7 +96,7 @@ impl UPTransportVsomeipInnerEngine {
     }
 
     fn start_event_loop(
-        ue_id: UeId,
+        uri: UUri,
         rx_to_event_loop: Receiver<TransportCommand>,
         config_path: Option<&Path>,
     ) {
@@ -113,7 +113,7 @@ impl UPTransportVsomeipInnerEngine {
 
             runtime.block_on(async move {
                 trace!("Within blocked runtime");
-                Self::event_loop(ue_id, rx_to_event_loop, config_path).await;
+                Self::event_loop(uri, rx_to_event_loop, config_path).await;
                 info!("Broke out of loop! You probably dropped the UPClientVsomeip");
             });
             trace!("Parking dedicated thread");
@@ -233,7 +233,7 @@ impl UPTransportVsomeipInnerEngine {
     }
 
     async fn event_loop(
-        ue_id: UeId,
+        uri: UUri,
         mut rx_to_event_loop: Receiver<TransportCommand>,
         config_path: Option<PathBuf>,
     ) {
@@ -408,7 +408,7 @@ impl UPTransportVsomeipInnerEngine {
                     Self::return_oneshot_result(stop_res, return_channel).await;
                 }
             }
-            trace!("Hit bottom of event loop, ue_id: {ue_id}");
+            trace!("Hit bottom of event loop, uri: {uri:?}");
         }
     }
 

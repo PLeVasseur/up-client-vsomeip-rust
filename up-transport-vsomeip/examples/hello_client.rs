@@ -66,11 +66,17 @@ async fn main() -> Result<(), UStatus> {
 
     // There will be a single vsomeip_transport, as there is a connection into device and a streamer
     // TODO: Add error handling if we fail to create a UPTransportVsomeip
+    let client_uuri = UUri {
+        authority_name: CLIENT_AUTHORITY.to_string(),
+        ue_id: CLIENT_UE_ID as u32,
+        ue_version_major: CLIENT_UE_VERSION_MAJOR as u32,
+        resource_id: CLIENT_RESOURCE_ID as u32,
+        ..Default::default()
+    };
     let client: Arc<dyn UTransport> = Arc::new(
         UPTransportVsomeip::new_with_config(
-            &CLIENT_AUTHORITY.to_string(),
+            client_uuri,
             &HELLO_SERVICE_AUTHORITY.to_string(),
-            CLIENT_UE_ID,
             &vsomeip_config.unwrap(),
             None,
         )

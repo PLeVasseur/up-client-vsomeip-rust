@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UTransport, UUri};
+use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 1000;
@@ -73,10 +73,17 @@ async fn publisher_subscriber() {
         ..Default::default()
     };
 
+    let subscriber_uri = UUri {
+        authority_name: authority_name.to_string(),
+        ue_id: subscriber_ue_id,
+        ue_version_major,
+        resource_id: 0,
+        ..Default::default()
+    };
+
     let subscriber_res = UPTransportVsomeip::new(
-        &authority_name.to_string(),
+        subscriber_uri,
         &"me_authority".to_string(),
-        subscriber_ue_id,
         None,
     );
 
@@ -99,10 +106,16 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let publisher_res = UPTransportVsomeip::new(
-        &authority_name.to_string(),
-        &"me_authority".to_string(),
+    let publisher_uri = UUri {
+        authority_name: authority_name.to_string(),
         ue_id,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
+    let publisher_res = UPTransportVsomeip::new(
+        publisher_uri,
+        &"me_authority".to_string(),
         None,
     );
 

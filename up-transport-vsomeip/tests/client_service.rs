@@ -12,14 +12,13 @@
  ********************************************************************************/
 
 use log::{error, info};
-use protobuf::Enum;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UTransport, UUri,
+    UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -126,16 +125,6 @@ impl UListener for RequestListener {
     }
 }
 
-fn any_uuri() -> UUri {
-    UUri {
-        authority_name: "*".to_string(),
-        ue_id: 0x0000_FFFF,     // any instance, any service
-        ue_version_major: 0xFF, // any
-        resource_id: 0xFFFF,    // any
-        ..Default::default()
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn client_service() {
     env_logger::init();
@@ -157,10 +146,16 @@ async fn client_service() {
     let client_config = canonicalize(client_config).ok();
     println!("client_config: {client_config:?}");
 
+    let client_uuri = UUri {
+        authority_name: client_authority_name.to_string(),
+        ue_id: streamer_ue_id,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
     let client_res = UPTransportVsomeip::new_with_config(
-        &client_authority_name.to_string(),
+        client_uuri,
         &service_authority_name.to_string(),
-        streamer_ue_id,
         &client_config.unwrap(),
         None,
     );
@@ -207,10 +202,16 @@ async fn client_service() {
     let service_config = canonicalize(service_config).ok();
     println!("service_config: {service_config:?}");
 
+    let service_uuri = UUri {
+        authority_name: service_authority_name.to_string(),
+        ue_id: streamer_ue_id,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
     let service_res = UPTransportVsomeip::new_with_config(
-        &service_authority_name.to_string(),
+        service_uuri,
         &client_authority_name.to_string(),
-        streamer_ue_id,
         &service_config.unwrap(),
         None,
     );
@@ -235,7 +236,7 @@ async fn client_service() {
     let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(&any_uuri(), Some(&service_1_uuri), request_listener.clone())
+        .register_listener(&UUri::any(), Some(&service_1_uuri), request_listener.clone())
         .await;
 
     if let Err(err) = reg_service_1 {

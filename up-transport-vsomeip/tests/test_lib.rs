@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 use std::sync::Once;
-use up_rust::{UListener, UMessage, UStatus};
+use up_rust::{UListener, UMessage};
 
 static INIT: Once = Once::new();
 pub fn before_test() {
