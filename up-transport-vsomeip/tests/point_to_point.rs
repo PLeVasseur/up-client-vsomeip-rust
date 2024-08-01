@@ -28,7 +28,7 @@ use up_transport_vsomeip::{UPTransportVsomeip, UeId};
 
 const TEST_DURATION: u64 = 1000;
 
-const STREAMER_UE_ID: u16 = 0x9876;
+const STREAMER_UE_ID: u32 = 0x9876;
 
 const CLIENT_AUTHORITY_NAME: &str = "foo";
 const CLIENT_UE_ID: u32 = 0x1234;
@@ -47,7 +47,7 @@ const SERVICE_METHOD_RESOURCE_ID: u32 = 0x0421;
 const NON_POINT_TO_POINT_LISTENED_AUTHORITY: &str = "oops";
 const OTHER_CLIENT_UE_ID: u32 = 0x7331;
 const OTHER_CLIENT_UE_VERSION_NUMBER: u32 = 1;
-const OTHER_CLIENT_STREAMER_UE_ID: u16 = 0x1337;
+const OTHER_CLIENT_STREAMER_UE_ID: u32 = 0x1337;
 
 const OTHER_SERVICE_UE_ID: u32 = 0x5252;
 const OTHER_SERVICE_UE_VERSION_NUMBER: u32 = 1;
@@ -404,12 +404,15 @@ async fn point_to_point() {
     info!("client_config: {client_config:?}");
 
     let client_uri = UUri {
-
+        authority_name: CLIENT_AUTHORITY_NAME.to_string(),
+        ue_id: CLIENT_UE_ID,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
     };
     let client_res = UPTransportVsomeip::new_with_config(
+        client_uri,
         &CLIENT_AUTHORITY_NAME.to_string(),
-        &CLIENT_AUTHORITY_NAME.to_string(),
-        CLIENT_UE_ID as UeId,
         &client_config.unwrap(),
         None,
     );
@@ -441,10 +444,16 @@ async fn point_to_point() {
     let service_config = canonicalize(service_config).ok();
     info!("service_config: {service_config:?}");
 
+    let service_uri = UUri {
+        authority_name: SERVICE_AUTHORITY_NAME.to_string(),
+        ue_id: SERVICE_UE_ID,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
     let service_res = UPTransportVsomeip::new_with_config(
+        service_uri,
         &SERVICE_AUTHORITY_NAME.to_string(),
-        &SERVICE_AUTHORITY_NAME.to_string(),
-        SERVICE_UE_ID as UeId,
         &service_config.unwrap(),
         None,
     );
@@ -468,10 +477,16 @@ async fn point_to_point() {
         error!("Unable to register: {:?}", err);
     }
 
+    let non_listened_to_client_uri = UUri {
+        authority_name: NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
+        ue_id: OTHER_CLIENT_STREAMER_UE_ID,
+        ue_version_major: 1,
+        resource_id: 0,
+        ..Default::default()
+    };
     let non_listened_to_client = UPTransportVsomeip::new(
+        non_listened_to_client_uri,
         &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
-        &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
-        OTHER_CLIENT_STREAMER_UE_ID,
         None,
     )
     .unwrap();
