@@ -5,7 +5,7 @@ use up_rust::UUri;
 pub fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id: UeId) -> UUri {
     UUri {
         authority_name: authority_name.to_string(),
-        ue_id: ue_id as u32,
+        ue_id,
         ue_version_major: 0xFF, // any
         resource_id: 0xFFFF,    // any
         ..Default::default()

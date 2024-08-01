@@ -88,7 +88,7 @@ impl UPTransportVsomeipStorage {
     }
 
     pub fn get_ue_id(&self) -> UeId {
-        self.uri.ue_id.clone()
+        self.uri.ue_id
     }
 }
 
