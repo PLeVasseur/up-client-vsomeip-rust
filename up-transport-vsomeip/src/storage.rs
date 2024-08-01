@@ -72,6 +72,10 @@ impl UPTransportVsomeipStorage {
         }
     }
 
+    pub fn get_uri(&self) -> UUri {
+        self.uri.clone()
+    }
+
     pub fn get_runtime_handle(&self) -> Handle {
         self.runtime_handle.clone()
     }

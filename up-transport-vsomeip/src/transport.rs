@@ -193,12 +193,14 @@ impl UTransport for UPTransportVsomeip {
 
 impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
-        todo!()
+        self.storage.get_uri().authority_name
     }
     fn get_resource_uri(&self, resource_id: u16) -> UUri {
-        todo!()
+        let mut resource_uri = self.storage.get_uri();
+        resource_uri.resource_id = resource_id as u32;
+        resource_uri
     }
     fn get_source_uri(&self) -> UUri {
-        todo!()
+        self.storage.get_uri()
     }
 }

@@ -197,6 +197,13 @@ impl UPTransportVsomeip {
         config_path: Option<&Path>,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
+        uri.verify_rpc_response().map_err(|e| {
+            UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                format!("uri provided to transport is incorrect: {e:?}"),
+            )
+        })?;
+
         let (runtime_handle, thread_handle, shutdown_runtime_tx) =
             get_callback_runtime_handle(runtime_config);
 
