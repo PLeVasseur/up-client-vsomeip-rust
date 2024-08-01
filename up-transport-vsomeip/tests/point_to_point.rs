@@ -21,10 +21,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
-use up_rust::{
-    UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID,
-};
-use up_transport_vsomeip::{UPTransportVsomeip, UeId};
+use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
+use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 1000;
 
@@ -470,7 +468,11 @@ async fn point_to_point() {
     let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(&UUri::any(), Some(&service_uuri()), request_listener.clone())
+        .register_listener(
+            &UUri::any(),
+            Some(&service_uuri()),
+            request_listener.clone(),
+        )
         .await;
 
     if let Err(err) = reg_service_1 {

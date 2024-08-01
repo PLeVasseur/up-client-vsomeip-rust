@@ -11,17 +11,22 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::UPTransportVsomeip;
-use async_trait::async_trait;
-use std::sync::Arc;
-use log::trace;
-use tokio::sync::oneshot;
-use up_rust::{UCode, UListener, UMessage, UStatus, UTransport, UUri, LocalUriProvider, ComparableListener, UAttributesValidators};
-use crate::determine_message_type::{determine_registration_type, determine_send_type, RegistrationType};
+use crate::determine_message_type::{
+    determine_registration_type, determine_send_type, RegistrationType,
+};
 use crate::storage::application_registry::ApplicationRegistry;
 use crate::storage::message_handler_registry::MessageHandlerRegistry;
-use crate::transport_inner::transport_inner_engine::TransportCommand;
-use crate::transport_inner::UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL;
+use crate::transport_engine::TransportCommand;
+use crate::transport_engine::UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL;
+use crate::UPTransportVsomeip;
+use async_trait::async_trait;
+use log::trace;
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use up_rust::{
+    ComparableListener, LocalUriProvider, UAttributesValidators, UCode, UListener, UMessage,
+    UStatus, UTransport, UUri,
+};
 
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
@@ -75,7 +80,7 @@ impl UTransport for UPTransportVsomeip {
             sink_filter,
             message_type.clone(),
         )
-            .await?;
+        .await?;
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
@@ -89,7 +94,7 @@ impl UTransport for UPTransportVsomeip {
                 tx,
             ),
         )
-            .await;
+        .await;
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
@@ -157,13 +162,12 @@ impl UTransport for UPTransportVsomeip {
                 tx,
             ),
         )
-            .await;
+        .await;
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
         Self::await_engine("register", rx).await
-
     }
 
     async fn unregister_listener(
@@ -191,6 +195,10 @@ impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
         todo!()
     }
-    fn get_resource_uri(&self, resource_id: u16) -> UUri { todo!() }
-    fn get_source_uri(&self) -> UUri { todo!() }
+    fn get_resource_uri(&self, resource_id: u16) -> UUri {
+        todo!()
+    }
+    fn get_source_uri(&self) -> UUri {
+        todo!()
+    }
 }

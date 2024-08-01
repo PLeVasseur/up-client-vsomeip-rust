@@ -11,6 +11,20 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+use crate::determine_message_type::{determine_registration_type, RegistrationType};
+use crate::storage::application_registry::ApplicationRegistry;
+use crate::storage::message_handler_registry::{
+    ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
+};
+use crate::storage::UPTransportVsomeipStorage;
+use crate::transport_engine::{TransportCommand, UPTransportVsomeipEngine};
+use crate::transport_engine::{
+    UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP,
+    UP_CLIENT_VSOMEIP_TAG,
+};
+use crate::utils::any_uuri_fixed_authority_id;
+use crate::vsomeip_config::extract_applications;
 use log::{error, info, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -20,21 +34,13 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
-use up_rust::{UCode, UStatus, UUID, UListener, UUri, ComparableListener};
-use crate::determine_message_type::{determine_registration_type, RegistrationType};
-use crate::storage::application_registry::ApplicationRegistry;
-use crate::storage::message_handler_registry::{ClientUsage, GetMessageHandlerError, MessageHandlerRegistry};
-use crate::storage::UPTransportVsomeipStorage;
-use crate::transport_inner::transport_inner_engine::{TransportCommand, UPTransportVsomeipInnerEngine};
-use crate::transport_inner::{UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, UP_CLIENT_VSOMEIP_TAG};
-use crate::utils::any_uuri_fixed_authority_id;
-use crate::vsomeip_config::extract_applications;
+use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri, UUID};
 
 mod determine_message_type;
 mod message_conversions;
 mod storage;
 mod transport;
-mod transport_inner;
+mod transport_engine;
 mod utils;
 mod vsomeip_config;
 
@@ -129,7 +135,7 @@ pub struct RuntimeConfig {
 /// and the "engine" of the innner transport to allow mocking of them.
 pub struct UPTransportVsomeip {
     storage: Arc<UPTransportVsomeipStorage>,
-    engine: UPTransportVsomeipInnerEngine,
+    engine: UPTransportVsomeipEngine,
     point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
     config_path: Option<PathBuf>,
     thread_handle: Option<thread::JoinHandle<()>>,
@@ -181,12 +187,7 @@ impl UPTransportVsomeip {
         remote_authority_name: &AuthorityName,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
-        Self::new_internal(
-            uri,
-            remote_authority_name,
-            None,
-            runtime_config,
-        )
+        Self::new_internal(uri, remote_authority_name, None, runtime_config)
     }
 
     /// Creates a UPTransportVsomeip whether a vsomeip config file was provided or not
@@ -196,7 +197,6 @@ impl UPTransportVsomeip {
         config_path: Option<&Path>,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
-
         let (runtime_handle, thread_handle, shutdown_runtime_tx) =
             get_callback_runtime_handle(runtime_config);
 
@@ -206,7 +206,7 @@ impl UPTransportVsomeip {
             runtime_handle.clone(),
         ));
 
-        let engine = UPTransportVsomeipInnerEngine::new(uri, None);
+        let engine = UPTransportVsomeipEngine::new(uri, None);
         let point_to_point_listener = RwLock::new(None);
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
@@ -223,7 +223,7 @@ impl UPTransportVsomeip {
         function_id: &str,
         rx: oneshot::Receiver<Result<(), UStatus>>,
     ) -> Result<(), UStatus> {
-        match timeout(Duration::from_secs(crate::transport_inner::INTERNAL_FUNCTION_TIMEOUT), rx).await {
+        match timeout(Duration::from_secs(crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
@@ -236,7 +236,7 @@ impl UPTransportVsomeip {
                 UCode::DEADLINE_EXCEEDED,
                 format!(
                     "Unable to receive status back from internal function: {} within {} second window.",
-                    function_id, crate::transport_inner::INTERNAL_FUNCTION_TIMEOUT
+                    function_id, crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT
                 ),
             )),
         }
@@ -418,9 +418,9 @@ impl UPTransportVsomeip {
         let Some(app_name) = self
             .storage
             .get_app_name_for_client_id(message_type.client_id())
-            else {
-                panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
-            };
+        else {
+            panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
+        };
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
@@ -435,7 +435,7 @@ impl UPTransportVsomeip {
                 tx,
             ),
         )
-            .await;
+        .await;
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
@@ -487,8 +487,10 @@ impl UPTransportVsomeip {
 
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = UUri::any();
-            let sink_filter =
-                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), app_config.id as UeId);
+            let sink_filter = any_uuri_fixed_authority_id(
+                &self.storage.get_local_authority(),
+                app_config.id as UeId,
+            );
             let listener_config = (
                 source_filter.clone(),
                 Some(sink_filter.clone()),
@@ -518,7 +520,7 @@ impl UPTransportVsomeip {
                     tx,
                 ),
             )
-                .await;
+            .await;
 
             if let Err(err) = send_to_engine_res {
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
@@ -561,8 +563,10 @@ impl UPTransportVsomeip {
 
         for app_config in &application_configs {
             let source_filter = UUri::any();
-            let sink_filter =
-                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), app_config.id as UeId);
+            let sink_filter = any_uuri_fixed_authority_id(
+                &self.storage.get_local_authority(),
+                app_config.id as UeId,
+            );
 
             let registration_type = {
                 let reg_type_res = determine_registration_type(
@@ -676,7 +680,7 @@ impl UPTransportVsomeip {
                 tx,
             ),
         )
-            .await;
+        .await;
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
@@ -719,7 +723,7 @@ impl UPTransportVsomeip {
             &self.engine.transport_command_sender,
             TransportCommand::StopVsomeipApp(client_id, app_name, tx),
         )
-            .await;
+        .await;
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }

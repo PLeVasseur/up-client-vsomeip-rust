@@ -17,9 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{
-    UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri,
-};
+use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 1000;
@@ -236,7 +234,11 @@ async fn client_service() {
     let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(&UUri::any(), Some(&service_1_uuri), request_listener.clone())
+        .register_listener(
+            &UUri::any(),
+            Some(&service_1_uuri),
+            request_listener.clone(),
+        )
         .await;
 
     if let Err(err) = reg_service_1 {

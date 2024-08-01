@@ -56,11 +56,7 @@ pub struct UPTransportVsomeipStorage {
 }
 
 impl UPTransportVsomeipStorage {
-    pub fn new(
-        uri: UUri,
-        remote_authority: AuthorityName,
-        runtime_handle: Handle,
-    ) -> Self {
+    pub fn new(uri: UUri, remote_authority: AuthorityName, runtime_handle: Handle) -> Self {
         let application_state_handler_registry =
             InMemoryApplicationStateAvailabilityHandlerRegistry::new_trait_obj();
 

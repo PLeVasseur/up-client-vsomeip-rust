@@ -8,7 +8,6 @@ use std::thread;
 use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY;
 use up_rust::{UListener, UMessage, UMessageBuilder, UStatus, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
-use up_transport_vsomeip::UeId;
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
 const HELLO_INSTANCE_ID: u32 = 0x0001;

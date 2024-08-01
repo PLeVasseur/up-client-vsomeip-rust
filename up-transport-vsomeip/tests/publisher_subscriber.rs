@@ -81,11 +81,7 @@ async fn publisher_subscriber() {
         ..Default::default()
     };
 
-    let subscriber_res = UPTransportVsomeip::new(
-        subscriber_uri,
-        &"me_authority".to_string(),
-        None,
-    );
+    let subscriber_res = UPTransportVsomeip::new(subscriber_uri, &"me_authority".to_string(), None);
 
     let Ok(subscriber) = subscriber_res else {
         panic!("Unable to establish subscriber");
@@ -113,11 +109,7 @@ async fn publisher_subscriber() {
         resource_id: 0,
         ..Default::default()
     };
-    let publisher_res = UPTransportVsomeip::new(
-        publisher_uri,
-        &"me_authority".to_string(),
-        None,
-    );
+    let publisher_res = UPTransportVsomeip::new(publisher_uri, &"me_authority".to_string(), None);
 
     let Ok(publisher) = publisher_res else {
         panic!("Unable to establish publisher");

@@ -47,8 +47,7 @@ mod tests {
             ..Default::default()
         };
         let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
-                .unwrap();
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -98,8 +97,7 @@ mod tests {
             ..Default::default()
         };
         let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
-                .unwrap();
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
@@ -156,8 +154,7 @@ mod tests {
             ..Default::default()
         };
         let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None)
-                .unwrap();
+            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
 
         let source_filter = UUri {
             authority_name: "foo".to_string(),
