@@ -261,6 +261,7 @@ where {
     }
 
     fn ucode_to_vsomeip_err_code(ucode: UCode) -> vsomeip::return_code_e {
+        // TODO handle the one-to-many mapping. eg: INVALID_ARGUMENT <==> E_WRONG_MESSAGE_TYPE / E_UNKNOWN_METHOD
         match ucode {
             UCode::OK => vsomeip::return_code_e::E_OK,
             UCode::INVALID_ARGUMENT => vsomeip::return_code_e::E_WRONG_MESSAGE_TYPE,  
