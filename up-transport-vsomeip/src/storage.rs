@@ -11,20 +11,17 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-pub mod application_registry;
 pub mod application_state_availability_handler_registry;
 pub mod message_handler_registry;
 pub mod rpc_correlation;
 pub mod vsomeip_offered_requested;
 
-use crate::storage::application_registry::ApplicationRegistry;
 use crate::storage::message_handler_registry::{
     ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
 };
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::storage::{
-    application_registry::InMemoryApplicationRegistry,
     application_state_availability_handler_registry::{
         ApplicationStateAvailabilityHandlerRegistry,
         InMemoryApplicationStateAvailabilityHandlerRegistry,
@@ -50,7 +47,6 @@ pub struct UPTransportVsomeipStorage {
     runtime_handle: Handle,
     message_handler_registry: Arc<InMemoryMessageHandlerRegistry>,
     application_state_handler_registry: Arc<InMemoryApplicationStateAvailabilityHandlerRegistry>,
-    application_registry: Arc<InMemoryApplicationRegistry>,
     rpc_correlation: Arc<InMemoryRpcCorrelationRegistry>,
     vsomeip_offered_requested: Arc<InMemoryVsomeipOfferedRequestedRegistry>,
 }
@@ -66,7 +62,6 @@ impl UPTransportVsomeipStorage {
             runtime_handle,
             message_handler_registry: Arc::new(InMemoryMessageHandlerRegistry::new()),
             application_state_handler_registry,
-            application_registry: Arc::new(InMemoryApplicationRegistry::new()),
             rpc_correlation: Arc::new(InMemoryRpcCorrelationRegistry::new()),
             vsomeip_offered_requested: Arc::new(InMemoryVsomeipOfferedRequestedRegistry::new()),
         }
@@ -234,27 +229,6 @@ impl VsomeipOfferedRequestedRegistry for UPTransportVsomeipStorage {
     ) -> bool {
         self.vsomeip_offered_requested
             .insert_event_requested(service_id, instance_id, event_id)
-    }
-}
-
-impl ApplicationRegistry for UPTransportVsomeipStorage {
-    fn get_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
-        self.application_registry
-            .get_app_name_for_client_id(client_id)
-    }
-
-    fn insert_client_and_app_name(
-        &self,
-        client_id: ClientId,
-        app_name: ApplicationName,
-    ) -> Result<(), UStatus> {
-        self.application_registry
-            .insert_client_and_app_name(client_id, app_name)
-    }
-
-    fn remove_app_name_for_client_id(&self, client_id: ClientId) -> Option<ApplicationName> {
-        self.application_registry
-            .remove_app_name_for_client_id(client_id)
     }
 }
 
