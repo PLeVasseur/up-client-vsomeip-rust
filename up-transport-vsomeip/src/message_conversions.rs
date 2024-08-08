@@ -233,32 +233,22 @@ where {
             client_id,
             session_id
         );
-        let ok = {
+
+        let (commstatus, vsomeip_msg_type) = {
             if let Some(commstatus) = umsg.attributes.commstatus {
-                let commstatus = commstatus.enum_value_or(UCode::UNIMPLEMENTED);
-                trace!("UMessage Response commstatus was set to: {commstatus:?}");
-                commstatus == UCode::OK
+                (commstatus.enum_value_or(UCode::UNIMPLEMENTED),message_type_e::MT_ERROR)
+                
             } else {
-                trace!("UMessage Response had no commstatus set");
-                true
+                (UCode::UNIMPLEMENTED, message_type_e::MT_RESPONSE)
             }
         };
-        if ok {
-            vsomeip_msg
-                .get_message_base_pinned()
-                .set_return_code(vsomeip::return_code_e::E_OK);
-            vsomeip_msg
-                .get_message_base_pinned()
-                .set_message_type(message_type_e::MT_RESPONSE);
-        } else {
-            // TODO: Perform mapping from uProtocol UCode contained in commstatus into vsomeip::return_code_e
-            vsomeip_msg
-                .get_message_base_pinned()
-                .set_return_code(vsomeip::return_code_e::E_NOT_OK);
-            vsomeip_msg
-                .get_message_base_pinned()
-                .set_message_type(message_type_e::MT_ERROR);
-        }
+
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_return_code(Self::ucode_to_return_code_e(commstatus));
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_message_type(vsomeip_msg_type);
 
         trace!(
             "{} - Response: Finished building vsomeip message: service_id: {} instance_id: {}",
@@ -268,6 +258,29 @@ where {
         );
 
         Ok(vsomeip_msg)
+    }
+
+    fn ucode_to_return_code_e(ucode: UCode) -> vsomeip::return_code_e {
+        match ucode {
+            UCode::OK => vsomeip::return_code_e::E_OK,
+            UCode::INVALID_ARGUMENT |  
+            UCode::DEADLINE_EXCEEDED | 
+            UCode::NOT_FOUND | 
+            UCode::ALREADY_EXISTS | 
+            UCode::PERMISSION_DENIED | 
+            UCode::UNAUTHENTICATED |
+            UCode::RESOURCE_EXHAUSTED | 
+            UCode::FAILED_PRECONDITION |
+            UCode::ABORTED |
+            UCode::OUT_OF_RANGE | 
+            UCode::UNIMPLEMENTED  |
+            UCode::INTERNAL  |
+            UCode::UNAVAILABLE  |
+            UCode::DATA_LOSS  
+            => { vsomeip::return_code_e::E_NOT_OK }
+            UCode::UNKNOWN => vsomeip::return_code_e::E_UNKNOWN,
+            _ => vsomeip::return_code_e::E_UNKNOWN
+        }
     }
 }
 
