@@ -41,7 +41,25 @@ use up_rust::{ComparableListener, UListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
+pub struct VsomeipApplicationConfig {
+    application_name: String,
+    application_id: ClientId,
+}
+
+impl VsomeipApplicationConfig {
+    pub fn new(application_name: &str, application_id: ClientId) -> Self {
+        // TODO: - PELE - Add validation that we have supplied a valid application_name
+        // and application_id according to vsomeip spec
+
+        Self {
+            application_name: application_name.to_string(),
+            application_id,
+        }
+    }
+}
+
 pub struct UPTransportVsomeipStorage {
+    vsomeip_application_config: VsomeipApplicationConfig,
     uri: UUri,
     remote_authority: AuthorityName,
     runtime_handle: Handle,
@@ -52,11 +70,17 @@ pub struct UPTransportVsomeipStorage {
 }
 
 impl UPTransportVsomeipStorage {
-    pub fn new(uri: UUri, remote_authority: AuthorityName, runtime_handle: Handle) -> Self {
+    pub fn new(
+        vsomeip_application_config: VsomeipApplicationConfig,
+        uri: UUri,
+        remote_authority: AuthorityName,
+        runtime_handle: Handle,
+    ) -> Self {
         let application_state_handler_registry =
             InMemoryApplicationStateAvailabilityHandlerRegistry::new_trait_obj();
 
         Self {
+            vsomeip_application_config,
             uri,
             remote_authority,
             runtime_handle,
