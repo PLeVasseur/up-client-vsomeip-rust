@@ -189,7 +189,7 @@ impl UPTransportVsomeip {
     ///                             Should be set to `IP:port` of the endpoint mDevice
     /// * `ue_id` - the ue_id of the uEntity
     pub fn new(
-        vsomeip_application_config: VsomeipApplictionConfig,
+        vsomeip_application_config: VsomeipApplicationConfig,
         uri: UUri,
         remote_authority_name: &AuthorityName,
         runtime_config: Option<RuntimeConfig>,
@@ -205,6 +205,7 @@ impl UPTransportVsomeip {
 
     /// Creates a UPTransportVsomeip whether a vsomeip config file was provided or not
     fn new_internal(
+        vsomeip_application_config: VsomeipApplicationConfig,
         uri: UUri,
         remote_authority_name: &AuthorityName,
         config_path: Option<&Path>,
@@ -221,6 +222,7 @@ impl UPTransportVsomeip {
             get_callback_runtime_handle(runtime_config);
 
         let storage = Arc::new(UPTransportVsomeipStorage::new(
+            vsomeip_application_config,
             uri.clone(),
             remote_authority_name.clone(),
             runtime_handle.clone(),
@@ -230,14 +232,18 @@ impl UPTransportVsomeip {
         let point_to_point_listener = RwLock::new(None);
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
-        Ok(Self {
+        let me = Self {
             storage,
             engine,
             point_to_point_listener,
             config_path: optional_config_path,
             thread_handle: Some(thread_handle),
             shutdown_runtime_tx,
-        })
+        };
+
+        me.initialize_vsomeip_app(storage.get_vsomeip_application_config().application_name);
+
+        Ok(me)
     }
     async fn await_engine(
         function_id: &str,
@@ -435,12 +441,10 @@ impl UPTransportVsomeip {
             }
         };
 
-        let Some(app_name) = self
+        let app_name = self
             .storage
-            .get_app_name_for_client_id(message_type.client_id())
-        else {
-            panic!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", message_type.client_id());
-        };
+            .get_vsomeip_application_config()
+            .application_name;
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
@@ -680,9 +684,8 @@ impl UPTransportVsomeip {
         Ok(())
     }
 
-    async fn initialize_vsomeip_app(
+    fn initialize_vsomeip_app(
         &self,
-        client_id: ClientId,
         app_name: ApplicationName,
     ) -> Result<ApplicationName, UStatus> {
         let (tx, rx) = oneshot::channel();
@@ -691,7 +694,8 @@ impl UPTransportVsomeip {
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
         );
-        let send_to_engine_res = Self::send_to_engine_with_status(
+        let client_id = self.storage.get_vsomeip_application_config().application_id;
+        let send_to_engine = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::StartVsomeipApp(
                 client_id,
@@ -699,34 +703,24 @@ impl UPTransportVsomeip {
                 self.storage.clone(),
                 tx,
             ),
-        )
-        .await;
+        );
+
+        let send_to_engine_res = self.storage.get_runtime_handle().block_on(send_to_engine);
+
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        let internal_res =
-            Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx).await;
+
+        let internal = Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx);
+        let internal_res = self.storage.get_runtime_handle().block_on(internal);
         if let Err(err) = internal_res {
             Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
             ))
-        } else {
-            self.storage
-                .insert_client_and_app_name(client_id, app_name.clone())?;
-
-            let check_app_res = self.storage.get_app_name_for_client_id(client_id);
-            match check_app_res {
-                None => {
-                    error!("Unable to find app_name for client_id: {client_id}");
-                }
-                Some(app_name) => {
-                    trace!("Able to find app_name: {app_name} for client_id: {client_id}");
-                }
-            }
-
-            Ok(app_name)
         }
+
+        Ok(app_name)
     }
 
     async fn shutdown_vsomeip_app(&self, client_id: ClientId) -> Result<(), UStatus> {

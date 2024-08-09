@@ -14,7 +14,6 @@
 use crate::determine_message_type::{
     determine_registration_type, determine_send_type, RegistrationType,
 };
-use crate::storage::application_registry::ApplicationRegistry;
 use crate::storage::message_handler_registry::MessageHandlerRegistry;
 use crate::transport_engine::TransportCommand;
 use crate::transport_engine::UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL;
@@ -119,22 +118,10 @@ impl UTransport for UPTransportVsomeip {
             return self.register_point_to_point_listener(&listener).await;
         }
 
-        let app_name_res = {
-            if let Some(app_name) = self
-                .storage
-                .get_app_name_for_client_id(registration_type.client_id())
-            {
-                Ok(app_name)
-            } else {
-                let app_name = format!("{}", registration_type.client_id());
-                let client_id = registration_type.client_id();
-                self.initialize_vsomeip_app(client_id, app_name).await
-            }
-        };
-
-        let Ok(app_name) = app_name_res else {
-            return Err(app_name_res.err().unwrap());
-        };
+        let app_name = self
+            .storage
+            .get_vsomeip_application_config()
+            .application_name;
 
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);

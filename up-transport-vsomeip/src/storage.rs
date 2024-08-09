@@ -41,9 +41,10 @@ use up_rust::{ComparableListener, UListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
+#[derive(Clone)]
 pub struct VsomeipApplicationConfig {
-    application_name: String,
-    application_id: ClientId,
+    pub(crate) application_name: String,
+    pub(crate) application_id: ClientId,
 }
 
 impl VsomeipApplicationConfig {
@@ -108,6 +109,10 @@ impl UPTransportVsomeipStorage {
 
     pub fn get_ue_id(&self) -> UeId {
         self.uri.ue_id
+    }
+
+    pub fn get_vsomeip_application_config(&self) -> VsomeipApplicationConfig {
+        self.vsomeip_application_config.clone()
     }
 }
 
