@@ -81,11 +81,7 @@ pub enum TransportCommand {
         Arc<dyn ApplicationStateAvailabilityHandlerRegistry>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
-    StopVsomeipApp(
-        ClientId,
-        ApplicationName,
-        oneshot::Sender<Result<(), UStatus>>,
-    ),
+    StopVsomeipApp(ApplicationName, oneshot::Sender<Result<(), UStatus>>),
 }
 
 pub struct UPTransportVsomeipEngine {
@@ -388,7 +384,6 @@ impl UPTransportVsomeipEngine {
                         app_name
                     );
                     let new_app_res = Self::start_vsomeip_app_internal(
-                        client_id,
                         app_name.clone(),
                         application_state_availability_handler_registry,
                         config_path.clone(),
@@ -404,7 +399,7 @@ impl UPTransportVsomeipEngine {
 
                     Self::return_oneshot_result(new_app_res, return_channel).await;
                 }
-                TransportCommand::StopVsomeipApp(_client_id, app_name, return_channel) => {
+                TransportCommand::StopVsomeipApp(app_name, return_channel) => {
                     let stop_res =
                         Self::stop_vsomeip_app_internal(app_name, &runtime_wrapper).await;
                     Self::return_oneshot_result(stop_res, return_channel).await;
@@ -432,7 +427,7 @@ impl UPTransportVsomeipEngine {
         );
 
         match registration_type {
-            RegistrationType::Publish(_) => {
+            RegistrationType::Publish => {
                 trace!(
                     "{}:{} - Registering for Publish style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -498,7 +493,7 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
-            RegistrationType::Request(_) => {
+            RegistrationType::Request => {
                 trace!(
                     "{}:{} - Registering for Request style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -559,7 +554,7 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
-            RegistrationType::Response(_) => {
+            RegistrationType::Response => {
                 trace!(
                     "{}:{} - Registering for Response style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -613,7 +608,7 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
-            RegistrationType::AllPointToPoint(_) => Err(UStatus::fail_with_code(
+            RegistrationType::AllPointToPoint => Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 "Should be impossible to register point-to-point internally",
             )),

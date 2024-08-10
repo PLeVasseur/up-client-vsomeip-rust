@@ -233,7 +233,7 @@ impl UPTransportVsomeip {
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 
         let me = Self {
-            storage,
+            storage: storage.clone(),
             engine,
             point_to_point_listener,
             config_path: optional_config_path,
@@ -548,10 +548,10 @@ impl UPTransportVsomeip {
         };
 
         let service_configs = extract_services(config_path)?;
-        trace!("Got vsomeip application_configs: {application_configs:?}");
+        trace!("Got vsomeip service_configs: {service_configs:?}");
 
         for service_config in &service_configs {
-            let ue_id = (service_config.instance << 16) as u32 | service_config.service as u32;
+            let ue_id = (service_config.instance as u32) << 16 | service_config.service as u32;
             let source_filter = UUri::any();
             let sink_filter =
                 any_uuri_fixed_authority_id(&self.storage.get_local_authority(), ue_id);
@@ -653,22 +653,25 @@ impl UPTransportVsomeip {
         let internal = Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx);
         let internal_res = self.storage.get_runtime_handle().block_on(internal);
         if let Err(err) = internal_res {
-            Err(UStatus::fail_with_code(
+            return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
-            ))
+            ));
         }
 
         Ok(app_name)
     }
 
-    async fn shutdown_vsomeip_app(&self, client_id: ClientId) -> Result<(), UStatus> {
-        trace!("No more remaining listeners for client_id: {client_id} app_name: {app_name}");
+    async fn shutdown_vsomeip_app(&self) -> Result<(), UStatus> {
+        let app_name = self
+            .storage
+            .get_vsomeip_application_config()
+            .application_name;
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
-            TransportCommand::StopVsomeipApp(client_id, app_name, tx),
+            TransportCommand::StopVsomeipApp(app_name, tx),
         )
         .await;
         if let Err(err) = send_to_engine_res {

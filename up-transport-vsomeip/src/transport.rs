@@ -97,7 +97,7 @@ impl UTransport for UPTransportVsomeip {
 
         trace!("registration_type: {registration_type:?}");
 
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+        if registration_type == RegistrationType::AllPointToPoint {
             return self.register_point_to_point_listener(&listener).await;
         }
 
@@ -108,11 +108,10 @@ impl UTransport for UPTransportVsomeip {
 
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
-        let Ok(msg_handler) = self.storage.get_message_handler(
-            registration_type.client_id(),
-            self.storage.clone(),
-            listener_config,
-        ) else {
+        let Ok(msg_handler) = self
+            .storage
+            .get_message_handler(self.storage.clone(), listener_config)
+        else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 "Unable to get message handler for register_listener",
