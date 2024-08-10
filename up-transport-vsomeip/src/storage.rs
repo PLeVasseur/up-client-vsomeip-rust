@@ -264,15 +264,11 @@ impl VsomeipOfferedRequestedRegistry for UPTransportVsomeipStorage {
 impl MessageHandlerRegistry for UPTransportVsomeipStorage {
     fn get_message_handler(
         &self,
-        client_id: ClientId,
         transport_storage: Arc<UPTransportVsomeipStorage>,
         listener_config: (UUri, Option<UUri>, ComparableListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
-        self.message_handler_registry.get_message_handler(
-            client_id,
-            transport_storage,
-            listener_config,
-        )
+        self.message_handler_registry
+            .get_message_handler(transport_storage, listener_config)
     }
 
     fn release_message_handler(

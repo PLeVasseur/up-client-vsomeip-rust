@@ -19,10 +19,11 @@ use std::path::PathBuf;
 use up_rust::{UCode, UStatus};
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ApplicationConfig {
-    pub(crate) name: String,
+pub struct ServiceConfig {
     #[serde(deserialize_with = "deserialize_hex_u16")]
-    pub(crate) id: u16,
+    pub(crate) service: u16,
+    #[serde(deserialize_with = "deserialize_hex_u16")]
+    pub(crate) instance: u16,
 }
 
 fn deserialize_hex_u16<'de, D>(deserializer: D) -> Result<u16, D::Error>
@@ -49,25 +50,23 @@ fn read_json_file(file_path: &PathBuf) -> Result<Value, serde_json::Error> {
     serde_json::from_str(&content)
 }
 
-pub(crate) fn extract_applications(file_path: &PathBuf) -> Result<Vec<ApplicationConfig>, UStatus> {
+pub(crate) fn extract_services(file_path: &PathBuf) -> Result<Vec<ServiceConfig>, UStatus> {
     let file_content = read_json_file(file_path);
 
     return match file_content {
         Ok(json_data) => {
-            if let Some(applications_value) =
-                json_data.get("applications").and_then(|v| v.as_array())
-            {
-                match serde_json::from_value::<Vec<ApplicationConfig>>(Value::from(
-                    applications_value.clone(),
+            if let Some(services_value) = json_data.get("services").and_then(|v| v.as_array()) {
+                match serde_json::from_value::<Vec<ServiceConfig>>(Value::from(
+                    services_value.clone(),
                 )) {
-                    Ok(applications) => Ok(applications),
+                    Ok(services) => Ok(services),
                     Err(e) => {
-                        let err_msg = format!("Error deserializing 'applications': {:?}", e);
+                        let err_msg = format!("Error deserializing 'services': {:?}", e);
                         Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg))
                     }
                 }
             } else {
-                let err_msg = format!("The 'applications' array is not found in the vsomeip configuration file: {file_path:?}");
+                let err_msg = format!("The 'services' array is not found in the vsomeip configuration file: {file_path:?}");
                 Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err_msg))
             }
         }

@@ -125,7 +125,6 @@ pub trait MessageHandlerRegistry {
     /// Gets an unused [MessageHandlerFnPtr] to hand over to a vsomeip application
     fn get_message_handler(
         &self,
-        client_id: ClientId,
         transport_storage: Arc<UPTransportVsomeipStorage>,
         listener_config: (UUri, Option<UUri>, ComparableListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError>;

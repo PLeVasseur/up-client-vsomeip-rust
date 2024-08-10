@@ -355,10 +355,7 @@ impl UPTransportVsomeipEngine {
                         runtime_wrapper.get_pinned().get_application(&app_name_cxx),
                     );
                     let Some(mut application_wrapper) = application_wrapper else {
-                        let err = format!(
-                            "No application exists for {app_name} under client_id: {}",
-                            message_type.client_id()
-                        );
+                        let err = format!("No application exists for {app_name}",);
                         Self::return_oneshot_result(
                             Err(UStatus::fail_with_code(UCode::INTERNAL, err)),
                             return_channel,
@@ -366,9 +363,6 @@ impl UPTransportVsomeipEngine {
                         .await;
                         continue;
                     };
-
-                    let app_client_id = application_wrapper.get_pinned().get_client();
-                    trace!("Application existed for {app_name}, listed under client_id: {}, with app_client_id: {app_client_id}", message_type.client_id());
 
                     let res = Self::send_internal(
                         umsg,
@@ -642,7 +636,7 @@ impl UPTransportVsomeipEngine {
         );
 
         match registration_type {
-            RegistrationType::Publish(_) => {
+            RegistrationType::Publish => {
                 trace!(
                     "{}:{} - Unregistering for Publish style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -665,7 +659,7 @@ impl UPTransportVsomeipEngine {
                 );
                 Ok(())
             }
-            RegistrationType::Request(_) => {
+            RegistrationType::Request => {
                 trace!(
                     "{}:{} - Unregistering for Request style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -696,7 +690,7 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
-            RegistrationType::Response(_) => {
+            RegistrationType::Response => {
                 trace!(
                     "{}:{} - Unregistering for Response style messages.",
                     UP_CLIENT_VSOMEIP_TAG,
@@ -727,7 +721,7 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
-            RegistrationType::AllPointToPoint(_) => Err(UStatus::fail_with_code(
+            RegistrationType::AllPointToPoint => Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
                 "Should be impossible to unregister point-to-point internally",
             )),
@@ -828,7 +822,6 @@ impl UPTransportVsomeipEngine {
     }
 
     async fn start_vsomeip_app_internal(
-        client_id: ClientId,
         app_name: ApplicationName,
         application_state_availability_handler_registry: Arc<
             dyn ApplicationStateAvailabilityHandlerRegistry,
@@ -836,10 +829,9 @@ impl UPTransportVsomeipEngine {
         config_path: Option<PathBuf>,
     ) -> Result<(), UStatus> {
         trace!(
-            "{}:{} - Attempting to initialize new app for client_id: {} app_name: {}",
+            "{}:{} - Attempting to initialize new app for app_name: {}",
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-            client_id,
             app_name
         );
 
@@ -849,10 +841,9 @@ impl UPTransportVsomeipEngine {
             application_state_availability_handler_registry,
         )?;
         trace!(
-            "{}:{} - After starting app for client_id: {} app_name: {}",
+            "{}:{} - After starting app for app_name: {}",
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
-            client_id,
             app_name
         );
 

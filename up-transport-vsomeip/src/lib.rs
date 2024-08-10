@@ -11,7 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determine_message_type::{determine_registration_type, RegistrationType};
+use crate::determine_message_type::{determine_type, RegistrationType};
 use crate::storage::message_handler_registry::{
     ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
 };
@@ -23,7 +23,7 @@ use crate::transport_engine::{
     UP_CLIENT_VSOMEIP_TAG,
 };
 use crate::utils::any_uuri_fixed_authority_id;
-use crate::vsomeip_config::extract_applications;
+use crate::vsomeip_config::extract_services;
 use log::{error, info, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -292,32 +292,19 @@ impl UPTransportVsomeip {
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
 
-        let registration_type_res = determine_registration_type(
-            source_filter,
-            &sink_filter.cloned(),
-            self.storage.get_ue_id(),
-        );
+        let registration_type_res = determine_type(source_filter, &sink_filter.cloned());
         let Ok(registration_type) = registration_type_res else {
             return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
-        if registration_type == RegistrationType::AllPointToPoint(0xFFFF) {
+        if registration_type == RegistrationType::AllPointToPoint {
             return self.unregister_point_to_point_listener();
         }
 
-        let app_name_res = self
+        let app_name = self
             .storage
-            .get_app_name_for_client_id(registration_type.client_id());
-
-        let Some(app_name) = app_name_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
-                format!(
-                    "No application found for client_id: {}",
-                    registration_type.client_id()
-                ),
-            ));
-        };
+            .get_vsomeip_application_config()
+            .application_name;
 
         let (tx, rx) = oneshot::channel();
         trace!("attempting to block_on");
@@ -359,21 +346,10 @@ impl UPTransportVsomeip {
         //  * rpc_correlation -> send an error
         //  * vsomep_offered_requested -> unoffer / unrequest
 
-        let Ok(client_usage) = client_usage_res else {
+        let Ok(_client_usage) = client_usage_res else {
             warn!("{}", client_usage_res.err().unwrap());
             return Ok(());
         };
-
-        match client_usage {
-            ClientUsage::ClientIdInUse => {}
-            ClientUsage::ClientIdNotInUse(client_id) => {
-                task::block_in_place(|| {
-                    self.storage
-                        .get_runtime_handle()
-                        .block_on(self.shutdown_vsomeip_app(client_id))
-                })?;
-            }
-        }
 
         Ok(())
     }
@@ -393,7 +369,7 @@ impl UPTransportVsomeip {
             return Ok(false);
         };
 
-        if message_type != RegistrationType::Request(message_type.client_id()) {
+        if message_type != RegistrationType::Request {
             trace!("Sending non-Request when we have a point-to-point listener established");
             return Ok(true);
         }
@@ -414,12 +390,10 @@ impl UPTransportVsomeip {
         let listener = point_to_point_listener.clone();
         let comp_listener = ComparableListener::new(Arc::clone(&listener));
         let listener_config = (source_filter.clone(), sink_filter.clone(), comp_listener);
-        let message_type = RegistrationType::Response(message_type.client_id());
-        let msg_handler_res = self.storage.get_message_handler(
-            message_type.client_id(),
-            self.storage.clone(),
-            listener_config,
-        );
+        let message_type = RegistrationType::Response;
+        let msg_handler_res = self
+            .storage
+            .get_message_handler(self.storage.clone(), listener_config);
 
         let msg_handler = {
             match msg_handler_res {
@@ -483,8 +457,8 @@ impl UPTransportVsomeip {
             return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
         };
 
-        let application_configs = extract_applications(config_path)?;
-        trace!("Got vsomeip application_configs: {application_configs:?}");
+        let service_configs = extract_services(config_path)?;
+        trace!("Got vsomeip service_configs: {service_configs:?}");
 
         {
             let mut point_to_point_listener = self.point_to_point_listener.write().unwrap();
@@ -498,33 +472,24 @@ impl UPTransportVsomeip {
             trace!("We found a point-to-point listener and set it");
         }
 
-        for app_config in application_configs {
-            let registration_type = RegistrationType::Request(app_config.id);
-            let app_config = Arc::new(app_config);
-
-            let app_init_res = self
-                .initialize_vsomeip_app(app_config.id, app_config.name.clone())
-                .await;
-            if let Err(err) = app_init_res {
-                panic!("engine has stopped! unable to proceed! with err: {err:?}");
-            }
+        for service_config in service_configs {
+            let registration_type = RegistrationType::Request;
+            let service_config = Arc::new(service_config);
+            let ue_id = (service_config.instance << 16) as u32 | service_config.service as u32;
 
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = UUri::any();
-            let sink_filter = any_uuri_fixed_authority_id(
-                &self.storage.get_local_authority(),
-                app_config.id as UeId,
-            );
+            let sink_filter =
+                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), ue_id);
             let listener_config = (
                 source_filter.clone(),
                 Some(sink_filter.clone()),
                 comp_listener,
             );
-            let Ok(msg_handler) = self.storage.get_message_handler(
-                registration_type.client_id(),
-                self.storage.clone(),
-                listener_config,
-            ) else {
+            let Ok(msg_handler) = self
+                .storage
+                .get_message_handler(self.storage.clone(), listener_config)
+            else {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
                     "Unable to get message handler for register_point_to_point_listener",
@@ -539,7 +504,9 @@ impl UPTransportVsomeip {
                     Some(sink_filter.clone()),
                     registration_type.clone(),
                     msg_handler,
-                    app_config.name.clone(),
+                    self.storage
+                        .get_vsomeip_application_config()
+                        .application_name,
                     self.storage.clone(),
                     tx,
                 ),
@@ -554,8 +521,6 @@ impl UPTransportVsomeip {
             if let Err(err) = internal_res {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
-                    // TODO: Once we update to up-rust on crates.io Debug will be impl'ed on ComparableListener
-                    // format!("Unable to register point to point listener: {listener_config:?} err: {err:?}"),
                     format!("Unable to register point to point listener: err: {err:?}"),
                 ));
             }
@@ -582,22 +547,18 @@ impl UPTransportVsomeip {
             return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
         };
 
-        let application_configs = extract_applications(config_path)?;
+        let service_configs = extract_services(config_path)?;
         trace!("Got vsomeip application_configs: {application_configs:?}");
 
-        for app_config in &application_configs {
+        for service_config in &service_configs {
+            let ue_id = (service_config.instance << 16) as u32 | service_config.service as u32;
             let source_filter = UUri::any();
-            let sink_filter = any_uuri_fixed_authority_id(
-                &self.storage.get_local_authority(),
-                app_config.id as UeId,
-            );
+            let sink_filter =
+                any_uuri_fixed_authority_id(&self.storage.get_local_authority(), ue_id);
 
             let registration_type = {
-                let reg_type_res = determine_registration_type(
-                    &source_filter.clone(),
-                    &Some(sink_filter.clone()),
-                    self.storage.get_ue_id(),
-                );
+                let reg_type_res =
+                    determine_type(&source_filter.clone(), &Some(sink_filter.clone()));
                 match reg_type_res {
                     Ok(registration_type) => registration_type,
                     Err(warn) => {
@@ -608,18 +569,10 @@ impl UPTransportVsomeip {
                 }
             };
 
-            let app_name = {
-                match self
-                    .storage
-                    .get_app_name_for_client_id(registration_type.client_id())
-                {
-                    None => {
-                        info!("vsomeip app for point_to_point_listener vsomeip app should already have been started under client_id: {}", registration_type.client_id());
-                        return Ok(());
-                    }
-                    Some(app_name) => app_name,
-                }
-            };
+            let app_name = self
+                .storage
+                .get_vsomeip_application_config()
+                .application_name;
 
             let (tx, rx) = oneshot::channel();
 
@@ -661,24 +614,10 @@ impl UPTransportVsomeip {
             //  * rpc_correlation -> send an error
             //  * vsomep_offered_requested -> unoffer / unrequest
 
-            let Ok(client_usage) = client_usage_res else {
+            let Ok(_client_usage) = client_usage_res else {
                 warn!("{}", client_usage_res.err().unwrap());
                 continue;
             };
-            match client_usage {
-                ClientUsage::ClientIdInUse => {}
-                ClientUsage::ClientIdNotInUse(client_id) => {
-                    let shutdown_res = task::block_in_place(|| {
-                        self.storage
-                            .get_runtime_handle()
-                            .block_on(self.shutdown_vsomeip_app(client_id))
-                    });
-                    if let Err(warn) = shutdown_res {
-                        warn!("{warn}");
-                        continue;
-                    }
-                }
-            }
         }
 
         Ok(())
@@ -724,12 +663,6 @@ impl UPTransportVsomeip {
     }
 
     async fn shutdown_vsomeip_app(&self, client_id: ClientId) -> Result<(), UStatus> {
-        let Some(app_name) = self.storage.remove_app_name_for_client_id(client_id) else {
-            return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
-                format!("Unable to find app_name for client_id: {client_id}"),
-            ));
-        };
         trace!("No more remaining listeners for client_id: {client_id} app_name: {app_name}");
 
         let (tx, rx) = oneshot::channel();

@@ -11,9 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::determine_message_type::{
-    determine_registration_type, determine_send_type, RegistrationType,
-};
+use crate::determine_message_type::{determine_type, RegistrationType};
 use crate::storage::message_handler_registry::MessageHandlerRegistry;
 use crate::transport_engine::TransportCommand;
 use crate::transport_engine::UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL;
@@ -55,24 +53,13 @@ impl UTransport for UPTransportVsomeip {
         };
 
         let sink_filter = message.attributes.sink.as_ref();
-        let message_type = determine_send_type(source_filter, &sink_filter.cloned())?;
+        let message_type = determine_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
-        let app_name_res = {
-            if let Some(app_name) = self
-                .storage
-                .get_app_name_for_client_id(message_type.client_id())
-            {
-                Ok(app_name)
-            } else {
-                let client_id = message_type.client_id();
-                let app_name = format!("{}", message_type.client_id());
-                self.initialize_vsomeip_app(client_id, app_name).await
-            }
-        };
 
-        let Ok(app_name) = app_name_res else {
-            return Err(app_name_res.err().unwrap());
-        };
+        let app_name = self
+            .storage
+            .get_vsomeip_application_config()
+            .application_name;
 
         self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
             source_filter,
@@ -106,11 +93,7 @@ impl UTransport for UPTransportVsomeip {
         sink_filter: Option<&UUri>,
         listener: Arc<dyn UListener>,
     ) -> Result<(), UStatus> {
-        let registration_type = determine_registration_type(
-            source_filter,
-            &sink_filter.cloned(),
-            self.storage.get_ue_id(),
-        )?;
+        let registration_type = determine_type(source_filter, &sink_filter.cloned())?;
 
         trace!("registration_type: {registration_type:?}");
 
