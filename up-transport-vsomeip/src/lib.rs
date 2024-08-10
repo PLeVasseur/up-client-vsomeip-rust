@@ -662,22 +662,24 @@ impl UPTransportVsomeip {
         Ok(app_name)
     }
 
-    async fn shutdown_vsomeip_app(&self) -> Result<(), UStatus> {
+    fn shutdown_vsomeip_app(&self) -> Result<(), UStatus> {
         let app_name = self
             .storage
             .get_vsomeip_application_config()
             .application_name;
 
         let (tx, rx) = oneshot::channel();
-        let send_to_engine_res = Self::send_to_engine_with_status(
+        let send_to_engine = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::StopVsomeipApp(app_name, tx),
-        )
-        .await;
+        );
+        let send_to_engine_res = self.storage.get_runtime_handle().block_on(send_to_engine);
+
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await
+        let internal = Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx);
+        self.storage.get_runtime_handle().block_on(internal)
     }
 }
 
@@ -702,7 +704,9 @@ impl Drop for UPTransportVsomeip {
             }
         }
 
-        trace!("Finished running Drop for UPTransportVsomeipInnerHandle, ue_id: {ue_id}");
+        trace!("Finished running Drop for ue_id: {ue_id}");
+
+        self.shutdown_vsomeip_app();
 
         trace!("Signalling shutdown of runtime");
         // Signal the dedicated runtime to shut down
