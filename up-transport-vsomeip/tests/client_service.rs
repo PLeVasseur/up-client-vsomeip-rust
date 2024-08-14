@@ -13,7 +13,7 @@
 
 use log::{error, info};
 use std::fs::canonicalize;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
@@ -62,6 +62,7 @@ impl UListener for ResponseListener {
     }
 }
 pub struct RequestListener {
+    first_request: AtomicBool,
     client: Weak<UPTransportVsomeip>,
     received_request: AtomicUsize,
 }
@@ -70,6 +71,7 @@ impl RequestListener {
     #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPTransportVsomeip>) -> Self {
         Self {
+            first_request: AtomicBool::new(true),
             client: Arc::downgrade(&client),
             received_request: AtomicUsize::new(0),
         }
@@ -83,6 +85,13 @@ impl RequestListener {
 #[async_trait::async_trait]
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
+        // let first_request = self.first_request.fetch_and(false, Ordering::SeqCst);
+        // if first_request {
+        //     println!("first_request received");
+        //     tokio::time::sleep(Duration::from_nanos(1)).await;
+        //     println!("after sleep");
+        // }
+
         self.received_request.fetch_add(1, Ordering::SeqCst);
         info!("Received Request:\n{:?}", msg);
 
@@ -233,7 +242,8 @@ async fn client_service() {
         error!("Unable to register: {:?}", err);
     }
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(6000)).await;
+    println!("After 6000ms sleep");
 
     // Track the start time and set the duration for the loop
     let duration = Duration::from_millis(TEST_DURATION);
