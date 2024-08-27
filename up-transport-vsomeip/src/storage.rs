@@ -30,6 +30,7 @@ use crate::storage::{
     rpc_correlation::InMemoryRpcCorrelationRegistry,
     vsomeip_offered_requested::InMemoryVsomeipOfferedRequestedRegistry,
 };
+use crate::vsomeip_config::VsomeipApplicationConfig;
 use crate::{
     ApplicationName, AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId,
     SomeIpRequestId, UProtocolReqId, UeId,
@@ -40,24 +41,6 @@ use tokio::runtime::Handle;
 use up_rust::{ComparableListener, UListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
-
-#[derive(Clone)]
-pub struct VsomeipApplicationConfig {
-    pub(crate) application_name: String,
-    pub(crate) application_id: ClientId,
-}
-
-impl VsomeipApplicationConfig {
-    pub fn new(application_name: &str, application_id: ClientId) -> Self {
-        // TODO: - PELE - Add validation that we have supplied a valid application_name
-        // and application_id according to vsomeip spec
-
-        Self {
-            application_name: application_name.to_string(),
-            application_id,
-        }
-    }
-}
 
 pub struct UPTransportVsomeipStorage {
     vsomeip_application_config: VsomeipApplicationConfig,

@@ -29,12 +29,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use storage::VsomeipApplicationConfig;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
 use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri, UUID};
+use vsomeip_config::{extract_application, VsomeipApplicationConfig};
 
 mod determine_message_type;
 mod message_conversions;
@@ -167,9 +167,9 @@ impl UPTransportVsomeip {
             ));
         }
 
-        // E TODO: - PELE: Read vsomeip config, extract and populate VsomeipApplicationConfig
+        //  TODO: - PELE: Read vsomeip config, extract and populate VsomeipApplicationConfig
         //   For now, just set it to some default
-        let vsomeip_application_config = VsomeipApplicationConfig::new("", 0);
+        let vsomeip_application_config = extract_application(config_path)?;
 
         Self::new_internal(
             vsomeip_application_config,
