@@ -34,7 +34,8 @@ use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
 use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri, UUID};
-use vsomeip_config::{extract_application, VsomeipApplicationConfig};
+use vsomeip_config::extract_application;
+pub use vsomeip_config::VsomeipApplicationConfig;
 
 mod determine_message_type;
 mod message_conversions;

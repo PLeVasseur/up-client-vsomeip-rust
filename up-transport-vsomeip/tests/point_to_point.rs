@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
 
 const TEST_DURATION: u64 = 1000;
 
@@ -458,6 +458,7 @@ async fn point_to_point() {
         error!("Unable to register: {:?}", err);
     }
 
+    let vsomeip_app_config = VsomeipApplicationConfig::new("not_listened_to_client", 0x765);
     let non_listened_to_client_uri = UUri::try_from_parts(
         NON_POINT_TO_POINT_LISTENED_AUTHORITY,
         OTHER_CLIENT_STREAMER_UE_ID,
@@ -466,6 +467,7 @@ async fn point_to_point() {
     )
     .unwrap();
     let non_listened_to_client = UPTransportVsomeip::new(
+        vsomeip_app_config,
         non_listened_to_client_uri,
         &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
         None,

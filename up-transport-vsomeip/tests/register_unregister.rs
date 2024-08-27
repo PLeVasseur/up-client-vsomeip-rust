@@ -23,6 +23,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use up_rust::{UListener, UTransport, UUri};
+    use up_transport_vsomeip::VsomeipApplicationConfig;
 
     // #[test]
     // fn test_constructing_client() {
@@ -39,9 +40,15 @@ mod tests {
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
 
+        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_publish_test", 0x123);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
+        let client = UPTransportVsomeip::new(
+            vsomeip_app_config,
+            client_uri,
+            &"me_authority".to_string(),
+            None,
+        )
+        .unwrap();
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
         let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
@@ -77,9 +84,15 @@ mod tests {
     async fn test_registering_unregistering_request() {
         test_lib::before_test();
 
+        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_request_test", 0x124);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
+        let client = UPTransportVsomeip::new(
+            vsomeip_app_config,
+            client_uri,
+            &"me_authority".to_string(),
+            None,
+        )
+        .unwrap();
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
         let sink_filter = UUri::try_from_parts("bar", 0x02, 1, 20).unwrap();
@@ -116,6 +129,7 @@ mod tests {
     async fn test_registering_unregistering_response() {
         test_lib::before_test();
 
+        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_response_test", 0x125);
         let client_uri = UUri {
             authority_name: "foo".to_string(),
             ue_id: 10,
@@ -123,8 +137,13 @@ mod tests {
             resource_id: 0,
             ..Default::default()
         };
-        let client =
-            UPTransportVsomeip::new(client_uri, &"me_authority".to_string(), None).unwrap();
+        let client = UPTransportVsomeip::new(
+            vsomeip_app_config,
+            client_uri,
+            &"me_authority".to_string(),
+            None,
+        )
+        .unwrap();
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
         let sink_filter = UUri::try_from_parts("bar", 0x02, 1, 0).unwrap();
