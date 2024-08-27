@@ -241,7 +241,7 @@ impl UPTransportVsomeip {
             shutdown_runtime_tx,
         };
 
-        me.initialize_vsomeip_app(storage.get_vsomeip_application_config().application_name);
+        me.initialize_vsomeip_app(storage.get_vsomeip_application_config().application_name)?;
 
         Ok(me)
     }
@@ -706,9 +706,11 @@ impl Drop for UPTransportVsomeip {
 
         trace!("Finished running Drop for ue_id: {ue_id}");
 
-        self.shutdown_vsomeip_app();
+        if let Err(err) = self.shutdown_vsomeip_app() {
+            error!("Unable to shut down vsomeip application gracefully");
+        }
 
-        trace!("Signalling shutdown of runtime");
+        trace!("Signaling shutdown of runtime");
         // Signal the dedicated runtime to shut down
         self.shutdown_runtime_tx
             .send(())
