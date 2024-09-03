@@ -56,10 +56,7 @@ impl UTransport for UPTransportVsomeip {
         let message_type = determine_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
 
-        let app_name = self
-            .storage
-            .get_vsomeip_application_config()
-            .application_name;
+        let app_name = self.storage.get_vsomeip_application_config().name;
 
         self.register_for_returning_response_if_point_to_point_listener_and_sending_request(
             source_filter,
@@ -101,10 +98,7 @@ impl UTransport for UPTransportVsomeip {
             return self.register_point_to_point_listener(&listener).await;
         }
 
-        let app_name = self
-            .storage
-            .get_vsomeip_application_config()
-            .application_name;
+        let app_name = self.storage.get_vsomeip_application_config().name;
 
         let comp_listener = ComparableListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);

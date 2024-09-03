@@ -29,19 +29,19 @@ pub struct ServiceConfig {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VsomeipApplicationConfig {
-    pub(crate) application_name: String,
+    pub(crate) name: String,
     #[serde(deserialize_with = "deserialize_hex_u16")]
-    pub(crate) application_id: ClientId,
+    pub(crate) id: ClientId,
 }
 
 impl VsomeipApplicationConfig {
-    pub fn new(application_name: &str, application_id: ClientId) -> Self {
+    pub fn new(name: &str, id: ClientId) -> Self {
         // TODO: - PELE - Add validation that we have supplied a valid application_name
         // and application_id according to vsomeip spec
 
         Self {
-            application_name: application_name.to_string(),
-            application_id,
+            name: name.to_string(),
+            id,
         }
     }
 }

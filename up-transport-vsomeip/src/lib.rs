@@ -242,7 +242,7 @@ impl UPTransportVsomeip {
             shutdown_runtime_tx,
         };
 
-        me.initialize_vsomeip_app(storage.get_vsomeip_application_config().application_name)?;
+        me.initialize_vsomeip_app(storage.get_vsomeip_application_config().name)?;
 
         Ok(me)
     }
@@ -302,10 +302,7 @@ impl UPTransportVsomeip {
             return self.unregister_point_to_point_listener();
         }
 
-        let app_name = self
-            .storage
-            .get_vsomeip_application_config()
-            .application_name;
+        let app_name = self.storage.get_vsomeip_application_config().name;
 
         let (tx, rx) = oneshot::channel();
         trace!("attempting to block_on");
@@ -416,10 +413,7 @@ impl UPTransportVsomeip {
             }
         };
 
-        let app_name = self
-            .storage
-            .get_vsomeip_application_config()
-            .application_name;
+        let app_name = self.storage.get_vsomeip_application_config().name;
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine_res = Self::send_to_engine_with_status(
@@ -505,9 +499,7 @@ impl UPTransportVsomeip {
                     Some(sink_filter.clone()),
                     registration_type.clone(),
                     msg_handler,
-                    self.storage
-                        .get_vsomeip_application_config()
-                        .application_name,
+                    self.storage.get_vsomeip_application_config().name,
                     self.storage.clone(),
                     tx,
                 ),
@@ -570,10 +562,7 @@ impl UPTransportVsomeip {
                 }
             };
 
-            let app_name = self
-                .storage
-                .get_vsomeip_application_config()
-                .application_name;
+            let app_name = self.storage.get_vsomeip_application_config().name;
 
             let (tx, rx) = oneshot::channel();
 
@@ -634,7 +623,7 @@ impl UPTransportVsomeip {
             UP_CLIENT_VSOMEIP_TAG,
             UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
         );
-        let client_id = self.storage.get_vsomeip_application_config().application_id;
+        let client_id = self.storage.get_vsomeip_application_config().id;
         let send_to_engine = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::StartVsomeipApp(
@@ -645,14 +634,16 @@ impl UPTransportVsomeip {
             ),
         );
 
-        let send_to_engine_res = self.storage.get_runtime_handle().block_on(send_to_engine);
+        let send_to_engine_res =
+            task::block_in_place(|| self.storage.get_runtime_handle().block_on(send_to_engine));
 
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
 
         let internal = Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx);
-        let internal_res = self.storage.get_runtime_handle().block_on(internal);
+        let internal_res =
+            task::block_in_place(|| self.storage.get_runtime_handle().block_on(internal));
         if let Err(err) = internal_res {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
@@ -664,23 +655,21 @@ impl UPTransportVsomeip {
     }
 
     fn shutdown_vsomeip_app(&self) -> Result<(), UStatus> {
-        let app_name = self
-            .storage
-            .get_vsomeip_application_config()
-            .application_name;
+        let app_name = self.storage.get_vsomeip_application_config().name;
 
         let (tx, rx) = oneshot::channel();
         let send_to_engine = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::StopVsomeipApp(app_name, tx),
         );
-        let send_to_engine_res = self.storage.get_runtime_handle().block_on(send_to_engine);
+        let send_to_engine_res =
+            task::block_in_place(|| self.storage.get_runtime_handle().block_on(send_to_engine));
 
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
         let internal = Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx);
-        self.storage.get_runtime_handle().block_on(internal)
+        task::block_in_place(|| self.storage.get_runtime_handle().block_on(internal))
     }
 }
 
