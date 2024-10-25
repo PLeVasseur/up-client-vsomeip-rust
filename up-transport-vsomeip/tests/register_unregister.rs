@@ -25,17 +25,6 @@ mod tests {
     use up_rust::{UListener, UTransport, UUri};
     use up_transport_vsomeip::VsomeipApplicationConfig;
 
-    // #[test]
-    // fn test_constructing_client() {
-    //     test_lib::before_test();
-    //
-    //     let client = UPTransportVsomeip::new(&"foo".to_string(), &"me_authority".to_string(), 10);
-    //
-    //     thread::sleep(Duration::from_millis(100));
-    //
-    //     assert!(client.is_ok());
-    // }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
@@ -192,7 +181,7 @@ mod tests {
         let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
-            Path::new("vsomeip_configs/example_ustreamer.json"),
+            Path::new("vsomeip_configs/point_to_point_integ.json"),
             None,
         )
         .unwrap();
