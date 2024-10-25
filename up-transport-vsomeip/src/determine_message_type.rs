@@ -12,6 +12,7 @@
  ********************************************************************************/
 
 use crate::{ClientId, UeId};
+use log::trace;
 use up_rust::{UCode, UStatus, UUri};
 
 /// Registration type containing the [ClientId] of the [vsomeip_sys::vsomeip::application]
@@ -31,11 +32,13 @@ pub fn determine_type(
 ) -> Result<RegistrationType, UStatus> {
     if let Some(sink_filter) = &sink_filter {
         // determine if we're in the uStreamer use-case of capturing all point-to-point messages
+        trace!("source_filter: {source_filter:?}");
+        trace!("sink_filter: {sink_filter:?}");
         let streamer_use_case = {
-            sink_filter.authority_name == "*"
-                && sink_filter.ue_id == 0x0000_FFFF
-                && sink_filter.ue_version_major == 0xFF
-                && sink_filter.resource_id == 0xFFFF
+            source_filter.authority_name == "*"
+                && source_filter.ue_id == 0x0000_FFFF
+                && source_filter.ue_version_major == 0xFF
+                && source_filter.resource_id == 0xFFFF
                 && sink_filter.authority_name != "*"
                 && sink_filter.ue_id == 0x0000_FFFF
                 && sink_filter.ue_version_major == 0xFF

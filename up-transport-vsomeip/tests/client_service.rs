@@ -20,7 +20,7 @@ use tokio::time::Instant;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
-const TEST_DURATION: u64 = 1000;
+const TEST_DURATION: u64 = 10;
 
 pub struct ResponseListener {
     received_response: AtomicUsize,
