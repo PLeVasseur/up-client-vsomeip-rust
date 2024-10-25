@@ -13,11 +13,11 @@
 
 use crate::message_conversions::VsomeipMessageToUMessage;
 use crate::storage::UPTransportVsomeipStorage;
-use crate::{ClientId, MessageHandlerId};
+use crate::MessageHandlerId;
 use bimap::BiMap;
 use cxx::SharedPtr;
 use lazy_static::lazy_static;
-use log::{debug, error, info, trace, warn};
+use log::{error, trace, warn};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::error;
@@ -116,11 +116,6 @@ impl Display for MessageHandlerIdAndListenerConfigError {
 
 impl error::Error for MessageHandlerIdAndListenerConfigError {}
 
-pub enum ClientUsage {
-    ClientIdInUse,
-    ClientIdNotInUse(ClientId),
-}
-
 pub trait MessageHandlerRegistry {
     /// Gets an unused [MessageHandlerFnPtr] to hand over to a vsomeip application
     fn get_message_handler(
@@ -133,7 +128,7 @@ pub trait MessageHandlerRegistry {
     fn release_message_handler(
         &self,
         listener_config: (UUri, Option<UUri>, ComparableListener),
-    ) -> Result<ClientUsage, UStatus>;
+    ) -> Result<(), UStatus>;
 
     /// Get all listener configs
     fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)>;
@@ -263,7 +258,7 @@ impl InMemoryMessageHandlerRegistry {
     pub fn release_message_handler(
         &self,
         listener_config: (UUri, Option<UUri>, ComparableListener),
-    ) -> Result<ClientUsage, UStatus> {
+    ) -> Result<(), UStatus> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
         let mut message_handler_id_to_transport_storage =
             MESSAGE_HANDLER_ID_TO_TRANSPORT_STORAGE.write().unwrap();
@@ -305,7 +300,7 @@ impl InMemoryMessageHandlerRegistry {
             warn!("{warn}");
         }
 
-        Ok(ClientUsage::ClientIdInUse)
+        Ok(())
     }
 
     /// Get all listener configs

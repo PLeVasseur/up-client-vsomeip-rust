@@ -16,9 +16,7 @@ pub mod message_handler_registry;
 pub mod rpc_correlation;
 pub mod vsomeip_offered_requested;
 
-use crate::storage::message_handler_registry::{
-    ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
-};
+use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::storage::{
@@ -32,8 +30,8 @@ use crate::storage::{
 };
 use crate::vsomeip_config::VsomeipApplicationConfig;
 use crate::{
-    ApplicationName, AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId,
-    SomeIpRequestId, UProtocolReqId, UeId,
+    AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId, SomeIpRequestId,
+    UProtocolReqId, UeId,
 };
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
@@ -257,7 +255,7 @@ impl MessageHandlerRegistry for UPTransportVsomeipStorage {
     fn release_message_handler(
         &self,
         listener_config: (UUri, Option<UUri>, ComparableListener),
-    ) -> Result<ClientUsage, UStatus> {
+    ) -> Result<(), UStatus> {
         self.message_handler_registry
             .release_message_handler(listener_config)
     }

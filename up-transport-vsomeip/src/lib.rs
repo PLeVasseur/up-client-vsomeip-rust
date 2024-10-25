@@ -12,9 +12,7 @@
  ********************************************************************************/
 
 use crate::determine_message_type::{determine_type, RegistrationType};
-use crate::storage::message_handler_registry::{
-    ClientUsage, GetMessageHandlerError, MessageHandlerRegistry,
-};
+use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
 use crate::storage::UPTransportVsomeipStorage;
 use crate::transport_engine::{TransportCommand, UPTransportVsomeipEngine};
 use crate::transport_engine::{
@@ -24,7 +22,7 @@ use crate::transport_engine::{
 };
 use crate::utils::any_uuri_fixed_authority_id;
 use crate::vsomeip_config::extract_services;
-use log::{error, info, trace, warn};
+use log::{error, trace, warn};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -470,8 +468,7 @@ impl UPTransportVsomeip {
         for service_config in service_configs {
             let registration_type = RegistrationType::Request;
             let service_config = Arc::new(service_config);
-            let ue_id =
-                ((service_config.instance as u32) << 16) as u32 | service_config.service as u32;
+            let ue_id = (service_config.instance as u32) << 16 | service_config.service as u32;
 
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = UUri::any();
@@ -698,7 +695,7 @@ impl Drop for UPTransportVsomeip {
         trace!("Finished running Drop for ue_id: {ue_id}");
 
         if let Err(err) = self.shutdown_vsomeip_app() {
-            error!("Unable to shut down vsomeip application gracefully");
+            error!("Unable to shut down vsomeip application gracefully. err: {err:?}");
         }
 
         trace!("Signaling shutdown of runtime");

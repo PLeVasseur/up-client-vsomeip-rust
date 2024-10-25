@@ -11,9 +11,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::{ClientId, UeId};
 use log::trace;
-use up_rust::{UCode, UStatus, UUri};
+use up_rust::{UStatus, UUri};
 
 /// Registration type containing the [ClientId] of the [vsomeip_sys::vsomeip::application]
 /// which should be used for this message

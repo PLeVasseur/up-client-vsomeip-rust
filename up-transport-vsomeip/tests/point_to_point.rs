@@ -22,7 +22,7 @@ use tokio::time::Instant;
 use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
 use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
-use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
+use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 1000;
 
@@ -43,13 +43,6 @@ const SERVICE_UE_VERSION_NUMBER: u32 = 1;
 const SERVICE_METHOD_RESOURCE_ID: u32 = 0x0421;
 
 const NON_POINT_TO_POINT_LISTENED_AUTHORITY: &str = "oops";
-const OTHER_CLIENT_UE_ID: u32 = 0x7331;
-const OTHER_CLIENT_UE_VERSION_NUMBER: u32 = 1;
-const OTHER_CLIENT_STREAMER_UE_ID: u32 = 0x1337;
-
-const OTHER_SERVICE_UE_ID: u32 = 0x5252;
-const OTHER_SERVICE_UE_VERSION_NUMBER: u32 = 1;
-const OTHER_SERVICE_RESOURCE_ID: u32 = 0x0421;
 
 fn client_reply_uuri() -> UUri {
     UUri {
@@ -87,26 +80,6 @@ fn service_uuri() -> UUri {
         ue_id: SERVICE_UE_ID,
         ue_version_major: SERVICE_UE_VERSION_NUMBER,
         resource_id: SERVICE_METHOD_RESOURCE_ID,
-        ..Default::default()
-    }
-}
-
-fn other_client_reply_uuri() -> UUri {
-    UUri {
-        authority_name: NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
-        ue_id: OTHER_CLIENT_UE_ID,
-        ue_version_major: OTHER_CLIENT_UE_VERSION_NUMBER,
-        resource_id: 0x0000,
-        ..Default::default()
-    }
-}
-
-fn other_service_method_uuri() -> UUri {
-    UUri {
-        authority_name: NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
-        ue_id: OTHER_SERVICE_UE_ID,
-        ue_version_major: OTHER_SERVICE_UE_VERSION_NUMBER,
-        resource_id: OTHER_SERVICE_RESOURCE_ID,
         ..Default::default()
     }
 }
@@ -471,22 +444,6 @@ async fn point_to_point() {
         error!("Unable to register: {:?}", err);
     }
 
-    let vsomeip_app_config = VsomeipApplicationConfig::new("not_listened_to_client", 0x765);
-    let non_listened_to_client_uri = UUri::try_from_parts(
-        NON_POINT_TO_POINT_LISTENED_AUTHORITY,
-        OTHER_CLIENT_STREAMER_UE_ID,
-        1,
-        0,
-    )
-    .unwrap();
-    let non_listened_to_client = UPTransportVsomeip::new(
-        vsomeip_app_config,
-        non_listened_to_client_uri,
-        &NON_POINT_TO_POINT_LISTENED_AUTHORITY.to_string(),
-        None,
-    )
-    .unwrap();
-
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Track the start time and set the duration for the loop
@@ -505,21 +462,6 @@ async fn point_to_point() {
         if let Err(err) = send_res {
             panic!("Unable to send message: {err:?}");
         }
-
-        // let request_msg_not_listened_for_res = UMessageBuilder::request(
-        //     other_service_method_uuri(),
-        //     other_client_reply_uuri(),
-        //     10000,
-        // )
-        // .build()
-        // .unwrap();
-        // trace!("Sending message which shouldn't be received by point to point listener: {request_msg_not_listened_for_res}");
-        // let send_res = non_listened_to_client
-        //     .send(request_msg_not_listened_for_res)
-        //     .await;
-        // if let Err(err) = send_res {
-        //     panic!("Unable to send message: {err:?}");
-        // }
 
         iterations += 1;
     }
