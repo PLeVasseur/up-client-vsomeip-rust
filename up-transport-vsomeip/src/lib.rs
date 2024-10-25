@@ -470,7 +470,8 @@ impl UPTransportVsomeip {
         for service_config in service_configs {
             let registration_type = RegistrationType::Request;
             let service_config = Arc::new(service_config);
-            let ue_id = (service_config.instance << 16) as u32 | service_config.service as u32;
+            let ue_id =
+                ((service_config.instance as u32) << 16) as u32 | service_config.service as u32;
 
             let comp_listener = ComparableListener::new(listener.clone());
             let source_filter = UUri::any();

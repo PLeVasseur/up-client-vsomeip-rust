@@ -24,7 +24,7 @@ use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
 use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
 
-const TEST_DURATION: u64 = 10;
+const TEST_DURATION: u64 = 1000;
 
 const STREAMER_UE_ID: u32 = 0x9876;
 
@@ -373,6 +373,9 @@ async fn point_to_point() {
     );
     trace!("Initializing point to point: End");
     let Ok(point_to_point_client) = point_to_point_client_res else {
+        if let Err(e) = point_to_point_client_res {
+            panic!("Unable to establish UTransport: {e:?}");
+        }
         panic!("Unable to establish UTransport");
     };
     let point_to_point_client = Arc::new(point_to_point_client);
@@ -497,11 +500,11 @@ async fn point_to_point() {
                 .build()
                 .unwrap();
         trace!("Sending message from client: {request_msg_res}");
-        // let send_res = client.send(request_msg_res.clone()).await;
+        let send_res = client.send(request_msg_res.clone()).await;
 
-        // if let Err(err) = send_res {
-        //     panic!("Unable to send message: {err:?}");
-        // }
+        if let Err(err) = send_res {
+            panic!("Unable to send message: {err:?}");
+        }
 
         // let request_msg_not_listened_for_res = UMessageBuilder::request(
         //     other_service_method_uuri(),
