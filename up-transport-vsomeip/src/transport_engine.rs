@@ -822,7 +822,9 @@ impl UPTransportVsomeipEngine {
         result: Result<(), UStatus>,
         tx: oneshot::Sender<Result<(), UStatus>>,
     ) {
-        if let Err(err) = tx.send(result) {
+        let res = tx.send(result);
+        trace!("Attempt to return_oneshot_result: {res:?}");
+        if let Err(err) = res {
             error!("Unable to return oneshot result back to transport: {err:?}");
         }
     }
