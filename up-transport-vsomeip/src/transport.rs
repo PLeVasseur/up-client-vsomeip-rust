@@ -98,7 +98,8 @@ impl UTransport for UPTransportVsomeip {
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
+        let runtime_handle = self.storage.get_runtime_handle();
+        Self::await_engine(runtime_handle, UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
     async fn register_listener(
@@ -167,7 +168,8 @@ impl UTransport for UPTransportVsomeip {
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
 
-        Self::await_engine("register", rx).await
+        let runtime_handle = self.storage.get_runtime_handle();
+        Self::await_engine(runtime_handle, "register", rx).await
     }
 
     async fn unregister_listener(

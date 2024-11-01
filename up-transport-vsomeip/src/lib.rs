@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
@@ -226,11 +227,19 @@ impl UPTransportVsomeip {
             shutdown_runtime_tx,
         })
     }
+
     async fn await_engine(
+        runtime_handle: Handle,
         function_id: &str,
         rx: oneshot::Receiver<Result<(), UStatus>>,
     ) -> Result<(), UStatus> {
-        match timeout(Duration::from_secs(crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT), rx).await {
+        let await_engine_res = task::block_in_place(|| {
+            runtime_handle.block_on(timeout(
+                Duration::from_secs(crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT),
+                rx,
+            ))
+        });
+        match await_engine_res {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
@@ -323,10 +332,11 @@ impl UPTransportVsomeip {
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
+        let runtime_handle = self.storage.get_runtime_handle();
         let await_engine_res = task::block_in_place(|| {
             self.storage
                 .get_runtime_handle()
-                .block_on(Self::await_engine("unregister", rx))
+                .block_on(Self::await_engine(runtime_handle, "unregister", rx))
         });
         if let Err(warn) = await_engine_res {
             warn!("{warn}");
@@ -446,7 +456,8 @@ impl UPTransportVsomeip {
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! err: {err}");
         }
-        let await_res = Self::await_engine("register", rx).await;
+        let runtime_handle = self.storage.get_runtime_handle();
+        let await_res = Self::await_engine(runtime_handle, "register", rx).await;
         if let Err(err) = await_res {
             panic!("Unable to register: {err:?}");
         }
@@ -532,8 +543,13 @@ impl UPTransportVsomeip {
             if let Err(err) = send_to_engine_res {
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
-            let internal_res =
-                Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await;
+            let runtime_handle = self.storage.get_runtime_handle();
+            let internal_res = Self::await_engine(
+                runtime_handle,
+                UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                rx,
+            )
+            .await;
             if let Err(err) = internal_res {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,
@@ -623,10 +639,11 @@ impl UPTransportVsomeip {
             if let Err(err) = send_to_engine_res {
                 panic!("engine has stopped! unable to proceed! with err: {err:?}");
             }
+            let runtime_handle = self.storage.get_runtime_handle();
             let await_engine_res = task::block_in_place(|| {
                 self.storage
                     .get_runtime_handle()
-                    .block_on(Self::await_engine("unregister", rx))
+                    .block_on(Self::await_engine(runtime_handle, "unregister", rx))
             });
             if let Err(warn) = await_engine_res {
                 warn!("{warn}");
@@ -691,8 +708,13 @@ impl UPTransportVsomeip {
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        let internal_res =
-            Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL, rx).await;
+        let runtime_handle = self.storage.get_runtime_handle();
+        let internal_res = Self::await_engine(
+            runtime_handle,
+            UP_CLIENT_VSOMEIP_FN_TAG_INITIALIZE_NEW_APP_INTERNAL,
+            rx,
+        )
+        .await;
         if let Err(err) = internal_res {
             Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
@@ -734,7 +756,8 @@ impl UPTransportVsomeip {
         if let Err(err) = send_to_engine_res {
             panic!("engine has stopped! unable to proceed! with err: {err:?}");
         }
-        Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await
+        let runtime_handle = self.storage.get_runtime_handle();
+        Self::await_engine(runtime_handle, UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP, rx).await
     }
 }
 
