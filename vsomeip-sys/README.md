@@ -13,10 +13,10 @@ We currently support vsomeip **3.4.10** as released [here](https://github.com/CO
 1. Ensure you have a Rust toolchain installed
 2. Ensure you have the vsomeip library installed (optional, see features in `Cargo.toml`)
 3. Ensure that you have the [requirements](https://github.com/COVESA/vsomeip?tab=readme-ov-file#build-instructions-for-linux) of the vsomeip project install
-4. Run env_setup.sh
+4. Run env_setup.sh in parent directory
 
 ``` bash
-source build/env_setup.sh
+source ../build/env_setup.sh
 ```
 
 Then,
