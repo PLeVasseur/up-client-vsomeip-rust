@@ -37,16 +37,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  obtain_and_build_vsomeip:
+
+  set-env:
+    name: Set environment variables
     runs-on: ubuntu-latest
+
     outputs:
-      cache_key: ${{ steps.generate_cache_key.outputs.CACHE_KEY }}
+      arch_specific_cpp_stdlib_path: ${{ steps.set_env.outputs.arch_specific_cpp_stdlib_path }}
+      generic_cpp_stdlib_path: ${{ steps.set_env.outputs.generic_cpp_stdlib_path }}
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Add execute permissions for envsetup
         run: chmod +x build/envsetup.sh
+
+      - name: Set stdlib paths dynamically
+        id: set_env
+        run: |
+          source ./build/envsetup.sh highest
+          echo "sending to GH_OUTPUT vars = $GENERIC_CPP_STDLIB_PATH, $ARCH_SPECIFIC_CPP_STDLIB_PATH"
+          echo "arch_specific_cpp_stdlib_path=$ARCH_SPECIFIC_CPP_STDLIB_PATH" >> $GITHUB_OUTPUT
+          echo "generic_cpp_stdlib_path=$GENERIC_CPP_STDLIB_PATH" >> $GITHUB_OUTPUT
+
+  obtain_and_build_vsomeip:
+    runs-on: ubuntu-latest
+    needs: set-env
+
+    outputs:
+      cache_key: ${{ steps.generate_cache_key.outputs.CACHE_KEY }}
+
+    env:
+       ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.arch_specific_cpp_stdlib_path }}
+       GENERIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.generic_cpp_stdlib_path }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set environment variables
         run: |
@@ -54,9 +81,6 @@ jobs:
           echo "VSOMEIP_SOURCE_PATH=${{ github.workspace }}/${{ env.VSOMEIP_SOURCE_PATH }}" >> $GITHUB_ENV
           echo "VSOMEIP_INSTALL_PATH=${{ github.workspace }}/${{ env.VSOMEIP_INSTALL_PATH }}" >> $GITHUB_ENV
           echo "VSOMEIP_SOURCE_PATH_WITH_WILDCARD=${{ github.workspace }}/${{ env.VSOMEIP_SOURCE_PATH }}/*" >> $GITHUB_ENV
-          source ./build/envsetup.sh highest
-          echo "GENERIC_CPP_STDLIB_PATH=$GENERIC_CPP_STDLIB_PATH" >> $GITHUB_ENV
-          echo "ARCH_SPECIFIC_CPP_STDLIB_PATH=$ARCH_SPECIFIC_CPP_STDLIB_PATH" >> $GITHUB_ENV
           env
 
       - name: Print environment variables for debugging
@@ -65,6 +89,8 @@ jobs:
           echo "VSOMEIP_SOURCE_PATH: ${{ env.VSOMEIP_SOURCE_PATH }}"
           echo "VSOMEIP_INSTALL_PATH: ${{ env.VSOMEIP_INSTALL_PATH }}"
           echo "VSOMEIP_SOURCE_PATH_WITH_WILDCARD: ${{ env.VSOMEIP_SOURCE_PATH_WITH_WILDCARD }}"
+          echo "yyyy $ARCH_SPECIFIC_CPP_STDLIB_PATH"
+          echo "yyyy $GENERIC_CPP_STDLIB_PATH"
           echo "GENERIC_CPP_STDLIB_PATH: ${{ env.GENERIC_CPP_STDLIB_PATH }}"
           echo "ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ env.ARCH_SPECIFIC_CPP_STDLIB_PATH }}"
           env
@@ -128,9 +154,14 @@ jobs:
 
   lint:
     name: Lint
-    needs: obtain_and_build_vsomeip
+    needs: 
+      - obtain_and_build_vsomeip
+      - set-env
     runs-on: ubuntu-latest
+
     env:
+      ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.arch_specific_cpp_stdlib_path }}
+      GENERIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.generic_cpp_stdlib_path }}
       CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
 
     steps:
@@ -143,6 +174,8 @@ jobs:
       - name: Print environment variables for debugging
         run: |
           echo "VSOMEIP_INSTALL_PATH: ${{ env.VSOMEIP_INSTALL_PATH }}"
+          echo "yyyy $ARCH_SPECIFIC_CPP_STDLIB_PATH"
+          echo "yyyy $GENERIC_CPP_STDLIB_PATH"
 
       - name: Ensure vsomeip install path exists
         run: |
@@ -178,10 +211,15 @@ jobs:
 
   test:
     name: Test
-    needs: obtain_and_build_vsomeip
+    needs: 
+      - obtain_and_build_vsomeip
+      - set-env
     runs-on: ubuntu-latest
+
     env:
       CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
+      ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.arch_specific_cpp_stdlib_path }}
+      GENERIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.generic_cpp_stdlib_path }}
 
     steps:
       - uses: actions/checkout@v4
@@ -200,6 +238,8 @@ jobs:
         run: |
           echo "VSOMEIP_INSTALL_PATH: ${{ env.VSOMEIP_INSTALL_PATH }}"
           echo "LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}"
+          echo "yyyy $ARCH_SPECIFIC_CPP_STDLIB_PATH"
+          echo "yyyy $GENERIC_CPP_STDLIB_PATH"
 
       - name: Ensure vsomeip install path exists
         run: |
@@ -257,10 +297,14 @@ jobs:
 
   build-docs:
     name: Build documentation
-    needs: obtain_and_build_vsomeip
+    needs: 
+      - obtain_and_build_vsomeip
+      - set-env
     runs-on: ubuntu-latest
     env:
       CACHE_KEY: ${{ needs.obtain_and_build_vsomeip.outputs.cache_key }}
+      ARCH_SPECIFIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.arch_specific_cpp_stdlib_path }}
+      GENERIC_CPP_STDLIB_PATH: ${{ needs.set-env.outputs.generic_cpp_stdlib_path }}
 
     steps:
       - uses: actions/checkout@v4
@@ -272,6 +316,8 @@ jobs:
       - name: Print environment variables for debugging
         run: |
           echo "VSOMEIP_INSTALL_PATH: ${{ env.VSOMEIP_INSTALL_PATH }}"
+          echo "yyyy $ARCH_SPECIFIC_CPP_STDLIB_PATH"
+          echo "yyyy $GENERIC_CPP_STDLIB_PATH"
 
       - name: Ensure vsomeip install path exists
         run: |
