@@ -12,7 +12,6 @@
  ********************************************************************************/
 
 use log::{info, trace};
-use std::iter;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
