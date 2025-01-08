@@ -5,5 +5,12 @@
       "name" : "4660",
       "id" : "0x1234"
     }
+  ],
+  "services" :
+  [
+    {
+      "service": "0x1234",
+      "instance": 1
+    }
   ]
 }

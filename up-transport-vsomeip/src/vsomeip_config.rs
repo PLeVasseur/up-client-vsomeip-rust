@@ -23,7 +23,6 @@ use up_rust::{UCode, UStatus};
 pub struct ServiceConfig {
     #[serde(deserialize_with = "deserialize_hex_u16")]
     pub(crate) service: ServiceId,
-    #[serde(deserialize_with = "deserialize_hex_u16")]
     pub(crate) instance: InstanceId,
 }
 

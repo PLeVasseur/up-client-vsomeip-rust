@@ -5,5 +5,16 @@
       "name" : "2345_app",
       "id" : "0x2345"
     }
+  ],
+  "services" :
+  [
+    {
+      "service": "0x0345",
+      "instance": 1
+    },
+    {
+      "service": "0x1234",
+      "instance": 1
+    }
   ]
 }

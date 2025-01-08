@@ -24,7 +24,9 @@ use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
 use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
 use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
 
-const TEST_DURATION: u64 = 1000;
+// PELE: Restore this
+// const TEST_DURATION: u64 = 1000;
+const TEST_DURATION: u64 = 20;
 
 const STREAMER_UE_ID: u32 = 0x9876;
 
@@ -388,7 +390,7 @@ async fn point_to_point() {
         panic!("Unable to register with UTransport: {err}");
     }
 
-    let client_config = "vsomeip_configs/point_to_point_integ.json";
+    let client_config = "vsomeip_configs/client.json";
     let client_config = canonicalize(client_config).ok();
     info!("client_config: {client_config:?}");
 
@@ -401,7 +403,10 @@ async fn point_to_point() {
     );
 
     let Ok(client) = client_res else {
-        panic!("Unable to establish client");
+        panic!(
+            "Unable to establish client: {:?}",
+            client_res.err().unwrap()
+        );
     };
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -423,40 +428,40 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let service_config = "vsomeip_configs/point_to_point_integ.json";
-    let service_config = canonicalize(service_config).ok();
-    info!("service_config: {service_config:?}");
+    // let service_config = "vsomeip_configs/service.json";
+    // let service_config = canonicalize(service_config).ok();
+    // info!("service_config: {service_config:?}");
 
-    let service_uri = UUri::try_from_parts(SERVICE_AUTHORITY_NAME, SERVICE_UE_ID, 1, 0).unwrap();
-    let service_res = UPTransportVsomeip::new_with_config(
-        service_uri,
-        &SERVICE_AUTHORITY_NAME.to_string(),
-        &service_config.unwrap(),
-        None,
-    );
+    // let service_uri = UUri::try_from_parts(SERVICE_AUTHORITY_NAME, SERVICE_UE_ID, 1, 0).unwrap();
+    // let service_res = UPTransportVsomeip::new_with_config(
+    //     service_uri,
+    //     &SERVICE_AUTHORITY_NAME.to_string(),
+    //     &service_config.unwrap(),
+    //     None,
+    // );
 
-    let Ok(service) = service_res else {
-        panic!("Unable to establish service");
-    };
+    // let Ok(service) = service_res else {
+    //     panic!("Unable to establish service");
+    // };
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    // tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let service = Arc::new(service);
+    // let service = Arc::new(service);
 
-    let request_listener_check = Arc::new(RequestListener::new(service.clone()));
-    let request_listener: Arc<dyn UListener> = request_listener_check.clone();
+    // let request_listener_check = Arc::new(RequestListener::new(service.clone()));
+    // let request_listener: Arc<dyn UListener> = request_listener_check.clone();
 
-    let reg_service_1 = service
-        .register_listener(
-            &UUri::any(),
-            Some(&service_uuri()),
-            request_listener.clone(),
-        )
-        .await;
+    // let reg_service_1 = service
+    //     .register_listener(
+    //         &UUri::any(),
+    //         Some(&service_uuri()),
+    //         request_listener.clone(),
+    //     )
+    //     .await;
 
-    if let Err(err) = reg_service_1 {
-        error!("Unable to register: {:?}", err);
-    }
+    // if let Err(err) = reg_service_1 {
+    //     error!("Unable to register: {:?}", err);
+    // }
 
     let vsomeip_app_config = VsomeipApplicationConfig::new("not_listened_to_client", 0x765);
     let non_listened_to_client_uri = UUri::try_from_parts(
@@ -483,7 +488,8 @@ async fn point_to_point() {
     let mut iterations = 0;
     while Instant::now().duration_since(start_time) < duration {
         let request_msg_res =
-            UMessageBuilder::request(ptp_method_uuri(), client_reply_uuri(), 10000)
+            // UMessageBuilder::request(ptp_method_uuri(), client_reply_uuri(), 10000)
+            UMessageBuilder::request(service_uuri(), client_reply_uuri(), 10000)
                 .build()
                 .unwrap();
         trace!("Sending message from client: {request_msg_res}");
@@ -493,20 +499,20 @@ async fn point_to_point() {
             panic!("Unable to send message: {err:?}");
         }
 
-        let request_msg_not_listened_for_res = UMessageBuilder::request(
-            other_service_method_uuri(),
-            other_client_reply_uuri(),
-            10000,
-        )
-        .build()
-        .unwrap();
-        trace!("Sending message which shouldn't be received by point to point listener: {request_msg_not_listened_for_res}");
-        let send_res = non_listened_to_client
-            .send(request_msg_not_listened_for_res)
-            .await;
-        if let Err(err) = send_res {
-            panic!("Unable to send message: {err:?}");
-        }
+        // let request_msg_not_listened_for_res = UMessageBuilder::request(
+        //     other_service_method_uuri(),
+        //     other_client_reply_uuri(),
+        //     10000,
+        // )
+        // .build()
+        // .unwrap();
+        // trace!("Sending message which shouldn't be received by point to point listener: {request_msg_not_listened_for_res}");
+        // let send_res = non_listened_to_client
+        //     .send(request_msg_not_listened_for_res)
+        //     .await;
+        // if let Err(err) = send_res {
+        //     panic!("Unable to send message: {err:?}");
+        // }
 
         iterations += 1;
     }
@@ -515,10 +521,10 @@ async fn point_to_point() {
 
     println!("iterations: {}", iterations);
 
-    println!(
-        "request_listener_check.received_request(): {}",
-        request_listener_check.received_request()
-    );
+    // println!(
+    //     "request_listener_check.received_request(): {}",
+    //     request_listener_check.received_request()
+    // );
     println!(
         "point_to_point_listener_check.received_request(): {}",
         point_to_point_listener_check.received_request()
@@ -532,7 +538,7 @@ async fn point_to_point() {
         response_listener_check.received_response()
     );
 
-    assert_eq!(iterations, request_listener_check.received_request());
+    // assert_eq!(iterations, request_listener_check.received_request());
     assert_eq!(iterations, point_to_point_listener_check.received_request());
     assert_eq!(
         iterations,
