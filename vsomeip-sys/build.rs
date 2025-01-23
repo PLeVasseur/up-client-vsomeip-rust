@@ -11,8 +11,13 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use std::path::{Path, PathBuf};
-use std::{env, fs, io};
+use std::env;
+use std::path::PathBuf;
+
+#[cfg(feature = "bundled")]
+use std::path::Path;
+#[cfg(feature = "bundled")]
+use std::{fs, io};
 
 #[cfg(feature = "bundled")]
 fn vsomeip_includes() -> PathBuf {
@@ -128,7 +133,7 @@ mod build {
         }
 
         let out_dir = env::var_os("OUT_DIR").unwrap();
-        let submodule_to_patch = PathBuf::from(&crate_root).join(format!("{}", submodule_folder));
+        let submodule_to_patch = PathBuf::from(&crate_root).join(submodule_folder);
         let vsomeip_build_dir = PathBuf::from(out_dir).join("vsomeip").join("vsomeip_build");
         let copy_res = copy_dir_all(&submodule_to_patch, &vsomeip_build_dir);
         println!(
@@ -332,6 +337,7 @@ mod bindings {
     }
 }
 
+#[cfg(feature = "bundled")]
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> io::Result<()> {
     fs::create_dir_all(&dst)?;
     for entry in fs::read_dir(src)? {
