@@ -34,7 +34,7 @@ impl UFrameToVsomeipMessage {
         vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
-        let source = frame.header().attributes().source();
+        let source = frame.metadata().attributes().source();
 
         let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
         let instance_id = 1;
@@ -71,8 +71,8 @@ impl UFrameToVsomeipMessage {
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-        let source = frame.header().attributes().source();
-        let sink = frame.header().attributes().sink().ok_or_else(|| {
+        let source = frame.metadata().attributes().source();
+        let sink = frame.metadata().attributes().sink().ok_or_else(|| {
             UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Request frame has no sink UUri")
         })?;
 
@@ -105,7 +105,7 @@ impl UFrameToVsomeipMessage {
             "{} - app_client_id for Request frame: {} request_uuid: {}",
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_FRAME_TO_VSOMEIP_MSG,
             app_client_id,
-            frame.header().attributes().id().to_hyphenated_string(),
+            frame.metadata().attributes().id().to_hyphenated_string(),
         );
 
         vsomeip_msg
@@ -120,7 +120,7 @@ impl UFrameToVsomeipMessage {
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-        let source = frame.header().attributes().source();
+        let source = frame.metadata().attributes().source();
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_message(true));
         let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
@@ -138,7 +138,7 @@ impl UFrameToVsomeipMessage {
             .get_message_base_pinned()
             .set_interface_version(interface_version);
 
-        let request_uuid = frame.header().attributes().request_id().ok_or_else(|| {
+        let request_uuid = frame.metadata().attributes().request_id().ok_or_else(|| {
             UStatus::fail_with_code(
                 UCode::INVALID_ARGUMENT,
                 "Response frame has no request_id for SOME/IP request correlation",
@@ -152,7 +152,7 @@ impl UFrameToVsomeipMessage {
             .get_message_base_pinned()
             .set_session(session_id);
 
-        let (return_code, vsomeip_msg_type) = match frame.header().attributes().commstatus() {
+        let (return_code, vsomeip_msg_type) = match frame.metadata().attributes().commstatus() {
             Some(UCode::OK) | None => (vsomeip::return_code_e::E_OK, message_type_e::MT_RESPONSE),
             Some(commstatus) => (
                 Self::ucode_to_vsomeip_err_code(commstatus),
@@ -211,7 +211,7 @@ impl VsomeipMessageToUFrame {
             message_type_e::MT_REQUEST => {
                 let request_id = vsomeip_message.get_message_base_pinned().get_request();
                 rpc_correlation_registry.insert_me_request_correlation(
-                    frame.header().attributes().id().clone(),
+                    frame.metadata().attributes().id().clone(),
                     request_id,
                 )?;
             }

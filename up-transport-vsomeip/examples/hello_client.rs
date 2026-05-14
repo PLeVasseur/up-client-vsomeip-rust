@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::{
-    UEncoding, UFrameHeader, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
+    UEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -93,7 +93,7 @@ async fn main() -> Result<(), UStatus> {
         let payload = format!("me_client@i={i}").into_bytes();
         i += 1;
         let frame = UOwnedFrame::new(
-            UFrameHeader::request(method.clone(), client_uuri.clone(), REQUEST_TTL)
+            UFrameMetadata::request(method.clone(), client_uuri.clone(), REQUEST_TTL)
                 .with_encoding(UEncoding::from_content_type("text/plain")),
             payload,
         );

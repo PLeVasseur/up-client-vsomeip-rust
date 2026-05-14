@@ -13,7 +13,7 @@
 
 use bytes::Bytes;
 use up_rust::{
-    UAttributes, UCode, UEncoding, UFrameHeader, UMessageType, UOwnedFrame, UPriority, UStatus,
+    UAttributes, UCode, UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UPriority, UStatus,
     UUri, UUID,
 };
 
@@ -24,38 +24,38 @@ pub(crate) fn encode_frame_payload(frame: &UOwnedFrame) -> Result<Vec<u8>, UStat
     let mut bytes = Vec::new();
     bytes.extend_from_slice(FRAME_PAYLOAD_MAGIC);
     bytes.push(FRAME_PAYLOAD_VERSION);
-    write_u64(&mut bytes, frame.header().attributes().id().msb);
-    write_u64(&mut bytes, frame.header().attributes().id().lsb);
+    write_u64(&mut bytes, frame.metadata().attributes().id().msb);
+    write_u64(&mut bytes, frame.metadata().attributes().id().lsb);
     bytes.push(message_type_to_byte(
-        frame.header().attributes().message_type(),
+        frame.metadata().attributes().message_type(),
     ));
-    bytes.push(priority_to_byte(frame.header().attributes().priority()));
-    write_optional_u32(&mut bytes, frame.header().attributes().ttl());
+    bytes.push(priority_to_byte(frame.metadata().attributes().priority()));
+    write_optional_u32(&mut bytes, frame.metadata().attributes().ttl());
     append_string(
         &mut bytes,
-        &frame.header().attributes().source().to_uri(false),
+        &frame.metadata().attributes().source().to_uri(false),
     )?;
     append_string(
         &mut bytes,
         frame
-            .header()
+            .metadata()
             .attributes()
             .sink()
             .map(|uri| uri.to_uri(false))
             .as_deref()
             .unwrap_or_default(),
     )?;
-    append_string(&mut bytes, frame.header().encoding().format_id())?;
-    append_string(&mut bytes, frame.header().encoding().content_type())?;
+    append_string(&mut bytes, frame.metadata().encoding().format_id())?;
+    append_string(&mut bytes, frame.metadata().encoding().content_type())?;
     append_string(
         &mut bytes,
-        frame.header().encoding().schema_ref().unwrap_or_default(),
+        frame.metadata().encoding().schema_ref().unwrap_or_default(),
     )?;
-    write_optional_uuid(&mut bytes, frame.header().attributes().request_id());
-    write_optional_string(&mut bytes, frame.header().attributes().traceparent())?;
-    write_optional_string(&mut bytes, frame.header().attributes().token())?;
-    write_optional_u32(&mut bytes, frame.header().attributes().permission_level());
-    write_optional_code(&mut bytes, frame.header().attributes().commstatus());
+    write_optional_uuid(&mut bytes, frame.metadata().attributes().request_id());
+    write_optional_string(&mut bytes, frame.metadata().attributes().traceparent())?;
+    write_optional_string(&mut bytes, frame.metadata().attributes().token())?;
+    write_optional_u32(&mut bytes, frame.metadata().attributes().permission_level());
+    write_optional_code(&mut bytes, frame.metadata().attributes().commstatus());
     bytes.extend_from_slice(frame.payload_bytes());
     Ok(bytes)
 }
@@ -130,7 +130,7 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
     }
 
     Ok(UOwnedFrame::new(
-        UFrameHeader::new(
+        UFrameMetadata::new(
             attributes,
             UEncoding::new(format_id, content_type, schema_ref),
         ),
@@ -358,7 +358,7 @@ mod tests {
                 .with_permission_level(9)
                 .with_commstatus(UCode::UNAVAILABLE);
         let frame = UOwnedFrame::new(
-            UFrameHeader::new(
+            UFrameMetadata::new(
                 attributes,
                 UEncoding::new("custom", "application/custom", Some("schema://custom")),
             ),
@@ -384,7 +384,7 @@ mod tests {
         let mut value = StringValue::new();
         value.value = "protobuf payload".to_string();
         let frame = UOwnedFrame::from_serializable::<ProtobufWire, _>(
-            UFrameHeader::publish(source),
+            UFrameMetadata::publish(source),
             &value,
         )
         .unwrap();
@@ -393,7 +393,7 @@ mod tests {
         let decoded = decode_frame_payload(encoded).unwrap();
         let decoded_payload: StringValue = decoded.deserialize::<ProtobufWire, _>().unwrap();
 
-        assert_eq!(decoded.header().encoding(), &ProtobufWire::encoding());
+        assert_eq!(decoded.metadata().encoding(), &ProtobufWire::encoding());
         assert_eq!(decoded_payload.value, value.value);
     }
 }

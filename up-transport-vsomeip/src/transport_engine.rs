@@ -739,7 +739,7 @@ impl UPTransportVsomeipEngine {
         vsomeip_payload.set_data_safe(&payload);
         let attachable_payload = vsomeip_payload.get_shared_ptr();
 
-        match frame.header().attributes().message_type() {
+        match frame.metadata().attributes().message_type() {
             UMessageType::Notification => {
                 return Err(UStatus::fail_with_code(
                     UCode::INVALID_ARGUMENT,

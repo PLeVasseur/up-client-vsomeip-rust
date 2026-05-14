@@ -28,7 +28,7 @@ use up_rust::{
 #[async_trait]
 impl UOwnedTransport for UPTransportVsomeip {
     async fn send_owned(&self, frame: UOwnedFrame) -> Result<(), UStatus> {
-        let attributes = frame.header().attributes();
+        let attributes = frame.metadata().attributes();
         if attributes.is_expired() {
             return Err(UStatus::fail_with_code(
                 UCode::DEADLINE_EXCEEDED,

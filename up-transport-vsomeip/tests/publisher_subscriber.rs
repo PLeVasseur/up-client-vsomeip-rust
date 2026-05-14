@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    UAttributes, UEncoding, UFrameHeader, UMessageType, UOwnedFrame, UOwnedListener,
+    UAttributes, UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UOwnedListener,
     UOwnedTransport, UUri, UUID,
 };
 use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
@@ -56,7 +56,7 @@ impl UOwnedListener for SubscriberListener {
 
 fn publish_frame(topic: UUri, payload: Vec<u8>) -> UOwnedFrame {
     UOwnedFrame::new(
-        UFrameHeader::new(
+        UFrameMetadata::new(
             UAttributes::new(UUID::build(), topic, None, UMessageType::Publish),
             UEncoding::from_content_type("text/plain"),
         ),

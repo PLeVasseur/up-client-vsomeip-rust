@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::thread;
 use up_rust::{
-    UEncoding, UFrameHeader, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
+    UEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -51,16 +51,16 @@ impl UOwnedListener for ServiceRequestHandler {
         let request = std::str::from_utf8(frame.payload_bytes()).unwrap_or("<non-UTF8 request>");
         println!("ServiceRequestHandler received request: {request}");
 
-        let Some(reply_to) = Some(frame.header().attributes().source().clone()) else {
+        let Some(reply_to) = Some(frame.metadata().attributes().source().clone()) else {
             return;
         };
-        let Some(invoked_method) = frame.header().attributes().sink().cloned() else {
+        let Some(invoked_method) = frame.metadata().attributes().sink().cloned() else {
             return;
         };
         let response = UOwnedFrame::new(
-            UFrameHeader::response(
+            UFrameMetadata::response(
                 reply_to,
-                frame.header().attributes().id().clone(),
+                frame.metadata().attributes().id().clone(),
                 invoked_method,
             )
             .with_encoding(UEncoding::from_content_type("text/plain")),

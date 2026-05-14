@@ -19,7 +19,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    UEncoding, UFrameHeader, UMessageType, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri, UUID,
+    UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri,
+    UUID,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -85,7 +86,7 @@ fn text_encoding() -> UEncoding {
 
 fn request_frame(method: UUri, reply_to: UUri, payload: Vec<u8>) -> UOwnedFrame {
     UOwnedFrame::new(
-        UFrameHeader::request(method, reply_to, 1000).with_encoding(text_encoding()),
+        UFrameMetadata::request(method, reply_to, 1000).with_encoding(text_encoding()),
         payload,
     )
 }
@@ -97,7 +98,8 @@ fn response_frame(
     payload: Vec<u8>,
 ) -> UOwnedFrame {
     UOwnedFrame::new(
-        UFrameHeader::response(reply_to, request_id, invoked_method).with_encoding(text_encoding()),
+        UFrameMetadata::response(reply_to, request_id, invoked_method)
+            .with_encoding(text_encoding()),
         payload,
     )
 }
@@ -131,7 +133,12 @@ impl UOwnedListener for PointToPointListener {
     async fn on_receive_owned(&self, frame: UOwnedFrame) {
         info!("Received in point-to-point listener:\n{:?}", frame);
 
-        let received_source_authority = frame.header().attributes().source().authority_name.clone();
+        let received_source_authority = frame
+            .metadata()
+            .attributes()
+            .source()
+            .authority_name
+            .clone();
         if received_source_authority == NON_POINT_TO_POINT_LISTENED_AUTHORITY {
             panic!(
                 "Received a message on point to point listener that we should not have:\n{frame:?}"
@@ -142,12 +149,12 @@ impl UOwnedListener for PointToPointListener {
             panic!("Unable to get ahold of the transport within PointToPointListener");
         };
 
-        match frame.header().attributes().message_type() {
+        match frame.metadata().attributes().message_type() {
             UMessageType::Request => {
                 trace!("PointToPointListener got a request");
                 self.received_request.fetch_add(1, Ordering::SeqCst);
 
-                let original_id = frame.header().attributes().id().clone();
+                let original_id = frame.metadata().attributes().id().clone();
                 let forwarding_request = request_frame(
                     service_uuri(),
                     ptp_reply_uuri(),
@@ -248,16 +255,16 @@ impl UOwnedListener for RequestListener {
         let original_id = std::str::from_utf8(frame.payload_bytes())
             .expect("forwarded request payload is not UTF-8")
             .to_string();
-        let reply_to = frame.header().attributes().source().clone();
+        let reply_to = frame.metadata().attributes().source().clone();
         let invoked_method = frame
-            .header()
+            .metadata()
             .attributes()
             .sink()
             .expect("Request frame has no invoked method")
             .clone();
         let response = response_frame(
             reply_to,
-            frame.header().attributes().id().clone(),
+            frame.metadata().attributes().id().clone(),
             invoked_method,
             original_id.into_bytes(),
         );

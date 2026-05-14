@@ -17,7 +17,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UCode, UEncoding, UFrameHeader, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri};
+use up_rust::{
+    UCode, UEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri,
+};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 2000;
@@ -88,22 +90,22 @@ impl UOwnedListener for RequestListener {
         let response_payload_string = format!("Here's a response to: {payload_string}");
         let response_payload_bytes = response_payload_string.into_bytes();
 
-        let reply_to = frame.header().attributes().source().clone();
+        let reply_to = frame.metadata().attributes().source().clone();
         let invoked_method = frame
-            .header()
+            .metadata()
             .attributes()
             .sink()
             .expect("Request frame has no invoked method")
             .clone();
-        let response_header = UFrameHeader::response(
+        let response_header = UFrameMetadata::response(
             reply_to,
-            frame.header().attributes().id().clone(),
+            frame.metadata().attributes().id().clone(),
             invoked_method,
         )
         .with_encoding(UEncoding::from_content_type("text/plain"));
         let mut response_msg = UOwnedFrame::new(response_header, response_payload_bytes);
-        *response_msg.header_mut().attributes_mut() = response_msg
-            .header()
+        *response_msg.metadata_mut().attributes_mut() = response_msg
+            .metadata()
             .attributes()
             .clone()
             .with_commstatus(UCode::OK);
@@ -118,7 +120,7 @@ impl UOwnedListener for RequestListener {
 
 fn request_frame(method: UUri, reply_to: UUri, ttl: u32, payload: Vec<u8>) -> UOwnedFrame {
     UOwnedFrame::new(
-        UFrameHeader::request(method, reply_to, ttl)
+        UFrameMetadata::request(method, reply_to, ttl)
             .with_encoding(UEncoding::from_content_type("text/plain")),
         payload,
     )
