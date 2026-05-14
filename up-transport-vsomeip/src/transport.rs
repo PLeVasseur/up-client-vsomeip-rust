@@ -128,17 +128,6 @@ impl UOwnedTransport for UPTransportVsomeip {
     ) -> Result<(), UStatus> {
         self.unregister_listener(source_filter, sink_filter, listener)
     }
-
-    async fn receive_owned(
-        &self,
-        _source_filter: &UUri,
-        _sink_filter: Option<&UUri>,
-    ) -> Result<UOwnedFrame, UStatus> {
-        Err(UStatus::fail_with_code(
-            UCode::UNIMPLEMENTED,
-            "This method is not implemented for vsomeip. Use register_owned_listener instead.",
-        ))
-    }
 }
 
 impl LocalUriProvider for UPTransportVsomeip {
