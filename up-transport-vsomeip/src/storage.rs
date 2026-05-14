@@ -30,13 +30,12 @@ use crate::storage::{
 };
 use crate::vsomeip_config::VsomeipApplicationConfig;
 use crate::{
-    AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId, SomeIpRequestId,
-    UProtocolReqId, UeId,
+    AuthorityName, EventId, InstanceId, MethodId, ServiceId, SomeIpRequestId, UProtocolReqId, UeId,
 };
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::{ComparableListener, UListener, UStatus, UUri};
+use up_rust::{ComparableOwnedListener, UOwnedListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
@@ -121,31 +120,6 @@ impl ApplicationStateAvailabilityHandlerRegistry for UPTransportVsomeipStorage {
 }
 
 impl RpcCorrelationRegistry for UPTransportVsomeipStorage {
-    fn retrieve_session_id(&self, client_id: ClientId) -> SessionId {
-        self.rpc_correlation.retrieve_session_id(client_id)
-    }
-
-    fn insert_ue_request_correlation(
-        &self,
-        someip_request_id: SomeIpRequestId,
-        uprotocol_req_id: &UProtocolReqId,
-        source_uri: &UUri,
-    ) -> Result<(), UStatus> {
-        self.rpc_correlation.insert_ue_request_correlation(
-            someip_request_id,
-            uprotocol_req_id,
-            source_uri,
-        )
-    }
-
-    fn remove_ue_request_correlation(
-        &self,
-        someip_request_id: SomeIpRequestId,
-    ) -> Result<(UProtocolReqId, UUri), UStatus> {
-        self.rpc_correlation
-            .remove_ue_request_correlation(someip_request_id)
-    }
-
     fn insert_me_request_correlation(
         &self,
         uprotocol_req_id: UProtocolReqId,
@@ -250,7 +224,7 @@ impl MessageHandlerRegistry for UPTransportVsomeipStorage {
     fn get_message_handler(
         &self,
         transport_storage: Arc<UPTransportVsomeipStorage>,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
         self.message_handler_registry
             .get_message_handler(transport_storage, listener_config)
@@ -258,20 +232,20 @@ impl MessageHandlerRegistry for UPTransportVsomeipStorage {
 
     fn release_message_handler(
         &self,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<(), UStatus> {
         self.message_handler_registry
             .release_message_handler(listener_config)
     }
 
-    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)> {
+    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableOwnedListener)> {
         self.message_handler_registry.get_all_listener_configs()
     }
 
     fn get_listener_for_message_handler_id(
         &self,
         message_handler_id: usize,
-    ) -> Option<Arc<dyn UListener>> {
+    ) -> Option<Arc<dyn UOwnedListener>> {
         self.message_handler_registry
             .get_listener_for_message_handler_id(message_handler_id)
     }

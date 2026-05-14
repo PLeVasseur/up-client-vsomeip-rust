@@ -19,14 +19,19 @@ mod tests {
     use crate::test_lib::PrintingListener;
     use crate::{test_lib, UPTransportVsomeip};
     use log::error;
+    use once_cell::sync::Lazy;
     use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
-    use up_rust::{UListener, UTransport, UUri};
+    use tokio::sync::Mutex;
+    use up_rust::{UOwnedListener, UOwnedTransport, UUri};
     use up_transport_vsomeip::VsomeipApplicationConfig;
+
+    static VSOMEIP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_publish() {
+        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
 
         let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_publish_test", 0x123);
@@ -40,12 +45,12 @@ mod tests {
         .unwrap();
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
-        let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
+        let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let reg_res = client
-            .register_listener(&source_filter, None, printing_helper.clone())
+            .register_owned_listener(&source_filter, None, printing_helper.clone())
             .await;
 
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -57,7 +62,7 @@ mod tests {
         assert!(reg_res.is_ok());
 
         let unreg_res = client
-            .unregister_listener(&source_filter, None, printing_helper)
+            .unregister_owned_listener(&source_filter, None, printing_helper)
             .await;
 
         if let Err(ref err) = unreg_res {
@@ -71,6 +76,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_request() {
+        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
 
         let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_request_test", 0x124);
@@ -85,12 +91,12 @@ mod tests {
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
         let sink_filter = UUri::try_from_parts("bar", 0x02, 1, 20).unwrap();
-        let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
+        let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let reg_res = client
-            .register_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
+            .register_owned_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -102,7 +108,7 @@ mod tests {
         assert!(reg_res.is_ok());
 
         let unreg_res = client
-            .unregister_listener(&source_filter, Some(&sink_filter), printing_helper)
+            .unregister_owned_listener(&source_filter, Some(&sink_filter), printing_helper)
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -116,6 +122,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_response() {
+        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
 
         let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_response_test", 0x125);
@@ -124,7 +131,6 @@ mod tests {
             ue_id: 10,
             ue_version_major: 1,
             resource_id: 0,
-            ..Default::default()
         };
         let client = UPTransportVsomeip::new(
             vsomeip_app_config,
@@ -136,12 +142,12 @@ mod tests {
 
         let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
         let sink_filter = UUri::try_from_parts("bar", 0x02, 1, 0).unwrap();
-        let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
+        let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let reg_res = client
-            .register_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
+            .register_owned_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -155,7 +161,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let unreg_res = client
-            .unregister_listener(&source_filter, Some(&sink_filter), printing_helper)
+            .unregister_owned_listener(&source_filter, Some(&sink_filter), printing_helper)
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -169,6 +175,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_all_point_to_point() {
+        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
 
         let client_uri = UUri {
@@ -176,7 +183,6 @@ mod tests {
             ue_id: 10,
             ue_version_major: 1,
             resource_id: 0,
-            ..Default::default()
         };
         let client = UPTransportVsomeip::new_with_config(
             client_uri,
@@ -188,12 +194,12 @@ mod tests {
 
         let source_filter = UUri::any();
         let sink_filter = UUri::try_from_parts("me_authority", 0x0000_FFFF, 0xFF, 0xFFFF).unwrap();
-        let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
+        let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let reg_res = client
-            .register_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
+            .register_owned_listener(&source_filter, Some(&sink_filter), printing_helper.clone())
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -207,7 +213,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let unreg_res = client
-            .unregister_listener(&source_filter, Some(&sink_filter), printing_helper)
+            .unregister_owned_listener(&source_filter, Some(&sink_filter), printing_helper)
             .await;
 
         tokio::time::sleep(Duration::from_millis(100)).await;

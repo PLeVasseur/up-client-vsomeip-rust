@@ -21,40 +21,27 @@ use log::trace;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use up_rust::{
-    ComparableListener, LocalUriProvider, UAttributesValidators, UCode, UListener, UMessage,
-    UStatus, UTransport, UUri,
+    ComparableOwnedListener, LocalUriProvider, UCode, UOwnedFrame, UOwnedListener, UOwnedTransport,
+    UStatus, UUri,
 };
 
 #[async_trait]
-impl UTransport for UPTransportVsomeip {
-    async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        let attributes = message.attributes.as_ref().ok_or(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
-            "Missing uAttributes",
-        ))?;
-
-        // Validate UAttributes before conversion.
-        UAttributesValidators::get_validator_for_attributes(attributes)
-            .validate(attributes)
-            .map_err(|e| {
-                UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    format!("Invalid uAttributes, err: {e:?}"),
-                )
-            })?;
-
-        trace!("Sending message with attributes: {:?}", attributes);
-
-        let Some(source_filter) = message.attributes.source.as_ref() else {
+impl UOwnedTransport for UPTransportVsomeip {
+    async fn send_owned(&self, frame: UOwnedFrame) -> Result<(), UStatus> {
+        let attributes = frame.header().attributes();
+        if attributes.is_expired() {
             return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "UMessage provided with no source",
+                UCode::DEADLINE_EXCEEDED,
+                "message has expired",
             ));
-        };
+        }
 
-        let sink_filter = message.attributes.sink.as_ref();
+        trace!("Sending native frame with attributes: {:?}", attributes);
+
+        let source_filter = attributes.source();
+        let sink_filter = attributes.sink();
         let message_type = determine_type(source_filter, &sink_filter.cloned())?;
-        trace!("inside send(), message_type: {message_type:?}");
+        trace!("inside send_owned(), message_type: {message_type:?}");
 
         let app_name = self.storage.get_vsomeip_application_config().name;
 
@@ -69,7 +56,7 @@ impl UTransport for UPTransportVsomeip {
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::Send(
-                message,
+                Box::new(frame),
                 message_type,
                 app_name,
                 self.storage.clone(),
@@ -84,11 +71,11 @@ impl UTransport for UPTransportVsomeip {
         Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
-    async fn register_listener(
+    async fn register_owned_listener(
         &self,
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
-        listener: Arc<dyn UListener>,
+        listener: Arc<dyn UOwnedListener>,
     ) -> Result<(), UStatus> {
         let registration_type = determine_type(source_filter, &sink_filter.cloned())?;
 
@@ -100,7 +87,7 @@ impl UTransport for UPTransportVsomeip {
 
         let app_name = self.storage.get_vsomeip_application_config().name;
 
-        let comp_listener = ComparableListener::new(listener);
+        let comp_listener = ComparableOwnedListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
         let Ok(msg_handler) = self
             .storage
@@ -108,7 +95,7 @@ impl UTransport for UPTransportVsomeip {
         else {
             return Err(UStatus::fail_with_code(
                 UCode::INTERNAL,
-                "Unable to get message handler for register_listener",
+                "Unable to get message handler for register_owned_listener",
             ));
         };
 
@@ -133,23 +120,23 @@ impl UTransport for UPTransportVsomeip {
         Self::await_engine("register", rx).await
     }
 
-    async fn unregister_listener(
+    async fn unregister_owned_listener(
         &self,
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
-        listener: Arc<dyn UListener>,
+        listener: Arc<dyn UOwnedListener>,
     ) -> Result<(), UStatus> {
         self.unregister_listener(source_filter, sink_filter, listener)
     }
 
-    async fn receive(
+    async fn receive_owned(
         &self,
         _source_filter: &UUri,
         _sink_filter: Option<&UUri>,
-    ) -> Result<UMessage, UStatus> {
+    ) -> Result<UOwnedFrame, UStatus> {
         Err(UStatus::fail_with_code(
             UCode::UNIMPLEMENTED,
-            "This method is not implemented for vsomeip. Use register_listener instead.",
+            "This method is not implemented for vsomeip. Use register_owned_listener instead.",
         ))
     }
 }
@@ -158,11 +145,13 @@ impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
         self.storage.get_uri().authority_name
     }
+
     fn get_resource_uri(&self, resource_id: u16) -> UUri {
         let mut resource_uri = self.storage.get_uri();
-        resource_uri.resource_id = resource_id as u32;
+        resource_uri.resource_id = u32::from(resource_id);
         resource_uri
     }
+
     fn get_source_uri(&self) -> UUri {
         self.storage.get_uri()
     }

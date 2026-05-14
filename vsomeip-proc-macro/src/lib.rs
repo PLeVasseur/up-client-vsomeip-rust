@@ -25,7 +25,7 @@ use syn::{parse_macro_input, LitInt};
 /// The vsomeip-sys crate requires extern "C" fns to be passed to it when registering a message handler
 ///
 /// By using pre-generated extern "C" fns we are then able to ignore that implementation detail inside
-/// of the UTransport implementation of vsomeip
+/// of the native owned transport implementation of vsomeip
 #[proc_macro]
 pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream {
     let num_fns = parse_macro_input!(input as LitInt)
@@ -104,7 +104,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                     let transport_storage_clone = transport_storage.clone();
                     let uri = transport_storage.get_uri();
-                    let res = VsomeipMessageToUMessage::convert_vsomeip_msg_to_umsg(
+                    let res = VsomeipMessageToUFrame::convert_vsomeip_msg_to_frame(
                         &authority_name,
                         &uri,
                         &remote_authority_name,
@@ -115,14 +115,14 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                     trace!("Ran convert_vsomeip_msg_to_umsg");
 
-                    let Ok(umsg) = res else {
+                    let Ok(frame) = res else {
                         if let Err(err) = res {
-                            error!("Unable to convert vsomeip message to UMessage: {:?}", err);
+                            error!("Unable to convert vsomeip message to native frame: {:?}", err);
                         }
                         return;
                     };
 
-                    trace!("Was able to convert to UMessage");
+                    trace!("Was able to convert to native frame");
 
                     trace!("Calling listener registered under {}", message_handler_id);
 
@@ -131,9 +131,9 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                         let registry = transport_storage.clone();
                         match registry.get_listener_for_message_handler_id(message_handler_id) {
                             Some(listener) => {
-                                // Send the listener and umsg back to the main thread
-                                if tx.send((listener, umsg)).is_err() {
-                                    error!("Failed to send listener and umsg to main thread");
+                                // Send the listener and frame back to the main thread
+                                if tx.send((listener, frame)).is_err() {
+                                    error!("Failed to send listener and frame to main thread");
                                 }
                             },
                             None => {
@@ -147,11 +147,11 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                 trace!("Reached bottom of call_shared_extern_fn");
 
-                // Receive the listener and umsg from the mpsc channel
-                let (listener, umsg) = match rx.recv() {
-                    Ok((listener, umsg)) => (listener, umsg),
+                // Receive the listener and frame from the mpsc channel
+                let (listener, frame) = match rx.recv() {
+                    Ok((listener, frame)) => (listener, frame),
                     Err(_) => {
-                        error!("Failed to receive listener and umsg from mpsc channel");
+                        error!("Failed to receive listener and frame from mpsc channel");
                         return;
                     }
                 };
@@ -159,14 +159,14 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                 // Spawn shared_async_fn on the multi-threaded executor
                 runtime_handle.spawn(async move {
                     trace!("Within spawned thread -- calling shared_async_fn");
-                    shared_async_fn(listener, umsg).await;
+                    shared_async_fn(listener, frame).await;
                     trace!("Within spawned thread -- finished shared_async_fn");
                 });
             }
 
-            async fn shared_async_fn(listener: Arc<dyn UListener>, umsg: UMessage) {
-                trace!("shared_async_fn with umsg: {:?}", umsg);
-                listener.on_receive(umsg).await;
+            async fn shared_async_fn(listener: Arc<dyn UOwnedListener>, frame: UOwnedFrame) {
+                trace!("shared_async_fn with frame: {:?}", frame);
+                listener.on_receive_owned(frame).await;
             }
 
             pub(super) fn get_extern_fn(message_handler_id: usize) -> extern "C" fn(&SharedPtr<vsomeip::message>) {

@@ -31,11 +31,12 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
-use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri, UUID};
+use up_rust::{ComparableOwnedListener, UCode, UOwnedListener, UStatus, UUri, UUID};
 use vsomeip_config::extract_application;
 pub use vsomeip_config::VsomeipApplicationConfig;
 
 mod determine_message_type;
+mod frame_wire;
 mod message_conversions;
 mod storage;
 mod transport;
@@ -52,7 +53,7 @@ pub type ClientId = u16;
 /// A [vsomeip_sys::vsomeip::application]'s string-form identifier
 pub type ApplicationName = String;
 
-/// A [up_rust::UAttributes::reqid]
+/// A native uProtocol request identifier.
 pub type UProtocolReqId = UUID;
 /// A request ID used with vsomeip. See [vsomeip_sys::vsomeip::request_t]
 pub type SomeIpRequestId = u32;
@@ -125,7 +126,7 @@ pub struct RuntimeConfig {
     num_threads: u8,
 }
 
-/// UTransport implementation over top of the C++ vsomeip library
+/// Native owned-frame transport implementation over top of the C++ vsomeip library.
 ///
 /// We hold a transport_inner internally which does the nitty-gritty
 /// implementation of the transport
@@ -135,7 +136,7 @@ pub struct RuntimeConfig {
 pub struct UPTransportVsomeip {
     storage: Arc<UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipEngine,
-    point_to_point_listener: RwLock<Option<Arc<dyn UListener>>>,
+    point_to_point_listener: RwLock<Option<Arc<dyn UOwnedListener>>>,
     config_path: Option<PathBuf>,
     thread_handle: Option<thread::JoinHandle<()>>,
     shutdown_runtime_tx: std::sync::mpsc::Sender<()>,
@@ -295,7 +296,7 @@ impl UPTransportVsomeip {
         &self,
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
-        listener: Arc<dyn UListener>,
+        listener: Arc<dyn UOwnedListener>,
     ) -> Result<(), UStatus> {
         let src = source_filter.clone();
         let sink = sink_filter.cloned();
@@ -343,7 +344,7 @@ impl UPTransportVsomeip {
             warn!("{warn}");
         }
 
-        let comp_listener = ComparableListener::new(listener);
+        let comp_listener = ComparableOwnedListener::new(listener);
         let listener_config = (source_filter.clone(), sink_filter.cloned(), comp_listener);
         let release_res = self.storage.release_message_handler(listener_config);
 
@@ -393,7 +394,7 @@ impl UPTransportVsomeip {
         let sink_filter = Some(msg_src.clone());
 
         let listener = point_to_point_listener.clone();
-        let comp_listener = ComparableListener::new(Arc::clone(&listener));
+        let comp_listener = ComparableOwnedListener::new(Arc::clone(&listener));
         let listener_config = (source_filter.clone(), sink_filter.clone(), comp_listener);
         let message_type = RegistrationType::Response;
         let msg_handler_res = self
@@ -451,7 +452,7 @@ impl UPTransportVsomeip {
 
     async fn register_point_to_point_listener(
         &self,
-        listener: &Arc<dyn UListener>,
+        listener: &Arc<dyn UOwnedListener>,
     ) -> Result<(), UStatus> {
         let Some(config_path) = &self.config_path else {
             let err_msg = "No path to a vsomeip config file was provided";
@@ -467,7 +468,7 @@ impl UPTransportVsomeip {
             if point_to_point_listener.is_some() {
                 return Err(UStatus::fail_with_code(
                     UCode::ALREADY_EXISTS,
-                    "We already have a point-to-point UListener registered",
+                    "We already have a point-to-point UOwnedListener registered",
                 ));
             }
             *point_to_point_listener = Some(listener.clone());
@@ -479,7 +480,7 @@ impl UPTransportVsomeip {
             let service_config = Arc::new(service_config);
             let ue_id = ((service_config.instance as u32) << 16) | service_config.service as u32;
 
-            let comp_listener = ComparableListener::new(listener.clone());
+            let comp_listener = ComparableOwnedListener::new(listener.clone());
             let source_filter = UUri::any();
             let sink_filter =
                 any_uuri_fixed_authority_id(&self.storage.get_local_authority(), ue_id);
@@ -538,7 +539,7 @@ impl UPTransportVsomeip {
                     "No point-to-point listener found, we can't unregister it",
                 ));
             };
-            ComparableListener::new(point_to_point_listener.clone())
+            ComparableOwnedListener::new(point_to_point_listener.clone())
         };
 
         let Some(config_path) = &self.config_path else {

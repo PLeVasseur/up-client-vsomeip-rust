@@ -16,7 +16,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
+use up_rust::{
+    UAttributes, UEncoding, UFrameHeader, UMessageType, UOwnedFrame, UOwnedListener,
+    UOwnedTransport, UUri, UUID,
+};
 use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
 
 const TEST_DURATION: u64 = 2000;
@@ -38,21 +41,27 @@ impl SubscriberListener {
     }
 }
 #[async_trait::async_trait]
-impl UListener for SubscriberListener {
-    async fn on_receive(&self, msg: UMessage) {
-        trace!("{:?}", msg);
+impl UOwnedListener for SubscriberListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
+        trace!("{:?}", frame);
         self.received_publish.fetch_add(1, Ordering::SeqCst);
 
-        let Some(payload_bytes) = msg.payload else {
-            panic!("No bytes included in payload");
-        };
-
-        let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
+        let Ok(payload_string) = std::str::from_utf8(frame.payload_bytes()) else {
             panic!("Unable to convert back to payload_string");
         };
 
         info!("We received payload_string: {payload_string}");
     }
+}
+
+fn publish_frame(topic: UUri, payload: Vec<u8>) -> UOwnedFrame {
+    UOwnedFrame::new(
+        UFrameHeader::new(
+            UAttributes::new(UUID::build(), topic, None, UMessageType::Publish),
+            UEncoding::from_content_type("text/plain"),
+        ),
+        payload,
+    )
 }
 
 pub async fn spawn_artifical_load(duration: Duration) {
@@ -99,10 +108,10 @@ async fn publisher_subscriber() {
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     let subscriber_listener_check = Arc::new(SubscriberListener::new());
-    let subscriber_listener: Arc<dyn UListener> = subscriber_listener_check.clone();
+    let subscriber_listener: Arc<dyn UOwnedListener> = subscriber_listener_check.clone();
 
     let reg_res = subscriber
-        .register_listener(&publisher_topic, None, subscriber_listener)
+        .register_owned_listener(&publisher_topic, None, subscriber_listener)
         .await;
 
     if let Err(err) = reg_res {
@@ -131,6 +140,16 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
+    publisher
+        .send_owned(publish_frame(
+            publisher_topic.clone(),
+            b"warmup_publish".to_vec(),
+        ))
+        .await
+        .expect("failed to send warm-up publish frame");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let baseline_received = subscriber_listener_check.received_publish();
+
     // Track the start time and set the duration for the loop
     let duration = Duration::from_millis(TEST_DURATION);
     let start_time = Instant::now();
@@ -141,22 +160,14 @@ async fn publisher_subscriber() {
         let publish_payload_string = format!("publish_message@i={iterations}");
         let publish_payload = publish_payload_string.into_bytes();
 
-        let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone())
-            .build_with_payload(publish_payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
-
-        let Ok(publish_msg) = publish_msg_res else {
-            panic!(
-                "Unable to create Publish UMessage: {:?}",
-                publish_msg_res.err().unwrap()
-            );
-        };
+        let publish_msg = publish_frame(publisher_topic.clone(), publish_payload);
 
         trace!("Publish message we're about to send:\n{publish_msg:?}");
 
-        let send_res = publisher.send(publish_msg).await;
+        let send_res = publisher.send_owned(publish_msg).await;
 
         if let Err(err) = send_res {
-            panic!("Unable to send Publish UMessage: {:?}", err);
+            panic!("Unable to send Publish frame: {:?}", err);
         }
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -167,7 +178,8 @@ async fn publisher_subscriber() {
 
     let mut attempts = 0;
     const MAX_WAIT_ATTEMPTS: usize = 10;
-    while subscriber_listener_check.received_publish() < iterations && attempts < MAX_WAIT_ATTEMPTS
+    while subscriber_listener_check.received_publish() < baseline_received + iterations
+        && attempts < MAX_WAIT_ATTEMPTS
     {
         tokio::time::sleep(Duration::from_millis(200)).await;
         attempts += 1;
@@ -182,7 +194,9 @@ async fn publisher_subscriber() {
 
     assert_eq!(
         iterations,
-        subscriber_listener_check.received_publish(),
+        subscriber_listener_check
+            .received_publish()
+            .saturating_sub(baseline_received),
         "The number of messages received by the subscriber does not match the number sent."
     );
 }

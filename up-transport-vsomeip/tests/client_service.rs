@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
+use up_rust::{UCode, UEncoding, UFrameHeader, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 2000;
@@ -39,20 +39,11 @@ impl ResponseListener {
     }
 }
 #[async_trait::async_trait]
-impl UListener for ResponseListener {
-    async fn on_receive(&self, msg: UMessage) {
-        info!("Received Response:\n{:?}", msg);
+impl UOwnedListener for ResponseListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
+        info!("Received Response:\n{:?}", frame);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
-            }
-        };
-
-        let payload_bytes = payload.to_vec();
+        let payload_bytes = frame.payload_bytes().to_vec();
         info!("Received response payload_bytes of: {payload_bytes:?}");
         let Ok(response_payload_string) = std::str::from_utf8(&payload_bytes) else {
             panic!("unable to convert payload_bytes to string");
@@ -82,21 +73,12 @@ impl RequestListener {
 }
 
 #[async_trait::async_trait]
-impl UListener for RequestListener {
-    async fn on_receive(&self, msg: UMessage) {
+impl UOwnedListener for RequestListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
         self.received_request.fetch_add(1, Ordering::SeqCst);
-        info!("Received Request:\n{:?}", msg);
+        info!("Received Request:\n{:?}", frame);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
-            }
-        };
-
-        let payload_bytes = payload.to_vec();
+        let payload_bytes = frame.payload_bytes().to_vec();
         info!("Received request payload_bytes of: {payload_bytes:?}");
         let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
             panic!("Unable to unpack string from payload_bytes");
@@ -106,22 +88,40 @@ impl UListener for RequestListener {
         let response_payload_string = format!("Here's a response to: {payload_string}");
         let response_payload_bytes = response_payload_string.into_bytes();
 
-        let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
-            .with_comm_status(UCode::OK)
-            .build_with_payload(response_payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
-        let Ok(response_msg) = response_msg else {
-            panic!(
-                "Unable to create response_msg: {:?}",
-                response_msg.err().unwrap()
-            );
-        };
+        let reply_to = frame.header().attributes().source().clone();
+        let invoked_method = frame
+            .header()
+            .attributes()
+            .sink()
+            .expect("Request frame has no invoked method")
+            .clone();
+        let response_header = UFrameHeader::response(
+            reply_to,
+            frame.header().attributes().id().clone(),
+            invoked_method,
+        )
+        .with_encoding(UEncoding::from_content_type("text/plain"));
+        let mut response_msg = UOwnedFrame::new(response_header, response_payload_bytes);
+        *response_msg.header_mut().attributes_mut() = response_msg
+            .header()
+            .attributes()
+            .clone()
+            .with_commstatus(UCode::OK);
         if let Some(client) = self.client.upgrade() {
-            let send_res = client.send(response_msg).await;
+            let send_res = client.send_owned(response_msg).await;
             if let Err(err) = send_res {
-                panic!("Unable to send response_msg: {:?}", err);
+                panic!("Unable to send response frame: {:?}", err);
             }
         }
     }
+}
+
+fn request_frame(method: UUri, reply_to: UUri, ttl: u32, payload: Vec<u8>) -> UOwnedFrame {
+    UOwnedFrame::new(
+        UFrameHeader::request(method, reply_to, ttl)
+            .with_encoding(UEncoding::from_content_type("text/plain")),
+        payload,
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -179,10 +179,10 @@ async fn client_service() {
     .unwrap();
 
     let response_listener_check = Arc::new(ResponseListener::new());
-    let response_listener: Arc<dyn UListener> = response_listener_check.clone();
+    let response_listener: Arc<dyn UOwnedListener> = response_listener_check.clone();
 
     let reg_res_1 = client
-        .register_listener(
+        .register_owned_listener(
             &service_1_uuri_method_a,
             Some(&client_uuri),
             response_listener.clone(),
@@ -223,10 +223,10 @@ async fn client_service() {
     .unwrap();
 
     let request_listener_check = Arc::new(RequestListener::new(service.clone()));
-    let request_listener: Arc<dyn UListener> = request_listener_check.clone();
+    let request_listener: Arc<dyn UOwnedListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(
+        .register_owned_listener(
             &UUri::any(),
             Some(&service_1_uuri),
             request_listener.clone(),
@@ -249,21 +249,17 @@ async fn client_service() {
     while (Instant::now().duration_since(start_time) < duration) && (iterations < MAX_ITERATIONS) {
         let payload_string = format!("request@i={i}");
         let payload = payload_string.into_bytes();
-        let request_msg_res_1_a =
-            UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
-                .build_with_payload(payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+        let request_msg_1_a = request_frame(
+            service_1_uuri_method_a.clone(),
+            client_uuri.clone(),
+            10000,
+            payload,
+        );
 
-        let Ok(request_msg_1_a) = request_msg_res_1_a else {
-            panic!(
-                "Unable to create Request UMessage: {:?}",
-                request_msg_res_1_a.err().unwrap()
-            );
-        };
-
-        let send_res_1_a = client.send(request_msg_1_a).await;
+        let send_res_1_a = client.send_owned(request_msg_1_a).await;
 
         if let Err(err) = send_res_1_a {
-            panic!("Unable to send Request UMessage: {:?}", err);
+            panic!("Unable to send Request frame: {:?}", err);
         }
 
         iterations += 1;

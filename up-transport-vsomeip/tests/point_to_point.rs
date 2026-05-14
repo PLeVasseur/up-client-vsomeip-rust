@@ -12,16 +12,15 @@
  ********************************************************************************/
 
 use log::{error, info, trace};
-use protobuf::EnumOrUnknown;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
+use up_rust::{
+    UEncoding, UFrameHeader, UMessageType, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri, UUID,
+};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 500;
@@ -50,7 +49,6 @@ fn client_reply_uuri() -> UUri {
         ue_id: CLIENT_UE_ID,
         ue_version_major: CLIENT_UE_VERSION_NUMBER,
         resource_id: 0x0000,
-        ..Default::default()
     }
 }
 
@@ -60,7 +58,6 @@ fn ptp_reply_uuri() -> UUri {
         ue_id: PTP_UE_ID,
         ue_version_major: PTP_UE_VERSION_NUMBER,
         resource_id: 0x0000,
-        ..Default::default()
     }
 }
 
@@ -70,7 +67,6 @@ fn ptp_method_uuri() -> UUri {
         ue_id: PTP_UE_ID,
         ue_version_major: PTP_UE_VERSION_NUMBER,
         resource_id: PTP_METHOD_RESOURCE_ID,
-        ..Default::default()
     }
 }
 
@@ -80,8 +76,30 @@ fn service_uuri() -> UUri {
         ue_id: SERVICE_UE_ID,
         ue_version_major: SERVICE_UE_VERSION_NUMBER,
         resource_id: SERVICE_METHOD_RESOURCE_ID,
-        ..Default::default()
     }
+}
+
+fn text_encoding() -> UEncoding {
+    UEncoding::from_content_type("text/plain")
+}
+
+fn request_frame(method: UUri, reply_to: UUri, payload: Vec<u8>) -> UOwnedFrame {
+    UOwnedFrame::new(
+        UFrameHeader::request(method, reply_to, 1000).with_encoding(text_encoding()),
+        payload,
+    )
+}
+
+fn response_frame(
+    reply_to: UUri,
+    request_id: UUID,
+    invoked_method: UUri,
+    payload: Vec<u8>,
+) -> UOwnedFrame {
+    UOwnedFrame::new(
+        UFrameHeader::response(reply_to, request_id, invoked_method).with_encoding(text_encoding()),
+        payload,
+    )
 }
 
 pub struct PointToPointListener {
@@ -91,7 +109,6 @@ pub struct PointToPointListener {
 }
 
 impl PointToPointListener {
-    #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPTransportVsomeip>) -> Self {
         Self {
             client: Arc::downgrade(&client),
@@ -99,129 +116,75 @@ impl PointToPointListener {
             received_response: AtomicUsize::new(0),
         }
     }
+
     pub fn received_request(&self) -> usize {
         self.received_request.load(Ordering::SeqCst)
     }
+
     pub fn received_response(&self) -> usize {
         self.received_response.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait::async_trait]
-impl UListener for PointToPointListener {
-    async fn on_receive(&self, msg: UMessage) {
-        info!("Received in point-to-point listener:\n{:?}", msg);
+impl UOwnedListener for PointToPointListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
+        info!("Received in point-to-point listener:\n{:?}", frame);
 
-        let received_source_authority = msg.attributes.source.clone().unwrap().authority_name;
+        let received_source_authority = frame.header().attributes().source().authority_name.clone();
         if received_source_authority == NON_POINT_TO_POINT_LISTENED_AUTHORITY {
             panic!(
-                "Received a message on point to point listener that we should not have:\n{msg:?}"
+                "Received a message on point to point listener that we should not have:\n{frame:?}"
             );
         }
 
-        match msg
-            .attributes
-            .type_
-            .enum_value_or(UMESSAGE_TYPE_UNSPECIFIED)
-        {
-            UMESSAGE_TYPE_UNSPECIFIED => {
-                panic!("Not supported message type: UNSPECIFIED:\n{:?}", msg);
-            }
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
-                panic!("uProtocol PUBLISH received. This shouldn't happen!");
-            }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
+        let Some(client) = self.client.upgrade() else {
+            panic!("Unable to get ahold of the transport within PointToPointListener");
+        };
+
+        match frame.header().attributes().message_type() {
+            UMessageType::Request => {
                 trace!("PointToPointListener got a request");
                 self.received_request.fetch_add(1, Ordering::SeqCst);
 
-                let original_id = msg
-                    .attributes
-                    .as_ref()
-                    .unwrap()
-                    .id
-                    .as_ref()
-                    .unwrap()
-                    .clone();
-
-                info!(
-                    "within point to point listener, original_id: {}",
-                    original_id.to_hyphenated_string()
+                let original_id = frame.header().attributes().id().clone();
+                let forwarding_request = request_frame(
+                    service_uuri(),
+                    ptp_reply_uuri(),
+                    original_id.to_hyphenated_string().into_bytes(),
                 );
 
-                let mut builder = UMessageBuilder::request(service_uuri(), ptp_reply_uuri(), 1000);
-                let Ok(forwarding_request) = builder.build_with_protobuf_payload(&original_id)
-                else {
-                    panic!("Unable to make uProtocol Request message to forward to service");
-                };
-
-                info!("constructed forwarding_request: {forwarding_request:?}");
-
-                let Some(client) = self.client.upgrade() else {
-                    panic!("Unable to get ahold of the transport within PointToPointListener");
-                };
-
-                let _ = client.send(forwarding_request).await.inspect_err(|err| {
-                    error!("err: Unable to send response: {err:?}");
-                    panic!("Unable to send response: {err:?}");
-                });
-
-                info!("Able to forward request");
+                client
+                    .send_owned(forwarding_request)
+                    .await
+                    .unwrap_or_else(|err| {
+                        error!("Unable to forward request: {err:?}");
+                        panic!("Unable to forward request: {err:?}");
+                    });
             }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                trace!("PointToPointListener got a response: {:?}", msg);
+            UMessageType::Response => {
+                trace!("PointToPointListener got a response: {:?}", frame);
                 self.received_response.fetch_add(1, Ordering::SeqCst);
 
-                let mut msg_with_correct_payload_format = msg.clone();
-                if let Some(attributes) = msg_with_correct_payload_format.attributes.as_mut() {
-                    attributes.payload_format = EnumOrUnknown::from(UPAYLOAD_FORMAT_PROTOBUF);
-                }
-
-                trace!(
-                    "corrected response with protobuf payload format: {:?}",
-                    msg_with_correct_payload_format
+                let original_id = std::str::from_utf8(frame.payload_bytes())
+                    .expect("forwarded response payload is not UTF-8")
+                    .parse::<UUID>()
+                    .expect("forwarded response payload is not a UUID");
+                let response = response_frame(
+                    client_reply_uuri(),
+                    original_id,
+                    ptp_method_uuri(),
+                    Vec::new(),
                 );
 
-                let original_id: Result<UUID, _> =
-                    msg_with_correct_payload_format.extract_protobuf();
-
-                let original_id = {
-                    match original_id {
-                        Err(err) => {
-                            panic!("{err}");
-                        }
-                        Ok(original_id) => original_id,
-                    }
-                };
-
-                trace!("point to point response, original_id: {original_id}");
-
-                let builder =
-                    UMessageBuilder::response(client_reply_uuri(), original_id, ptp_method_uuri())
-                        .build();
-                let response_msg = {
-                    match builder {
-                        Ok(msg) => msg,
-                        Err(err) => {
-                            panic!("{err}");
-                        }
-                    }
-                };
-
-                trace!("response_msg: {response_msg:?}");
-
-                let Some(client) = self.client.upgrade() else {
-                    panic!("Unable to get ahold of the transport within PointToPointListener");
-                };
-
-                let _ = client.send(response_msg).await.inspect_err(|err| {
-                    panic!("Unable to send response: {err:?}");
+                client.send_owned(response).await.unwrap_or_else(|err| {
+                    panic!("Unable to forward response: {err:?}");
                 });
-
-                info!("Able to forward response");
-
-                return;
             }
-            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
+            UMessageType::Publish => {
+                panic!("uProtocol PUBLISH received. This shouldn't happen!");
+            }
+            UMessageType::Notification => {
                 panic!("Not supported message type: NOTIFICATION");
             }
         }
@@ -231,8 +194,8 @@ impl UListener for PointToPointListener {
 pub struct ResponseListener {
     received_response: AtomicUsize,
 }
+
 impl ResponseListener {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             received_response: AtomicUsize::new(0),
@@ -243,10 +206,17 @@ impl ResponseListener {
         self.received_response.load(Ordering::SeqCst)
     }
 }
+
+impl Default for ResponseListener {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
-impl UListener for ResponseListener {
-    async fn on_receive(&self, msg: UMessage) {
-        info!("ResponseListener: Received Response:\n{:?}", msg);
+impl UOwnedListener for ResponseListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
+        info!("ResponseListener: Received Response:\n{:?}", frame);
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
 }
@@ -257,7 +227,6 @@ pub struct RequestListener {
 }
 
 impl RequestListener {
-    #[allow(clippy::new_without_default)]
     pub fn new(client: Arc<UPTransportVsomeip>) -> Self {
         Self {
             client: Arc::downgrade(&client),
@@ -271,53 +240,36 @@ impl RequestListener {
 }
 
 #[async_trait::async_trait]
-impl UListener for RequestListener {
-    async fn on_receive(&self, msg: UMessage) {
+impl UOwnedListener for RequestListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
         self.received_request.fetch_add(1, Ordering::SeqCst);
-        info!("Received Request:\n{:?}", msg);
+        info!("Received Request:\n{:?}", frame);
 
-        let mut msg_with_correct_payload_format = msg.clone();
-        if let Some(attributes) = msg_with_correct_payload_format.attributes.as_mut() {
-            attributes.payload_format = EnumOrUnknown::from(UPAYLOAD_FORMAT_PROTOBUF);
-        }
+        let original_id = std::str::from_utf8(frame.payload_bytes())
+            .expect("forwarded request payload is not UTF-8")
+            .to_string();
+        let reply_to = frame.header().attributes().source().clone();
+        let invoked_method = frame
+            .header()
+            .attributes()
+            .sink()
+            .expect("Request frame has no invoked method")
+            .clone();
+        let response = response_frame(
+            reply_to,
+            frame.header().attributes().id().clone(),
+            invoked_method,
+            original_id.into_bytes(),
+        );
 
-        info!("Corrected Request:\n{:?}", msg_with_correct_payload_format);
-
-        let original_id: Result<UUID, _> = msg_with_correct_payload_format.extract_protobuf();
-
-        let original_id = {
-            match original_id {
-                Err(err) => {
-                    panic!("{err}");
-                }
-                Ok(original_id) => original_id,
-            }
-        };
-
-        info!("original_id: {}", original_id.to_hyphenated_string());
-
-        let response_msg =
-            UMessageBuilder::response_for_request(&msg_with_correct_payload_format.attributes)
-                .with_comm_status(UCode::OK)
-                .build_with_protobuf_payload(&original_id);
-
-        info!("response_msg: {response_msg:?}");
-
-        let Ok(response_msg) = response_msg else {
-            panic!(
-                "Unable to create response_msg: {:?}",
-                response_msg.err().unwrap()
-            );
-        };
         if let Some(client) = self.client.upgrade() {
-            let send_res = client.send(response_msg).await;
-
-            if let Err(err) = send_res {
-                panic!("Unable to send response_msg: {:?}", err);
-            }
+            client.send_owned(response).await.unwrap_or_else(|err| {
+                panic!("Unable to send service response frame: {err:?}");
+            });
         }
     }
 }
+
 fn any_from_authority(authority_name: &str) -> UUri {
     let mut any_with_authority = UUri::any();
     any_with_authority.authority_name = authority_name.to_string();
@@ -337,20 +289,13 @@ async fn point_to_point() {
 
     let point_to_point_uri =
         UUri::try_from_parts(PTP_AUTHORITY_NAME, STREAMER_UE_ID, 1, 0).unwrap();
-    trace!("Initializing point to point: Start");
-    let point_to_point_client_res = UPTransportVsomeip::new_with_config(
+    let point_to_point_client = UPTransportVsomeip::new_with_config(
         point_to_point_uri,
         &PTP_AUTHORITY_NAME.to_string(),
         &abs_vsomeip_config_path.unwrap(),
         None,
-    );
-    trace!("Initializing point to point: End");
-    let Ok(point_to_point_client) = point_to_point_client_res else {
-        if let Err(e) = point_to_point_client_res {
-            panic!("Unable to establish UTransport: {e:?}");
-        }
-        panic!("Unable to establish UTransport");
-    };
+    )
+    .unwrap_or_else(|err| panic!("Unable to establish owned transport: {err:?}"));
     let point_to_point_client = Arc::new(point_to_point_client);
 
     let source = any_from_authority(PTP_AUTHORITY_NAME);
@@ -359,18 +304,16 @@ async fn point_to_point() {
 
     let point_to_point_listener_check =
         Arc::new(PointToPointListener::new(point_to_point_client.clone()));
-    let point_to_point_listener: Arc<dyn UListener> = point_to_point_listener_check.clone();
-    trace!("Registering point to point listener: Start");
+    let point_to_point_listener: Arc<dyn UOwnedListener> = point_to_point_listener_check.clone();
     let reg_res = point_to_point_client
-        .register_listener(&source, Some(&sink), point_to_point_listener.clone())
+        .register_owned_listener(&source, Some(&sink), point_to_point_listener.clone())
         .await;
-    trace!("Registering point to point listener: End");
     if let Err(err) = reg_res {
-        panic!("Unable to register with UTransport: {err}");
+        panic!("Unable to register with owned transport: {err}");
     }
 
     let fallback_reg_res = point_to_point_client
-        .register_listener(&legacy_source, Some(&sink), point_to_point_listener)
+        .register_owned_listener(&legacy_source, Some(&sink), point_to_point_listener)
         .await;
     if let Err(err) = fallback_reg_res {
         trace!("Fallback point-to-point listener registration not applied: {err}");
@@ -383,35 +326,28 @@ async fn point_to_point() {
     info!("client_config: {client_config:?}");
 
     let client_uri = UUri::try_from_parts(CLIENT_AUTHORITY_NAME, CLIENT_UE_ID, 1, 0).unwrap();
-    let client_res = UPTransportVsomeip::new_with_config(
+    let client = UPTransportVsomeip::new_with_config(
         client_uri,
         &CLIENT_AUTHORITY_NAME.to_string(),
         &client_config.unwrap(),
         None,
-    );
-
-    let Ok(client) = client_res else {
-        if let Err(e) = client_res {
-            panic!("Unable to establish client: {:?}", e);
-        }
-        panic!();
-    };
+    )
+    .unwrap_or_else(|err| panic!("Unable to establish client: {err:?}"));
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let response_listener_check = Arc::new(ResponseListener::new());
-    let response_listener: Arc<dyn UListener> = response_listener_check.clone();
+    let response_listener: Arc<dyn UOwnedListener> = response_listener_check.clone();
 
-    trace!("Registering a ResponseListener");
     let reg_res_1 = client
-        .register_listener(
+        .register_owned_listener(
             &ptp_method_uuri(),
             Some(&client_reply_uuri()),
             response_listener.clone(),
         )
         .await;
     if let Err(err) = reg_res_1 {
-        panic!("Unable to register for returning Response: {:?}", err);
+        panic!("Unable to register for returning Response: {err:?}");
     }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -421,29 +357,23 @@ async fn point_to_point() {
     info!("service_config: {service_config:?}");
 
     let service_uri = UUri::try_from_parts(SERVICE_AUTHORITY_NAME, SERVICE_UE_ID, 1, 0).unwrap();
-    let service_res = UPTransportVsomeip::new_with_config(
+    let service = UPTransportVsomeip::new_with_config(
         service_uri,
         &SERVICE_AUTHORITY_NAME.to_string(),
         &service_config.unwrap(),
         None,
-    );
-
-    let Ok(service) = service_res else {
-        if let Err(e) = service_res {
-            panic!("Unable to establish service: {:?}", e);
-        }
-        panic!();
-    };
+    )
+    .unwrap_or_else(|err| panic!("Unable to establish service: {err:?}"));
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let service = Arc::new(service);
 
     let request_listener_check = Arc::new(RequestListener::new(service.clone()));
-    let request_listener: Arc<dyn UListener> = request_listener_check.clone();
+    let request_listener: Arc<dyn UOwnedListener> = request_listener_check.clone();
 
     let reg_service_1 = service
-        .register_listener(
+        .register_owned_listener(
             &UUri::any(),
             Some(&service_uuri()),
             request_listener.clone(),
@@ -451,52 +381,27 @@ async fn point_to_point() {
         .await;
 
     if let Err(err) = reg_service_1 {
-        error!("Unable to register: {:?}", err);
+        error!("Unable to register: {err:?}");
     }
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Track the start time and set the duration for the loop
     let duration = Duration::from_millis(TEST_DURATION);
     let start_time = Instant::now();
     let mut iterations = 0;
 
-    // limit with iterations to ensure socket transactions can complete during test
     while (Instant::now().duration_since(start_time) < duration) && (iterations < MAX_ITERATIONS) {
-        let request_msg_res =
-            UMessageBuilder::request(ptp_method_uuri(), client_reply_uuri(), 10000)
-                .build()
-                .unwrap();
-        trace!("Sending message from client: {request_msg_res}");
-        let send_res = client.send(request_msg_res.clone()).await;
-
-        if let Err(err) = send_res {
-            panic!("Unable to send message: {err:?}");
-        }
+        let request_msg = request_frame(ptp_method_uuri(), client_reply_uuri(), Vec::new());
+        trace!("Sending message from client: {request_msg:?}");
+        client
+            .send_owned(request_msg)
+            .await
+            .unwrap_or_else(|err| panic!("Unable to send message: {err:?}"));
 
         iterations += 1;
     }
 
     tokio::time::sleep(Duration::from_millis(2000)).await;
-
-    println!("iterations: {}", iterations);
-
-    println!(
-        "request_listener_check.received_request(): {}",
-        request_listener_check.received_request()
-    );
-    println!(
-        "point_to_point_listener_check.received_request(): {}",
-        point_to_point_listener_check.received_request()
-    );
-    println!(
-        "point_to_point_listener_check.received_response(): {}",
-        point_to_point_listener_check.received_response()
-    );
-    println!(
-        "response_listener_check.received_response(): {}",
-        response_listener_check.received_response()
-    );
 
     assert_eq!(iterations, request_listener_check.received_request());
     assert_eq!(iterations, point_to_point_listener_check.received_request());

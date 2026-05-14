@@ -11,7 +11,7 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use crate::message_conversions::VsomeipMessageToUMessage;
+use crate::message_conversions::VsomeipMessageToUFrame;
 use crate::storage::UPTransportVsomeipStorage;
 use crate::MessageHandlerId;
 use bimap::BiMap;
@@ -26,8 +26,7 @@ use std::ops::DerefMut;
 use std::sync::RwLock;
 use std::sync::{mpsc, Arc, Weak};
 use tokio::task::LocalSet;
-use up_rust::{ComparableListener, UListener, UUri};
-use up_rust::{UCode, UMessage, UStatus};
+use up_rust::{ComparableOwnedListener, UCode, UOwnedFrame, UOwnedListener, UStatus, UUri};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
 use vsomeip_sys::glue::{make_message_wrapper, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
@@ -121,27 +120,27 @@ pub trait MessageHandlerRegistry {
     fn get_message_handler(
         &self,
         transport_storage: Arc<UPTransportVsomeipStorage>,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError>;
 
     /// Release a given message handler
     fn release_message_handler(
         &self,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<(), UStatus>;
 
     /// Get all listener configs
-    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)>;
+    fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableOwnedListener)>;
 
-    /// Get trait object [UListener] for a [MessageHandlerId]
+    /// Get trait object [UOwnedListener] for a [MessageHandlerId]
     fn get_listener_for_message_handler_id(
         &self,
         message_handler_id: usize,
-    ) -> Option<Arc<dyn UListener>>;
+    ) -> Option<Arc<dyn UOwnedListener>>;
 }
 
 type MessageHandlerIdAndListenerConfig =
-    BiMap<MessageHandlerId, (UUri, Option<UUri>, ComparableListener)>;
+    BiMap<MessageHandlerId, (UUri, Option<UUri>, ComparableOwnedListener)>;
 pub struct InMemoryMessageHandlerRegistry {
     message_handler_id_and_listener_config: RwLock<MessageHandlerIdAndListenerConfig>,
 }
@@ -157,7 +156,7 @@ impl InMemoryMessageHandlerRegistry {
     pub fn get_message_handler(
         &self,
         transport_storage: Arc<UPTransportVsomeipStorage>,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<MessageHandlerFnPtr, GetMessageHandlerError> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
         let mut message_handler_id_to_transport_storage =
@@ -257,7 +256,7 @@ impl InMemoryMessageHandlerRegistry {
     /// Release a given message handler
     pub fn release_message_handler(
         &self,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<(), UStatus> {
         // Lock all the necessary state at the beginning so we don't have partial transactions
         let mut message_handler_id_to_transport_storage =
@@ -304,7 +303,7 @@ impl InMemoryMessageHandlerRegistry {
     }
 
     /// Get all listener configs
-    pub fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableListener)> {
+    pub fn get_all_listener_configs(&self) -> Vec<(UUri, Option<UUri>, ComparableOwnedListener)> {
         let all_message_handler_ids = self.get_message_handler_ids();
         let mut listener_configs = Vec::new();
         for message_handler_id in all_message_handler_ids {
@@ -336,9 +335,9 @@ impl InMemoryMessageHandlerRegistry {
     fn get_message_handler_id_for_listener_config(
         message_handler_id_and_listener_config: &mut BiMap<
             usize,
-            (UUri, Option<UUri>, ComparableListener),
+            (UUri, Option<UUri>, ComparableOwnedListener),
         >,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Option<usize> {
         let message_handler_id =
             message_handler_id_and_listener_config.get_by_right(&listener_config)?;
@@ -346,11 +345,11 @@ impl InMemoryMessageHandlerRegistry {
         Some(*message_handler_id)
     }
 
-    /// Get trait object [UListener] for a [MessageHandlerId]
+    /// Get trait object [UOwnedListener] for a [MessageHandlerId]
     pub fn get_listener_for_message_handler_id(
         &self,
         message_handler_id: usize,
-    ) -> Option<Arc<dyn UListener>> {
+    ) -> Option<Arc<dyn UOwnedListener>> {
         let listener_id_and_listener_config =
             self.message_handler_id_and_listener_config.read().unwrap();
 
@@ -363,7 +362,7 @@ impl InMemoryMessageHandlerRegistry {
     fn get_listener_config_for_message_handler_id(
         &self,
         message_handler_id: usize,
-    ) -> Option<(UUri, Option<UUri>, ComparableListener)> {
+    ) -> Option<(UUri, Option<UUri>, ComparableOwnedListener)> {
         let message_handler_id_and_listener_config =
             self.message_handler_id_and_listener_config.read().unwrap();
 
@@ -447,7 +446,7 @@ impl InMemoryMessageHandlerRegistry {
     fn remove_message_handler_id_and_listener_config_based_on_message_handler_id(
         message_handler_id_and_listener_config: &mut BiMap<
             usize,
-            (UUri, Option<UUri>, ComparableListener),
+            (UUri, Option<UUri>, ComparableOwnedListener),
         >,
         message_handler_id: MessageHandlerId,
     ) -> Result<(), UStatus> {
@@ -466,10 +465,10 @@ impl InMemoryMessageHandlerRegistry {
     fn insert_message_handler_id_and_listener_config(
         message_handler_id_and_listener_config: &mut BiMap<
             usize,
-            (UUri, Option<UUri>, ComparableListener),
+            (UUri, Option<UUri>, ComparableOwnedListener),
         >,
         message_handler_id: usize,
-        listener_config: (UUri, Option<UUri>, ComparableListener),
+        listener_config: (UUri, Option<UUri>, ComparableOwnedListener),
     ) -> Result<(), MessageHandlerIdAndListenerConfigError> {
         trace!(
             "insert_listener_id_and_listener_config: message_handler_id: {}",

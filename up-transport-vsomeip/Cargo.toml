@@ -40,7 +40,6 @@ up-rust = { workspace = true }
 vsomeip-proc-macro = { workspace = true }
 vsomeip-sys = { workspace = true }
 lazy_static = { workspace = true }
-protobuf = { workspace = true }
 log = { workspace = true }
 once_cell = { workspace = true }
 futures = "0.3.30"
@@ -48,5 +47,6 @@ tempfile = "3.16.0"
 
 [dev-dependencies]
 env_logger = { version = "0.11.3" }
-hello-world-protos = { path = "../example-utils/hello-world-protos" }
+protobuf = { version = "3.7.2" }
 test-case = { version = "3.3" }
+up-rust = { path = "/home/pete.levasseur/eclipse/uprotocol/up-rust", default-features = false, features = ["protobuf-wire"] }

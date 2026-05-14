@@ -12,7 +12,8 @@
  ********************************************************************************/
 
 use crate::determine_message_type::RegistrationType;
-use crate::message_conversions::UMessageToVsomeipMessage;
+use crate::frame_wire::encode_frame_payload;
+use crate::message_conversions::UFrameToVsomeipMessage;
 use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
@@ -27,7 +28,7 @@ use std::time::Duration;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::oneshot;
-use up_rust::{UCode, UMessage, UMessageType, UStatus, UUri};
+use up_rust::{UCode, UMessageType, UOwnedFrame, UStatus, UUri};
 use vsomeip_sys::glue::{
     make_application_wrapper, make_payload_wrapper, make_runtime_wrapper, ApplicationWrapper,
     MessageHandlerFnPtr, RuntimeWrapper,
@@ -48,7 +49,7 @@ pub const UP_CLIENT_VSOMEIP_FN_TAG_STOP_APP: &str = "stop_app";
 pub const INTERNAL_FUNCTION_TIMEOUT: u64 = 3;
 
 pub enum TransportCommand {
-    // Primary purpose of a UTransport
+    // Primary purpose of an owned uProtocol transport.
     RegisterListener(
         UUri,
         Option<UUri>,
@@ -67,7 +68,7 @@ pub enum TransportCommand {
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
-        UMessage,
+        Box<UOwnedFrame>,
         RegistrationType,
         ApplicationName,
         Arc<dyn RpcCorrelationRegistry>,
@@ -327,7 +328,7 @@ impl UPTransportVsomeipEngine {
                     trace!("after returning oneshot result of res: {res:?}");
                 }
                 TransportCommand::Send(
-                    umsg,
+                    frame,
                     message_type,
                     app_name,
                     rpc_correlation_registry,
@@ -335,10 +336,10 @@ impl UPTransportVsomeipEngine {
                     return_channel,
                 ) => {
                     trace!(
-                        "{}:{} - Attempting to send UMessage: {:?}",
+                        "{}:{} - Attempting to send native frame: {:?}",
                         UP_CLIENT_VSOMEIP_TAG,
                         UP_CLIENT_VSOMEIP_FN_TAG_APP_EVENT_LOOP,
-                        umsg
+                        frame
                     );
 
                     trace!(
@@ -361,7 +362,7 @@ impl UPTransportVsomeipEngine {
                     };
 
                     let res = Self::send_internal(
-                        umsg,
+                        *frame,
                         rpc_correlation_registry,
                         vsomeip_offered_requested_registry,
                         &mut application_wrapper,
@@ -724,7 +725,7 @@ impl UPTransportVsomeipEngine {
     }
 
     async fn send_internal(
-        umsg: UMessage,
+        frame: UOwnedFrame,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
@@ -732,39 +733,23 @@ impl UPTransportVsomeipEngine {
     ) -> Result<(), UStatus> {
         trace!("send_internal");
 
-        let payload = {
-            if let Some(bytes) = umsg.payload.clone() {
-                bytes.to_vec()
-            } else {
-                Vec::new()
-            }
-        };
+        let payload = encode_frame_payload(&frame)?;
         let mut vsomeip_payload =
             make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
         vsomeip_payload.set_data_safe(&payload);
         let attachable_payload = vsomeip_payload.get_shared_ptr();
 
-        match umsg
-            .attributes
-            .type_
-            .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
-        {
-            UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
-                return Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "Unspecified message type not supported",
-                ));
-            }
-            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
+        match frame.header().attributes().message_type() {
+            UMessageType::Notification => {
                 return Err(UStatus::fail_with_code(
                     UCode::INVALID_ARGUMENT,
                     "Notification is not supported",
                 ));
             }
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+            UMessageType::Publish => {
                 let (service_id, instance_id, event_id) =
-                    UMessageToVsomeipMessage::umsg_publish_to_vsomeip_notification(
-                        &umsg,
+                    UFrameToVsomeipMessage::frame_publish_to_vsomeip_notification(
+                        &frame,
                         vsomeip_offered_requested_registry,
                         application_wrapper,
                     )
@@ -778,10 +763,9 @@ impl UPTransportVsomeipEngine {
                     true,
                 );
             }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
-                let vsomeip_msg = UMessageToVsomeipMessage::umsg_request_to_vsomeip_message(
-                    &umsg,
-                    rpc_correlation_registry,
+            UMessageType::Request => {
+                let vsomeip_msg = UFrameToVsomeipMessage::frame_request_to_vsomeip_message(
+                    &frame,
                     application_wrapper,
                     runtime_wrapper,
                 )
@@ -791,9 +775,9 @@ impl UPTransportVsomeipEngine {
                 let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
                 application_wrapper.get_pinned().send(shared_ptr_message);
             }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
-                let vsomeip_msg = UMessageToVsomeipMessage::umsg_response_to_vsomeip_message(
-                    &umsg,
+            UMessageType::Response => {
+                let vsomeip_msg = UFrameToVsomeipMessage::frame_response_to_vsomeip_message(
+                    &frame,
                     rpc_correlation_registry,
                     runtime_wrapper,
                 )

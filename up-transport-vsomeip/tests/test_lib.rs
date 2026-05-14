@@ -12,7 +12,7 @@
  ********************************************************************************/
 
 use std::sync::Once;
-use up_rust::{UListener, UMessage};
+use up_rust::{UOwnedFrame, UOwnedListener};
 
 static INIT: Once = Once::new();
 pub fn before_test() {
@@ -21,8 +21,8 @@ pub fn before_test() {
 
 pub struct PrintingListener;
 #[async_trait::async_trait]
-impl UListener for PrintingListener {
-    async fn on_receive(&self, msg: UMessage) {
-        println!("{:?}", msg);
+impl UOwnedListener for PrintingListener {
+    async fn on_receive_owned(&self, frame: UOwnedFrame) {
+        println!("{:?}", frame);
     }
 }
