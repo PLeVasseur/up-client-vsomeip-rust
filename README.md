@@ -25,6 +25,8 @@ See `vsomeip-sys/README.md` for more details on options.
 
 This library leverages the [up-rust](https://github.com/eclipse-uprotocol/up-rust) library for data types and models specified by uProtocol.
 
+This branch uses native `UOwnedFrame` values instead of generated `UMessage` transport envelopes. The vsomeip binding serializes a compact native-frame prefix before the application payload so it can preserve `UAttributes` and `UEncoding` across SOME/IP. `UEncoding.schema_ref` is preserved distinctly from the payload bytes and participates in typed decoder compatibility checks after receive. The transport remains owned-buffer based; it does not claim `UZeroCopyTransport` capability.
+
 ### Running the Tests
 
 To run the tests, run
