@@ -126,7 +126,7 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
         attributes = attributes.with_permission_level(permission_level);
     }
     if let Some(commstatus) = commstatus {
-        attributes = attributes.with_commstatus(commstatus);
+        attributes = attributes.with_comm_status(commstatus);
     }
 
     Ok(UOwnedFrame::new(
@@ -356,7 +356,7 @@ mod tests {
                 .with_traceparent("traceparent")
                 .with_token("token")
                 .with_permission_level(9)
-                .with_commstatus(UCode::UNAVAILABLE);
+                .with_comm_status(UCode::UNAVAILABLE);
         let frame = UOwnedFrame::new(
             UFrameMetadata::new(
                 attributes,

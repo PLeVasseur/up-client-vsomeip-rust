@@ -108,7 +108,7 @@ impl UOwnedListener for RequestListener {
             .metadata()
             .attributes()
             .clone()
-            .with_commstatus(UCode::OK);
+            .with_comm_status(UCode::OK);
         if let Some(client) = self.client.upgrade() {
             let send_res = client.send_owned(response_msg).await;
             if let Err(err) = send_res {
