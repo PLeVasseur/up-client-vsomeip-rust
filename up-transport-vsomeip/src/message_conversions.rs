@@ -36,10 +36,10 @@ impl UFrameToVsomeipMessage {
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let source = frame.metadata().attributes().source();
 
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
+        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id());
         let instance_id = 1;
-        let (_, event_id) = split_u32_to_u16(source.resource_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+        let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
         trace!("uProtocol Publish frame's interface_version: {interface_version}");
 
         if !vsomeip_offered_requested_registry.is_event_offered(service_id, instance_id, event_id) {
@@ -77,12 +77,12 @@ impl UFrameToVsomeipMessage {
         })?;
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
-        let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+        let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id());
         trace!(
             "{} - sink.ue_id: {} source.ue_id: {} _instance_id: {} service_id:{}",
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_FRAME_TO_VSOMEIP_MSG,
-            sink.ue_id,
-            source.ue_id,
+            sink.ue_id(),
+            source.ue_id(),
             _instance_id,
             service_id
         );
@@ -93,9 +93,9 @@ impl UFrameToVsomeipMessage {
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
-        let (_, method_id) = split_u32_to_u16(sink.resource_id);
+        let (_, method_id) = split_u32_to_u16(sink.resource_id_raw());
         vsomeip_msg.get_message_base_pinned().set_method(method_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+        let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major());
         vsomeip_msg
             .get_message_base_pinned()
             .set_interface_version(interface_version);
@@ -123,7 +123,7 @@ impl UFrameToVsomeipMessage {
         let source = frame.metadata().attributes().source();
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_message(true));
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
+        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id());
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
@@ -131,9 +131,9 @@ impl UFrameToVsomeipMessage {
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
-        let (_, method_id) = split_u32_to_u16(source.resource_id);
+        let (_, method_id) = split_u32_to_u16(source.resource_id_raw());
         vsomeip_msg.get_message_base_pinned().set_method(method_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
         vsomeip_msg
             .get_message_base_pinned()
             .set_interface_version(interface_version);

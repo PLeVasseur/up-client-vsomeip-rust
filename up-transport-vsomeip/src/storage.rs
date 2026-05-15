@@ -80,7 +80,7 @@ impl UPTransportVsomeipStorage {
         self.runtime_handle.clone()
     }
     pub fn get_local_authority(&self) -> AuthorityName {
-        self.uri.authority_name.clone()
+        self.uri.authority_name()
     }
 
     pub fn get_remote_authority(&self) -> AuthorityName {
@@ -88,7 +88,7 @@ impl UPTransportVsomeipStorage {
     }
 
     pub fn get_ue_id(&self) -> UeId {
-        self.uri.ue_id
+        self.uri.ue_id()
     }
 
     pub fn get_vsomeip_application_config(&self) -> VsomeipApplicationConfig {

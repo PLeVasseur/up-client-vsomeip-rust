@@ -3,12 +3,8 @@ use up_rust::UUri;
 
 /// Creates a [UUri] with specified [UUri::authority_name] and [UUri::ue_id]
 pub fn any_uuri_fixed_authority_id(authority_name: &AuthorityName, ue_id: UeId) -> UUri {
-    UUri {
-        authority_name: authority_name.to_string(),
-        ue_id,
-        ue_version_major: 0xFF, // any
-        resource_id: 0xFFFF,    // any
-    }
+    UUri::try_from_parts(authority_name, ue_id, 0xFF, 0xFFFF)
+        .expect("fixed authority wildcard URI must be valid")
 }
 
 /// Useful for splitting u32 into u16s when manipulating [UUri] elements

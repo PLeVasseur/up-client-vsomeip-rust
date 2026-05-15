@@ -85,7 +85,7 @@ pub fn determine_type(
         }
 
         // Log which case we're falling through to
-        if sink_filter.resource_id == 0 {
+        if sink_filter.resource_id_raw() == 0 {
             trace!("sink_filter.resource_id == 0 - returning Response");
             Ok(RegistrationType::Response)
         } else {

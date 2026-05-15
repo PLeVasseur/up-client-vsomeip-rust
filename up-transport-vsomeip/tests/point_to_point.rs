@@ -45,39 +45,43 @@ const SERVICE_METHOD_RESOURCE_ID: u32 = 0x0421;
 const NON_POINT_TO_POINT_LISTENED_AUTHORITY: &str = "oops";
 
 fn client_reply_uuri() -> UUri {
-    UUri {
-        authority_name: CLIENT_AUTHORITY_NAME.to_string(),
-        ue_id: CLIENT_UE_ID,
-        ue_version_major: CLIENT_UE_VERSION_NUMBER,
-        resource_id: 0x0000,
-    }
+    UUri::try_from_parts(
+        CLIENT_AUTHORITY_NAME,
+        CLIENT_UE_ID,
+        CLIENT_UE_VERSION_NUMBER as u8,
+        0,
+    )
+    .unwrap()
 }
 
 fn ptp_reply_uuri() -> UUri {
-    UUri {
-        authority_name: PTP_AUTHORITY_NAME.to_string(),
-        ue_id: PTP_UE_ID,
-        ue_version_major: PTP_UE_VERSION_NUMBER,
-        resource_id: 0x0000,
-    }
+    UUri::try_from_parts(
+        PTP_AUTHORITY_NAME,
+        PTP_UE_ID,
+        PTP_UE_VERSION_NUMBER as u8,
+        0,
+    )
+    .unwrap()
 }
 
 fn ptp_method_uuri() -> UUri {
-    UUri {
-        authority_name: PTP_AUTHORITY_NAME.to_string(),
-        ue_id: PTP_UE_ID,
-        ue_version_major: PTP_UE_VERSION_NUMBER,
-        resource_id: PTP_METHOD_RESOURCE_ID,
-    }
+    UUri::try_from_parts(
+        PTP_AUTHORITY_NAME,
+        PTP_UE_ID,
+        PTP_UE_VERSION_NUMBER as u8,
+        PTP_METHOD_RESOURCE_ID as u16,
+    )
+    .unwrap()
 }
 
 fn service_uuri() -> UUri {
-    UUri {
-        authority_name: SERVICE_AUTHORITY_NAME.to_string(),
-        ue_id: SERVICE_UE_ID,
-        ue_version_major: SERVICE_UE_VERSION_NUMBER,
-        resource_id: SERVICE_METHOD_RESOURCE_ID,
-    }
+    UUri::try_from_parts(
+        SERVICE_AUTHORITY_NAME,
+        SERVICE_UE_ID,
+        SERVICE_UE_VERSION_NUMBER as u8,
+        SERVICE_METHOD_RESOURCE_ID as u16,
+    )
+    .unwrap()
 }
 
 fn text_encoding() -> UEncoding {
@@ -133,12 +137,7 @@ impl UOwnedListener for PointToPointListener {
     async fn on_receive_owned(&self, frame: UOwnedFrame) {
         info!("Received in point-to-point listener:\n{:?}", frame);
 
-        let received_source_authority = frame
-            .metadata()
-            .attributes()
-            .source()
-            .authority_name
-            .clone();
+        let received_source_authority = frame.metadata().attributes().source().authority_name();
         if received_source_authority == NON_POINT_TO_POINT_LISTENED_AUTHORITY {
             panic!(
                 "Received a message on point to point listener that we should not have:\n{frame:?}"
@@ -278,9 +277,7 @@ impl UOwnedListener for RequestListener {
 }
 
 fn any_from_authority(authority_name: &str) -> UUri {
-    let mut any_with_authority = UUri::any();
-    any_with_authority.authority_name = authority_name.to_string();
-    any_with_authority
+    UUri::try_from_parts(authority_name, 0xFFFF_FFFF, 0xFF, 0xFFFF).expect("valid authority")
 }
 
 #[tokio::test(flavor = "multi_thread")]

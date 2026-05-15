@@ -24,8 +24,8 @@ pub(crate) fn encode_frame_payload(frame: &UOwnedFrame) -> Result<Vec<u8>, UStat
     let mut bytes = Vec::new();
     bytes.extend_from_slice(FRAME_PAYLOAD_MAGIC);
     bytes.push(FRAME_PAYLOAD_VERSION);
-    write_u64(&mut bytes, frame.metadata().attributes().id().msb);
-    write_u64(&mut bytes, frame.metadata().attributes().id().lsb);
+    write_u64(&mut bytes, frame.metadata().attributes().id().msb());
+    write_u64(&mut bytes, frame.metadata().attributes().id().lsb());
     bytes.push(message_type_to_byte(
         frame.metadata().attributes().message_type(),
     ));
@@ -156,8 +156,8 @@ fn write_optional_uuid(dst: &mut Vec<u8>, value: Option<&UUID>) {
     match value {
         Some(value) => {
             dst.push(1);
-            write_u64(dst, value.msb);
-            write_u64(dst, value.lsb);
+            write_u64(dst, value.msb());
+            write_u64(dst, value.lsb());
         }
         None => dst.push(0),
     }

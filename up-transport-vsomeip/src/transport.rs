@@ -132,13 +132,11 @@ impl UOwnedTransport for UPTransportVsomeip {
 
 impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
-        self.storage.get_uri().authority_name
+        self.storage.get_uri().authority_name()
     }
 
     fn get_resource_uri(&self, resource_id: u16) -> UUri {
-        let mut resource_uri = self.storage.get_uri();
-        resource_uri.resource_id = u32::from(resource_id);
-        resource_uri
+        self.storage.get_uri().with_resource_id(resource_id)
     }
 
     fn get_source_uri(&self) -> UUri {

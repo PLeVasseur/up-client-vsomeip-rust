@@ -434,10 +434,10 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
                 // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let instance_id = 1;
-                let (_, event_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, event_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -507,10 +507,10 @@ impl UPTransportVsomeipEngine {
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
                 let instance_id = 1; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
-                let (_, _, _, major_version) = split_u32_to_u8(sink_filter.ue_version_major);
+                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
+                let (_, _, _, major_version) = split_u32_to_u8(sink_filter.ue_version_major());
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -562,9 +562,9 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 if !vsomeip_offered_requested_registry.is_service_requested(
                     service_id,
@@ -638,9 +638,9 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
@@ -668,9 +668,9 @@ impl UPTransportVsomeipEngine {
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
@@ -699,9 +699,9 @@ impl UPTransportVsomeipEngine {
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
