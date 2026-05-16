@@ -14,7 +14,7 @@
 use crate::frame_wire::decode_frame_payload;
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::utils::{split_u32_to_u16, split_u32_to_u8};
+use crate::utils::{split_u32_to_u16, split_u32_to_u8, split_ue_id_to_instance_service};
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
 use log::trace;
@@ -36,8 +36,7 @@ impl UFrameToVsomeipMessage {
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let source = frame.metadata().attributes().source();
 
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id());
-        let instance_id = 1;
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
         let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
         let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
         trace!("uProtocol Publish frame's interface_version: {interface_version}");
@@ -77,19 +76,18 @@ impl UFrameToVsomeipMessage {
         })?;
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
-        let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id());
+        let (instance_id, service_id) = split_ue_id_to_instance_service(sink.ue_id());
         trace!(
-            "{} - sink.ue_id: {} source.ue_id: {} _instance_id: {} service_id:{}",
+            "{} - sink.ue_id: {} source.ue_id: {} instance_id: {} service_id:{}",
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_FRAME_TO_VSOMEIP_MSG,
             sink.ue_id(),
             source.ue_id(),
-            _instance_id,
+            instance_id,
             service_id
         );
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1;
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
@@ -123,11 +121,10 @@ impl UFrameToVsomeipMessage {
         let source = frame.metadata().attributes().source();
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_message(true));
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id());
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1;
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
@@ -185,6 +182,140 @@ impl UFrameToVsomeipMessage {
     }
 }
 
+#[derive(Clone, Debug)]
+struct VsomeipHeader {
+    service_id: ServiceId,
+    instance_id: InstanceId,
+    method_id: u16,
+    interface_version: u8,
+    message_type: message_type_e,
+    return_code: vsomeip::return_code_e,
+}
+
+fn validate_vsomeip_header_matches_frame(
+    frame: &UOwnedFrame,
+    header: VsomeipHeader,
+) -> Result<(), UStatus> {
+    let attributes = frame.metadata().attributes();
+    let (uri, expected_message_type, expected_return_code) = match attributes.message_type() {
+        up_rust::UMessageType::Publish => (
+            attributes.source(),
+            message_type_e::MT_NOTIFICATION,
+            Some(vsomeip::return_code_e::E_OK),
+        ),
+        up_rust::UMessageType::Request => (
+            attributes.sink().ok_or_else(|| {
+                UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Request frame has no sink UUri")
+            })?,
+            message_type_e::MT_REQUEST,
+            Some(vsomeip::return_code_e::E_OK),
+        ),
+        up_rust::UMessageType::Response => (
+            attributes.source(),
+            if attributes
+                .commstatus()
+                .is_some_and(|commstatus| commstatus != UCode::OK)
+            {
+                message_type_e::MT_ERROR
+            } else {
+                message_type_e::MT_RESPONSE
+            },
+            None,
+        ),
+        up_rust::UMessageType::Notification => {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "Notification is not supported over SOME/IP",
+            ));
+        }
+    };
+
+    let (expected_instance_id, expected_service_id) = split_ue_id_to_instance_service(uri.ue_id());
+    let (_, expected_method_id) = split_u32_to_u16(uri.resource_id_raw());
+    let (_, _, _, expected_interface_version) = split_u32_to_u8(uri.ue_version_major());
+
+    let interface_version_matches = header.interface_version == expected_interface_version
+        || header.interface_version == ANY_MAJOR;
+
+    if header.service_id != expected_service_id
+        || header.instance_id != expected_instance_id
+        || header.method_id != expected_method_id
+        || !interface_version_matches
+        || header.message_type != expected_message_type
+    {
+        return Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            format!("SOME/IP header does not match decoded frame metadata: header={header:?}"),
+        ));
+    }
+
+    if let Some(expected_return_code) = expected_return_code {
+        if header.return_code != expected_return_code {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                format!(
+                    "SOME/IP return code does not match decoded frame metadata: header={header:?}"
+                ),
+            ));
+        }
+    } else {
+        validate_response_return_code_matches_commstatus(frame, header)?;
+    }
+
+    Ok(())
+}
+
+fn validate_response_return_code_matches_commstatus(
+    frame: &UOwnedFrame,
+    header: VsomeipHeader,
+) -> Result<(), UStatus> {
+    let commstatus = frame.metadata().attributes().commstatus();
+    match header.message_type.clone() {
+        message_type_e::MT_RESPONSE => {
+            if header.return_code == vsomeip::return_code_e::E_OK
+                && commstatus.is_none_or(|commstatus| commstatus == UCode::OK)
+            {
+                Ok(())
+            } else {
+                Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    format!(
+                        "SOME/IP response return code does not match decoded commstatus: header={header:?}, commstatus={commstatus:?}"
+                    ),
+                ))
+            }
+        }
+        message_type_e::MT_ERROR => {
+            let Some(commstatus) = commstatus else {
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    "SOME/IP MT_ERROR requires decoded non-OK commstatus",
+                ));
+            };
+            if commstatus == UCode::OK
+                || header.return_code == vsomeip::return_code_e::E_OK
+                || UFrameToVsomeipMessage::ucode_to_vsomeip_err_code(commstatus)
+                    != header.return_code
+            {
+                return Err(UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    format!(
+                        "SOME/IP MT_ERROR return code does not match decoded commstatus: header={header:?}, commstatus={commstatus:?}"
+                    ),
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            format!(
+                "Invalid SOME/IP response message type: {:?}",
+                header.message_type
+            ),
+        )),
+    }
+}
+
 pub struct VsomeipMessageToUFrame;
 
 impl VsomeipMessageToUFrame {
@@ -208,6 +339,19 @@ impl VsomeipMessageToUFrame {
 
         let frame = decode_frame_payload(payload_bytes)?;
         validate_owned_frame_for_transport(&frame)?;
+        validate_vsomeip_header_matches_frame(
+            &frame,
+            VsomeipHeader {
+                service_id: vsomeip_message.get_message_base_pinned().get_service(),
+                instance_id: vsomeip_message.get_message_base_pinned().get_instance(),
+                method_id: vsomeip_message.get_message_base_pinned().get_method(),
+                interface_version: vsomeip_message
+                    .get_message_base_pinned()
+                    .get_interface_version(),
+                message_type: msg_type.clone(),
+                return_code: vsomeip_message.get_message_base_pinned().get_return_code(),
+            },
+        )?;
         match msg_type {
             message_type_e::MT_REQUEST => {
                 let request_id = vsomeip_message.get_message_base_pinned().get_request();
@@ -228,5 +372,128 @@ impl VsomeipMessageToUFrame {
         }
 
         Ok(frame)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use up_rust::{UAttributes, UFrameMetadata, UMessageType, UUID};
+
+    use super::*;
+
+    fn frame_with_attributes(attributes: UAttributes) -> UOwnedFrame {
+        UOwnedFrame::new(UFrameMetadata::new(attributes, None), Bytes::new())
+    }
+
+    #[test]
+    fn accepts_non_1_instance_from_publish_source_metadata() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
+        assert_ne!(instance_id, 1);
+        let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
+        let frame = frame_with_attributes(UAttributes::new(
+            UUID::build(),
+            source,
+            None,
+            UMessageType::Publish,
+        ));
+
+        validate_vsomeip_header_matches_frame(
+            &frame,
+            VsomeipHeader {
+                service_id,
+                instance_id,
+                method_id: event_id,
+                interface_version,
+                message_type: message_type_e::MT_NOTIFICATION,
+                return_code: vsomeip::return_code_e::E_OK,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn rejects_header_payload_metadata_mismatch() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
+        let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
+        let frame = frame_with_attributes(UAttributes::new(
+            UUID::build(),
+            source,
+            None,
+            UMessageType::Publish,
+        ));
+
+        let error = validate_vsomeip_header_matches_frame(
+            &frame,
+            VsomeipHeader {
+                service_id,
+                instance_id: instance_id.wrapping_add(1),
+                method_id: event_id,
+                interface_version,
+                message_type: message_type_e::MT_NOTIFICATION,
+                return_code: vsomeip::return_code_e::E_OK,
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.get_code(), UCode::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn rejects_mt_error_without_matching_non_ok_commstatus() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
+        let (_, method_id) = split_u32_to_u16(source.resource_id_raw());
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
+        let frame = frame_with_attributes(UAttributes::new(
+            UUID::build(),
+            source,
+            None,
+            UMessageType::Response,
+        ));
+
+        let error = validate_vsomeip_header_matches_frame(
+            &frame,
+            VsomeipHeader {
+                service_id,
+                instance_id,
+                method_id,
+                interface_version,
+                message_type: message_type_e::MT_ERROR,
+                return_code: vsomeip::return_code_e::E_NOT_OK,
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.get_code(), UCode::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn accepts_mt_error_with_matching_non_ok_commstatus() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
+        let (_, method_id) = split_u32_to_u16(source.resource_id_raw());
+        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
+        let frame = frame_with_attributes(
+            UAttributes::new(UUID::build(), source, None, UMessageType::Response)
+                .with_comm_status(UCode::UNAVAILABLE),
+        );
+
+        validate_vsomeip_header_matches_frame(
+            &frame,
+            VsomeipHeader {
+                service_id,
+                instance_id,
+                method_id,
+                interface_version,
+                message_type: message_type_e::MT_ERROR,
+                return_code: vsomeip::return_code_e::E_UNKNOWN_SERVICE,
+            },
+        )
+        .unwrap();
     }
 }

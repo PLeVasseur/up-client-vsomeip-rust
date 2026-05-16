@@ -17,7 +17,7 @@ use crate::message_conversions::UFrameToVsomeipMessage;
 use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::utils::{split_u32_to_u16, split_u32_to_u8};
+use crate::utils::{split_u32_to_u16, split_u32_to_u8, split_ue_id_to_instance_service};
 use crate::{ApplicationName, ClientId};
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace};
@@ -434,9 +434,8 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
-                // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let instance_id = 1;
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(source_filter.ue_id());
                 let (_, event_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 trace!(
@@ -507,8 +506,8 @@ impl UPTransportVsomeipEngine {
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
-                let instance_id = 1; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(sink_filter.ue_id());
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
                 let (_, _, _, major_version) = split_u32_to_u8(sink_filter.ue_version_major());
 
@@ -542,7 +541,7 @@ impl UPTransportVsomeipEngine {
 
                 (*application_wrapper).register_message_handler_fn_ptr_safe(
                     service_id,
-                    vsomeip::ANY_INSTANCE,
+                    instance_id,
                     method_id,
                     msg_handler,
                 );
@@ -562,8 +561,8 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(source_filter.ue_id());
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 if !vsomeip_offered_requested_registry.is_service_requested(
@@ -638,8 +637,8 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id());
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(source_filter.ue_id());
                 let (_, method_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
@@ -668,8 +667,8 @@ impl UPTransportVsomeipEngine {
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(sink_filter.ue_id());
                 let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
@@ -692,16 +691,9 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
-                let Some(sink_filter) = sink_filter else {
-                    return Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        "Request doesn't contain sink",
-                    ));
-                };
-
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id());
-                let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id_raw());
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(source_filter.ue_id());
+                let (_, method_id) = split_u32_to_u16(source_filter.resource_id_raw());
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
