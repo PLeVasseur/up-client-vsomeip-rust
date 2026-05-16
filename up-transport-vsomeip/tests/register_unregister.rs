@@ -16,30 +16,32 @@ use up_transport_vsomeip::UPTransportVsomeip;
 
 #[cfg(test)]
 mod tests {
-    use crate::test_lib::PrintingListener;
     use crate::{test_lib, UPTransportVsomeip};
     use log::error;
-    use once_cell::sync::Lazy;
-    use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::Mutex;
-    use up_rust::{UOwnedListener, UOwnedTransport, UUri};
-    use up_transport_vsomeip::VsomeipApplicationConfig;
+    use up_rust::{UOwnedFrame, UOwnedListener, UOwnedTransport, UUri};
 
-    static VSOMEIP_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    pub struct PrintingListener;
+
+    #[async_trait::async_trait]
+    impl UOwnedListener for PrintingListener {
+        async fn on_receive_owned(&self, frame: UOwnedFrame) {
+            println!("{:?}", frame);
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_publish() {
-        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_publish");
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_publish_test", 0x123);
+        let config = network.config("reg_unreg_publish_test", 0x0123);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
@@ -76,15 +78,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_request() {
-        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_request");
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_request_test", 0x124);
+        let config = network.config("reg_unreg_request_test", 0x0124);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
@@ -122,15 +124,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_response() {
-        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_response");
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_response_test", 0x125);
+        let config = network.config("reg_unreg_response_test", 0x0125);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
@@ -170,14 +172,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_all_point_to_point() {
-        let _guard = VSOMEIP_TEST_LOCK.lock().await;
         test_lib::before_test();
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_point_to_point");
+        let config = network.config_with_services("2345_app", 0x2345, &[(0x2345, 0x0001)]);
 
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
         let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
-            Path::new("vsomeip_configs/point_to_point_integ.json"),
+            config.path(),
             None,
         )
         .unwrap();

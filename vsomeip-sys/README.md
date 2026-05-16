@@ -13,13 +13,7 @@ We currently support vsomeip **3.4.10** as released [here](https://github.com/CO
 1. Ensure you have a Rust toolchain installed
 2. Ensure you have the vsomeip library installed (optional, see features in `Cargo.toml`)
 3. Ensure that you have the [requirements](https://github.com/COVESA/vsomeip?tab=readme-ov-file#build-instructions-for-linux) of the vsomeip project install
-4. Run env_setup.sh in parent directory
-
-``` bash
-source ../build/envsetup.sh
-```
-
-Then,
+4. Run the build. The build script auto-detects the standard system C++ include paths on common Linux layouts. If detection fails, source `../build/envsetup.sh highest` or set `GENERIC_CPP_STDLIB_PATH` and `ARCH_SPECIFIC_CPP_STDLIB_PATH` explicitly.
 
 ```bash
 cargo build

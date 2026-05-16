@@ -11,8 +11,9 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+mod test_lib;
+
 use log::{error, info};
-use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -128,8 +129,9 @@ fn request_frame(method: UUri, reply_to: UUri, ttl: u32, payload: Vec<u8>) -> UO
 
 #[tokio::test(flavor = "multi_thread")]
 async fn client_service() {
-    env_logger::init();
+    test_lib::before_test();
     // console_subscriber::init();
+    let network = test_lib::VsomeipTestNetwork::new("client_service");
 
     let service_authority_name = "foo";
     let streamer_ue_id = 0x7878;
@@ -143,15 +145,13 @@ async fn client_service() {
     let client_ue_version_major = 1;
     let client_resource_id = 0x0000;
 
-    let client_config = "vsomeip_configs/client.json";
-    let client_config = canonicalize(client_config).ok();
-    println!("client_config: {client_config:?}");
+    let client_config = network.config("837", 0x0345);
 
     let client_uuri = UUri::try_from_parts(client_authority_name, streamer_ue_id, 1, 0).unwrap();
     let client_res = UPTransportVsomeip::new_with_config(
         client_uuri,
         &service_authority_name.to_string(),
-        &client_config.unwrap(),
+        client_config.path(),
         None,
     );
 
@@ -196,15 +196,13 @@ async fn client_service() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let service_config = "vsomeip_configs/service.json";
-    let service_config = canonicalize(service_config).ok();
-    println!("service_config: {service_config:?}");
+    let service_config = network.config("4660", 0x1234);
 
     let service_uuri = UUri::try_from_parts(service_authority_name, streamer_ue_id, 1, 0).unwrap();
     let service_res = UPTransportVsomeip::new_with_config(
         service_uuri,
         &client_authority_name.to_string(),
-        &service_config.unwrap(),
+        service_config.path(),
         None,
     );
 

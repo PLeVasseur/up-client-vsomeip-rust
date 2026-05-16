@@ -8,13 +8,7 @@ This library implements a uTransport client for vsomeip in Rust following the uP
 
 ### Building the Library
 
-To build the library, setup the environment
-
-``` bash
-source build/envsetup.sh
-```
-
-then run:
+To build the library, run:
 ```bash
 VSOMEIP_INSTALL_PATH=<path/to/where/to/install/vsomeip> cargo build
 ```
@@ -31,12 +25,12 @@ This branch uses native `UOwnedFrame` values instead of generated `UMessage` tra
 
 To run the tests, run
 ```bash
- VSOMEIP_INSTALL_PATH= <path/to/vsomeip/install> LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path/to/vsomeip/install>/lib cargo test -- --test-threads 1
+VSOMEIP_INSTALL_PATH=<path/to/vsomeip/install> LD_LIBRARY_PATH=$LD_LIBRARY_PATH:<path/to/vsomeip/install>/lib cargo test
 ```
 
 Breaking this down:
 * Details about the environment variables can be found in `vsomeip-sys/README.md`. Please reference there for further detail.
-* We need to pass in `-- --test-threads 1` because the tests refer to the same configurations and will fall over if they are run simultaneously. So we instruct to use a single thread, i.e. run the tests in serial.
+* Tests generate isolated vSomeIP network names and temporary configs, so the default parallel Rust test harness is supported.
 
 ### Using the Library
 

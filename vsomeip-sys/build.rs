@@ -11,13 +11,11 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 #[cfg(feature = "bundled")]
-use std::path::Path;
-#[cfg(feature = "bundled")]
-use std::{fs, io};
+use std::io;
 
 #[cfg(feature = "bundled")]
 fn vsomeip_includes() -> PathBuf {
@@ -68,9 +66,16 @@ fn main() -> miette::Result<()> {
     let vsomeip_interface_path = vsomeip_includes();
     let out_dir = env::var_os("OUT_DIR").unwrap();
 
-    let generic_cpp_stdlib = env::var("GENERIC_CPP_STDLIB_PATH")
-        .expect("You must supply the path to generic C++ stdlib, e.g. /usr/include/c++/11");
-    let arch_specific_cpp_stdlib = env::var("ARCH_SPECIFIC_CPP_STDLIB_PATH").expect("You must supply the path to architecture-specific C++ stdlib, e.g. /usr/include/x86_64-linux-gnu/c++/11");
+    let generic_cpp_stdlib = cpp_stdlib_path(
+        "GENERIC_CPP_STDLIB_PATH",
+        detect_generic_cpp_stdlib_path,
+        "/usr/include/c++/11",
+    );
+    let arch_specific_cpp_stdlib = cpp_stdlib_path(
+        "ARCH_SPECIFIC_CPP_STDLIB_PATH",
+        detect_arch_specific_cpp_stdlib_path,
+        "/usr/include/x86_64-linux-gnu/c++/11",
+    );
 
     let project_root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let runtime_wrapper_dir = project_root.join("src/glue/include"); // Update the path as necessary
@@ -96,6 +101,66 @@ fn main() -> miette::Result<()> {
     )?;
 
     Ok(())
+}
+
+fn cpp_stdlib_path(
+    env_name: &str,
+    detect: impl FnOnce() -> Option<String>,
+    example: &str,
+) -> String {
+    env::var(env_name).unwrap_or_else(|_| {
+        detect().unwrap_or_else(|| {
+            panic!("You must supply {env_name}, e.g. {example}");
+        })
+    })
+}
+
+fn detect_generic_cpp_stdlib_path() -> Option<String> {
+    newest_versioned_child(Path::new("/usr/include/c++"))
+}
+
+fn detect_arch_specific_cpp_stdlib_path() -> Option<String> {
+    let arch = env::consts::ARCH;
+    let include_dir = Path::new("/usr/include");
+    fs::read_dir(include_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.contains(arch))
+        })
+        .filter_map(|path| newest_versioned_child(&path.join("c++")))
+        .max_by(|a, b| compare_versioned_paths(a, b))
+}
+
+fn newest_versioned_child(parent: &Path) -> Option<String> {
+    fs::read_dir(parent)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .max_by(|a, b| compare_versioned_paths(a, b))
+        .map(|path| path.display().to_string())
+}
+
+fn compare_versioned_paths(a: impl AsRef<Path>, b: impl AsRef<Path>) -> std::cmp::Ordering {
+    let a = a.as_ref();
+    let b = b.as_ref();
+    version_components(a)
+        .cmp(&version_components(b))
+        .then_with(|| a.cmp(b))
+}
+
+fn version_components(path: &Path) -> Vec<u32> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .split(|ch: char| !ch.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse::<u32>().ok())
+        .collect()
 }
 
 #[cfg(feature = "bundled")]

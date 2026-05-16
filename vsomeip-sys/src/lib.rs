@@ -88,34 +88,77 @@ mod tests {
     use crate::vsomeip::state_type_e;
     use cxx::{let_cxx_string, SharedPtr};
     use lazy_static::lazy_static;
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc::{Receiver, Sender};
+    use std::sync::mpsc::Sender;
     use std::sync::{mpsc, Condvar, Mutex};
     use std::thread;
     use std::time::{Duration, Instant};
+    use tempfile::TempDir;
+
+    static NEXT_NETWORK_ID: AtomicUsize = AtomicUsize::new(1);
+
+    struct VsomeipTestNetwork {
+        name: String,
+    }
+
+    struct IsolatedVsomeipConfig {
+        _dir: TempDir,
+        path: PathBuf,
+    }
+
+    impl VsomeipTestNetwork {
+        fn new(test_name: &str) -> Self {
+            let id = NEXT_NETWORK_ID.fetch_add(1, Ordering::SeqCst);
+            let pid = std::process::id();
+            Self {
+                name: format!("vsys_{pid}_{id}_{test_name}"),
+            }
+        }
+
+        fn config_with_applications(&self, applications: &[(&str, u16)]) -> IsolatedVsomeipConfig {
+            let dir = TempDir::new().expect("failed to create temporary vSomeIP config directory");
+            let path = dir.path().join("vsomeip.json");
+            let applications = applications
+                .iter()
+                .map(|(name, id)| format!(r#"{{ "name": "{}", "id": "0x{:04x}" }}"#, name, id))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let config = format!(
+                r#"{{
+  "unicast": "127.0.0.1",
+  "network": "{}",
+  "applications": [{}]
+}}
+"#,
+                self.name, applications
+            );
+            fs::write(&path, config).expect("failed to write temporary vSomeIP config");
+            IsolatedVsomeipConfig { _dir: dir, path }
+        }
+    }
+
+    impl IsolatedVsomeipConfig {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    lazy_static! {
+        static ref RAW_VSOMEIP_TEST_LOCK: Mutex<()> = Mutex::new(());
+        static ref RAW_VSOMEIP_CONFIG: IsolatedVsomeipConfig =
+            VsomeipTestNetwork::new("raw_vsomeip").config_with_applications(&[
+                ("check_available_app", 0x7102),
+                ("publisher", 0x7103),
+                ("subscriber", 0x7104),
+            ]);
+    }
 
     #[test]
     fn test_make_runtime() {
         let my_runtime = runtime::get();
         let runtime_wrapper = make_runtime_wrapper(my_runtime);
-
-        let_cxx_string!(my_app_str = "my_app");
-        let Some(app_wrapper) =
-            make_application_wrapper(runtime_wrapper.get_pinned().create_application(&my_app_str))
-        else {
-            panic!("Unable to get app wrapper");
-        };
-        app_wrapper.get_pinned().init();
-
-        extern "C" fn callback(
-            _service: crate::vsomeip::service_t,
-            _instance: crate::vsomeip::instance_t,
-            _availability: bool,
-        ) {
-            println!("hello from Rust!");
-        }
-        let callback = AvailabilityHandlerFnPtr(callback);
-        app_wrapper.register_availability_handler_fn_ptr_safe(1, 2, callback, 3, 4);
         let request = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
 
         let reliable = (*request).get_message_base_pinned().is_reliable();
@@ -152,96 +195,38 @@ mod tests {
 
         println!("loaded_data_vec: {loaded_data_vec:?}");
 
-        std::thread::sleep(Duration::from_millis(2000));
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     #[test]
     fn test_available_state_handler() {
-        // Create a globally accessible sender
+        let _guard = RAW_VSOMEIP_TEST_LOCK.lock().unwrap();
         lazy_static! {
             static ref SENDER: Mutex<Option<Sender<state_type_e>>> = Mutex::new(None);
-            static ref RECEIVER: Mutex<Option<Receiver<state_type_e>>> = Mutex::new(None);
         }
-        // in production code we'll probably have to have a registry of channel receivers
-        // tied to specific available_state_handler_i which we look up and get in the controlling thread
+
         extern "C" fn available_state_handler(available_state: state_type_e) {
             println!("available_state: {available_state:?}");
 
             if let Some(ref tx) = *SENDER.lock().unwrap() {
-                tx.send(available_state).unwrap();
+                let _ = tx.send(available_state);
             }
         }
 
-        let app_name = "check_available_app";
-
-        // Create a channel
         let (tx, rx) = mpsc::channel();
-
-        // Store the sender and receiver in the global variables
         *SENDER.lock().unwrap() = Some(tx);
-        *RECEIVER.lock().unwrap() = Some(rx);
 
-        let app_name_check = app_name.to_string();
+        let config_path = RAW_VSOMEIP_CONFIG.path().display().to_string();
         let handle = thread::spawn(move || {
             let my_runtime = runtime::get();
             let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
-            let_cxx_string!(app_name_cxx = app_name_check);
-
-            if make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
-                .is_some()
-            {
-                panic!("Application had started");
-            } else {
-                println!("Application not started yet");
-            }
-
-            let binding = RECEIVER.lock().unwrap();
-            let rx = binding.as_ref().unwrap();
-
-            while let Ok(msg) = rx.recv_timeout(Duration::from_secs(5)) {
-                println!("Received: {:?}", msg);
-
-                match msg {
-                    state_type_e::ST_REGISTERED => {
-                        if make_application_wrapper(
-                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
-                        )
-                        .is_some()
-                        {
-                            println!("Application had started");
-                        } else {
-                            panic!("Application not started yet");
-                        }
-                    }
-                    state_type_e::ST_DEREGISTERED => {
-                        println!("After stopping app, in theory:");
-                        if make_application_wrapper(
-                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
-                        )
-                        .is_some()
-                        {
-                            panic!("Application still running");
-                        } else {
-                            println!("Application has stopped");
-                        }
-                    }
-                }
-            }
-        });
-
-        thread::sleep(Duration::from_millis(500));
-
-        let app_name_start = app_name.to_string();
-        thread::spawn(move || {
-            let my_runtime = runtime::get();
-            let runtime_wrapper = make_runtime_wrapper(my_runtime);
-
-            let_cxx_string!(app_name_cxx = app_name_start);
+            let_cxx_string!(app_name_cxx = "check_available_app");
+            let_cxx_string!(config_path_cxx = config_path);
             let Some(app_wrapper) = make_application_wrapper(
                 runtime_wrapper
                     .get_pinned()
-                    .create_application(&app_name_cxx),
+                    .create_application1(&app_name_cxx, &config_path_cxx),
             ) else {
                 panic!("Unable to create application");
             };
@@ -249,29 +234,60 @@ mod tests {
             let state_handler = AvailableStateHandlerFnPtr(available_state_handler);
             app_wrapper.register_state_handler_fn_ptr_safe(state_handler);
             app_wrapper.get_pinned().start();
-
-            thread::sleep(Duration::from_millis(500));
-
-            app_wrapper.get_pinned().stop();
         });
 
-        let _ = handle.join();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let state = rx
+                .recv_timeout(remaining)
+                .expect("timed out waiting for vSomeIP registration state");
+            if state == state_type_e::ST_REGISTERED {
+                break;
+            }
+        }
+
+        let runtime_wrapper = make_runtime_wrapper(runtime::get());
+        let_cxx_string!(app_name_cxx = "check_available_app");
+        let Some(app_wrapper) =
+            make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
+        else {
+            panic!("Application not started yet");
+        };
+        app_wrapper.get_pinned().stop();
+        handle.join().expect("vSomeIP application thread panicked");
+        *SENDER.lock().unwrap() = None;
     }
 
     #[test]
     fn test_service_availability_handler() {
+        let _guard = RAW_VSOMEIP_TEST_LOCK.lock().unwrap();
         lazy_static! {
             static ref TIMES_MESSAGE_RECEIVED: AtomicUsize = AtomicUsize::new(0);
             static ref PAIR: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
         }
 
-        fn wait_for_service_available() {
+        fn wait_for_service_available() -> bool {
             let (lock, cvar) = &*PAIR;
             let mut started = lock.lock().unwrap();
-            while !*started {
-                started = cvar.wait(started).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !*started && Instant::now() < deadline {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                let result = cvar.wait_timeout(started, remaining).unwrap();
+                started = result.0;
             }
-            println!("The bool has changed to true!");
+            *started
+        }
+
+        fn wait_for_messages(baseline: usize) -> bool {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if TIMES_MESSAGE_RECEIVED.load(Ordering::SeqCst) > baseline {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            false
         }
 
         fn set_service_available() {
@@ -288,13 +304,16 @@ mod tests {
         extern "C" fn publishing_service_availability_handler(
             _service: vsomeip::service_t,
             _instance: vsomeip::instance_t,
-            _availability: bool,
+            availability: bool,
         ) {
-            println!("publishing service now available");
-            set_service_available();
+            if availability {
+                println!("publishing service now available");
+                set_service_available();
+            }
         }
 
-        let test_duration = 10;
+        TIMES_MESSAGE_RECEIVED.store(0, Ordering::SeqCst);
+        *PAIR.0.lock().unwrap() = false;
 
         let app_name_publisher = "publisher";
         let service_id = 0x3212;
@@ -309,16 +328,17 @@ mod tests {
         let_cxx_string!(app_name_publisher_cxx = app_name_publisher);
         let_cxx_string!(app_name_subscriber_cxx = app_name_subscriber);
 
-        let app_name_publisher_start = app_name_publisher.to_string();
-        thread::spawn(|| {
+        let publisher_config_path = RAW_VSOMEIP_CONFIG.path().display().to_string();
+        let publisher_handle = thread::spawn(move || {
             let runtime_wrapper = make_runtime_wrapper(runtime::get());
 
-            let_cxx_string!(app_name_cxx = app_name_publisher_start);
+            let_cxx_string!(app_name_cxx = "publisher");
+            let_cxx_string!(config_path_cxx = publisher_config_path);
 
             let Some(app_wrapper) = make_application_wrapper(
                 runtime_wrapper
                     .get_pinned()
-                    .create_application(&app_name_cxx),
+                    .create_application1(&app_name_cxx, &config_path_cxx),
             ) else {
                 panic!("Unable to init app");
             };
@@ -327,16 +347,17 @@ mod tests {
             app_wrapper.get_pinned().start();
         });
 
-        let app_name_subscriber_start = app_name_subscriber.to_string();
-        thread::spawn(|| {
+        let subscriber_config_path = RAW_VSOMEIP_CONFIG.path().display().to_string();
+        let subscriber_handle = thread::spawn(move || {
             let runtime_wrapper = make_runtime_wrapper(runtime::get());
 
-            let_cxx_string!(app_name_cxx = app_name_subscriber_start);
+            let_cxx_string!(app_name_cxx = "subscriber");
+            let_cxx_string!(config_path_cxx = subscriber_config_path);
 
             let Some(app_wrapper) = make_application_wrapper(
                 runtime_wrapper
                     .get_pinned()
-                    .create_application(&app_name_cxx),
+                    .create_application1(&app_name_cxx, &config_path_cxx),
             ) else {
                 panic!("Unable to init app");
             };
@@ -389,7 +410,7 @@ mod tests {
 
         let pub_service_availability_handler =
             AvailabilityHandlerFnPtr(publishing_service_availability_handler);
-        publisher_app_wrapper.register_availability_handler_fn_ptr_safe(
+        subscriber_app_wrapper.register_availability_handler_fn_ptr_safe(
             service_id,
             instance_id,
             pub_service_availability_handler,
@@ -406,13 +427,13 @@ mod tests {
 
         publisher_app_wrapper.offer_single_event_safe(service_id, instance_id, event_id, event_id);
 
-        wait_for_service_available();
+        assert!(
+            wait_for_service_available(),
+            "timed out waiting for publishing service availability"
+        );
 
-        // Track the start time and set the duration for the loop
-        let duration = Duration::from_millis(test_duration);
-        let start_time = Instant::now();
-
-        while Instant::now().duration_since(start_time) < duration {
+        let baseline_received = TIMES_MESSAGE_RECEIVED.load(Ordering::SeqCst);
+        for _ in 0..10 {
             let vsomeip_payload =
                 make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
             let payload = [1, 2, 3, 4];
@@ -427,13 +448,16 @@ mod tests {
             );
         }
 
-        thread::sleep(Duration::from_millis(500));
+        assert!(
+            wait_for_messages(baseline_received),
+            "timed out waiting for a vSomeIP event message"
+        );
 
-        #[allow(unused_variables)]
-        let times_message_received = TIMES_MESSAGE_RECEIVED.load(Ordering::SeqCst);
-
-        // TODO: It seems like checking if the service is up is not enough.
-        //  May unfortunately need to leave the sleep for now
-        // assert_eq!(iterations, times_message_received);
+        publisher_app_wrapper.get_pinned().stop();
+        subscriber_app_wrapper.get_pinned().stop();
+        publisher_handle.join().expect("publisher thread panicked");
+        subscriber_handle
+            .join()
+            .expect("subscriber thread panicked");
     }
 }

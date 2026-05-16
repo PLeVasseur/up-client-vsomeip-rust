@@ -218,7 +218,7 @@ impl UPTransportVsomeipEngine {
             UP_CLIENT_VSOMEIP_FN_TAG_START_APP
         );
 
-        match receiver.recv_timeout(Duration::from_millis(50)) {
+        match receiver.recv_timeout(Duration::from_secs(INTERNAL_FUNCTION_TIMEOUT)) {
             Err(err) => {
                 return Err(UStatus::fail_with_code(
                     UCode::INTERNAL,

@@ -237,7 +237,7 @@ impl UPTransportVsomeip {
             runtime_handle.clone(),
         ));
 
-        let engine = UPTransportVsomeipEngine::new(uri, None);
+        let engine = UPTransportVsomeipEngine::new(uri, config_path);
         let point_to_point_listener = RwLock::new(None);
         let optional_config_path: Option<PathBuf> = config_path.map(|p| p.to_path_buf());
 

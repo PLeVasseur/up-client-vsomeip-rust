@@ -11,6 +11,8 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+mod test_lib;
+
 use log::{info, trace};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -20,7 +22,7 @@ use up_rust::{
     UAttributes, UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UOwnedListener,
     UOwnedTransport, UUri, UUID,
 };
-use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
+use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
@@ -77,7 +79,8 @@ pub async fn spawn_artifical_load(duration: Duration) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn publisher_subscriber() {
-    env_logger::init();
+    test_lib::before_test();
+    let network = test_lib::VsomeipTestNetwork::new("publisher_subscriber");
 
     let authority_name = "foo";
 
@@ -89,15 +92,14 @@ async fn publisher_subscriber() {
     let publisher_topic =
         UUri::try_from_parts(authority_name, ue_id, ue_version_major, resource_id).unwrap();
 
-    let vsomeip_application_config_subscriber =
-        VsomeipApplicationConfig::new("subscriber_app", 0x344);
+    let subscriber_config = network.config("subscriber_app", 0x0344);
     let subscriber_uri =
         UUri::try_from_parts(authority_name, subscriber_ue_id, ue_version_major, 0).unwrap();
 
-    let subscriber_res = UPTransportVsomeip::new(
-        vsomeip_application_config_subscriber,
+    let subscriber_res = UPTransportVsomeip::new_with_config(
         subscriber_uri,
         &"me_authority".to_string(),
+        subscriber_config.path(),
         None,
     );
 
@@ -120,13 +122,12 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let vsomeip_application_config_publisher =
-        VsomeipApplicationConfig::new("publisher_app", 0x343);
+    let publisher_config = network.config("publisher_app", 0x0343);
     let publisher_uri = UUri::try_from_parts(authority_name, ue_id, 1, 0).unwrap();
-    let publisher_res = UPTransportVsomeip::new(
-        vsomeip_application_config_publisher,
+    let publisher_res = UPTransportVsomeip::new_with_config(
         publisher_uri,
         &"me_authority".to_string(),
+        publisher_config.path(),
         None,
     );
 

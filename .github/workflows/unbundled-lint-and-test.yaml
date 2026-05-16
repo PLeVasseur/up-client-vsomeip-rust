@@ -263,8 +263,8 @@ jobs:
         run: |
           # enable nightly features so that we can also include Doctests
           # TODO: tarpaulin fails silently. Possible version issue
-          # LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib RUSTC_BOOTSTRAP=1 cargo tarpaulin --no-default-features -o xml -o lcov -o html --doc --tests -- --test-threads 1 
-          LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib cargo test -- --test-threads 1
+          # LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib RUSTC_BOOTSTRAP=1 cargo tarpaulin --no-default-features -o xml -o lcov -o html --doc --tests
+          LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:${VSOMEIP_INSTALL_PATH}/lib cargo test
 
       - name: Upload coverage report (xml)
         uses: actions/upload-artifact@v4
