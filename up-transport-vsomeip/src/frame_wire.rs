@@ -18,7 +18,7 @@ use up_rust::{
 };
 
 const FRAME_PAYLOAD_MAGIC: &[u8; 4] = b"USIP";
-const FRAME_PAYLOAD_VERSION: u8 = 1;
+const FRAME_PAYLOAD_VERSION: u8 = 2;
 
 pub(crate) fn encode_frame_payload(frame: &UOwnedFrame) -> Result<Vec<u8>, UStatus> {
     let mut bytes = Vec::new();
@@ -45,12 +45,7 @@ pub(crate) fn encode_frame_payload(frame: &UOwnedFrame) -> Result<Vec<u8>, UStat
             .as_deref()
             .unwrap_or_default(),
     )?;
-    append_string(&mut bytes, frame.metadata().encoding().format_id())?;
-    append_string(&mut bytes, frame.metadata().encoding().content_type())?;
-    append_string(
-        &mut bytes,
-        frame.metadata().encoding().schema_ref().unwrap_or_default(),
-    )?;
+    write_optional_encoding(&mut bytes, frame.metadata().encoding())?;
     write_optional_uuid(&mut bytes, frame.metadata().attributes().request_id());
     write_optional_string(&mut bytes, frame.metadata().attributes().traceparent())?;
     write_optional_string(&mut bytes, frame.metadata().attributes().token())?;
@@ -95,14 +90,7 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
             })?)
         }
     };
-    let format_id = take_string(&mut bytes)?;
-    let content_type = take_string(&mut bytes)?;
-    let schema_ref = take_string(&mut bytes)?;
-    let schema_ref = if schema_ref.is_empty() {
-        None
-    } else {
-        Some(schema_ref)
-    };
+    let encoding = take_optional_encoding(&mut bytes)?;
     let request_id = take_optional_uuid(&mut bytes)?;
     let traceparent = take_optional_string(&mut bytes)?;
     let token = take_optional_string(&mut bytes)?;
@@ -129,13 +117,17 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
         attributes = attributes.with_comm_status(commstatus);
     }
 
-    Ok(UOwnedFrame::new(
-        UFrameMetadata::new(
-            attributes,
-            UEncoding::new(format_id, content_type, schema_ref),
-        ),
-        Bytes::copy_from_slice(bytes),
-    ))
+    let metadata = UFrameMetadata::new(attributes, encoding);
+    if metadata.encoding().is_some() {
+        Ok(UOwnedFrame::new(metadata, Bytes::copy_from_slice(bytes)))
+    } else if bytes.is_empty() {
+        Ok(UOwnedFrame::without_payload(metadata))
+    } else {
+        Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "SOME/IP native frame payload contains bytes but no payload encoding",
+        ))
+    }
 }
 
 fn write_u64(dst: &mut Vec<u8>, value: u64) {
@@ -168,6 +160,19 @@ fn write_optional_string(dst: &mut Vec<u8>, value: Option<&str>) -> Result<(), U
         Some(value) => {
             dst.push(1);
             append_string(dst, value)?;
+        }
+        None => dst.push(0),
+    }
+    Ok(())
+}
+
+fn write_optional_encoding(dst: &mut Vec<u8>, value: Option<&UEncoding>) -> Result<(), UStatus> {
+    match value {
+        Some(encoding) => {
+            dst.push(1);
+            append_string(dst, encoding.format_id())?;
+            append_string(dst, encoding.content_type())?;
+            append_string(dst, encoding.schema_ref().unwrap_or_default())?;
         }
         None => dst.push(0),
     }
@@ -241,6 +246,34 @@ fn take_optional_string(src: &mut &[u8]) -> Result<Option<String>, UStatus> {
     match take_u8(src)? {
         0 => Ok(None),
         1 => Ok(Some(take_string(src)?)),
+        _ => Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "invalid optional value",
+        )),
+    }
+}
+
+fn take_optional_encoding(src: &mut &[u8]) -> Result<Option<UEncoding>, UStatus> {
+    match take_u8(src)? {
+        0 => Ok(None),
+        1 => {
+            let format_id = take_string(src)?;
+            let content_type = take_string(src)?;
+            let schema_ref = take_string(src)?;
+            let schema_ref = if schema_ref.is_empty() {
+                None
+            } else {
+                Some(schema_ref)
+            };
+            UEncoding::try_new(format_id, content_type, schema_ref)
+                .map(Some)
+                .map_err(|err| {
+                    UStatus::fail_with_code(
+                        UCode::INVALID_ARGUMENT,
+                        format!("invalid payload encoding metadata: {err}"),
+                    )
+                })
+        }
         _ => Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
             "invalid optional value",
@@ -339,7 +372,7 @@ fn byte_to_priority(value: u8) -> Result<UPriority, UStatus> {
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::StringValue;
-    use up_rust::{ProtobufWire, WireFormat};
+    use up_rust::{wire::WireFormat, ProtobufWire};
 
     use super::*;
 
@@ -381,7 +414,13 @@ mod tests {
     #[test]
     fn rejects_invalid_optional_marker_in_metadata() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::new(UFrameMetadata::publish(source), [1_u8, 2, 3].as_slice());
+        let frame = UOwnedFrame::new(
+            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
+                "raw",
+                "application/octet-stream",
+            )),
+            [1_u8, 2, 3].as_slice(),
+        );
         let mut encoded = encode_frame_payload(&frame).unwrap();
         let ttl_marker_index = FRAME_PAYLOAD_MAGIC.len() + 1 + 8 + 8 + 1 + 1;
         *encoded
@@ -429,7 +468,53 @@ mod tests {
         let decoded = decode_frame_payload(encoded).unwrap();
         let decoded_payload: StringValue = decoded.deserialize::<ProtobufWire, _>().unwrap();
 
-        assert_eq!(decoded.metadata().encoding(), &ProtobufWire::encoding());
+        assert_eq!(
+            decoded.metadata().encoding(),
+            Some(&ProtobufWire::encoding())
+        );
         assert_eq!(decoded_payload.value, value.value);
+    }
+
+    #[test]
+    fn frame_payload_round_trips_without_payload() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let frame = UOwnedFrame::without_payload(UFrameMetadata::publish(source));
+
+        let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
+
+        assert_eq!(decoded, frame);
+        assert!(!decoded.has_payload());
+        assert!(decoded.metadata().encoding().is_none());
+    }
+
+    #[test]
+    fn frame_payload_round_trips_present_empty_payload() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let frame = UOwnedFrame::new(
+            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
+                "raw",
+                "application/octet-stream",
+            )),
+            [].as_slice(),
+        );
+
+        let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
+
+        assert_eq!(decoded, frame);
+        assert!(decoded.has_payload());
+        assert_eq!(decoded.payload_bytes(), b"");
+        assert!(decoded.metadata().encoding().is_some());
+    }
+
+    #[test]
+    fn rejects_payload_bytes_without_payload_encoding() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let frame = UOwnedFrame::without_payload(UFrameMetadata::publish(source));
+        let mut encoded = encode_frame_payload(&frame).unwrap();
+        encoded.push(1);
+
+        let error = decode_frame_payload(encoded).unwrap_err();
+
+        assert_eq!(error.get_code(), UCode::INVALID_ARGUMENT);
     }
 }

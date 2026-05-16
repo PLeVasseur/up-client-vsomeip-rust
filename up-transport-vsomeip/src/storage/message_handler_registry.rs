@@ -26,7 +26,9 @@ use std::ops::DerefMut;
 use std::sync::RwLock;
 use std::sync::{mpsc, Arc, Weak};
 use tokio::task::LocalSet;
-use up_rust::{ComparableOwnedListener, UCode, UOwnedFrame, UOwnedListener, UStatus, UUri};
+use up_rust::{
+    transport::ComparableOwnedListener, UCode, UOwnedFrame, UOwnedListener, UStatus, UUri,
+};
 use vsomeip_proc_macro::generate_message_handler_extern_c_fns;
 use vsomeip_sys::glue::{make_message_wrapper, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;

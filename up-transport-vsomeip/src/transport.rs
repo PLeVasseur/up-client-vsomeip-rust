@@ -21,21 +21,15 @@ use log::trace;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use up_rust::{
-    ComparableOwnedListener, LocalUriProvider, UCode, UOwnedFrame, UOwnedListener, UOwnedTransport,
-    UStatus, UUri,
+    transport::ComparableOwnedListener, validate_owned_frame_for_transport, LocalUriProvider,
+    UCode, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
 };
 
 #[async_trait]
 impl UOwnedTransport for UPTransportVsomeip {
     async fn send_owned(&self, frame: UOwnedFrame) -> Result<(), UStatus> {
+        validate_owned_frame_for_transport(&frame)?;
         let attributes = frame.metadata().attributes();
-        if attributes.is_expired() {
-            return Err(UStatus::fail_with_code(
-                UCode::DEADLINE_EXCEEDED,
-                "message has expired",
-            ));
-        }
-
         trace!("Sending native frame with attributes: {:?}", attributes);
 
         let source_filter = attributes.source();

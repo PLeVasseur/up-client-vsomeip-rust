@@ -104,12 +104,14 @@ impl UOwnedListener for RequestListener {
             invoked_method,
         )
         .with_encoding(UEncoding::from_content_type("text/plain"));
-        let mut response_msg = UOwnedFrame::new(response_header, response_payload_bytes);
-        *response_msg.metadata_mut().attributes_mut() = response_msg
-            .metadata()
-            .attributes()
-            .clone()
-            .with_comm_status(UCode::OK);
+        let response_header = UFrameMetadata::new(
+            response_header
+                .attributes()
+                .clone()
+                .with_comm_status(UCode::OK),
+            response_header.encoding().cloned(),
+        );
+        let response_msg = UOwnedFrame::new(response_header, response_payload_bytes);
         if let Some(client) = self.client.upgrade() {
             let send_res = client.send_owned(response_msg).await;
             if let Err(err) = send_res {

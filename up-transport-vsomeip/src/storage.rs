@@ -35,7 +35,7 @@ use crate::{
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::{ComparableOwnedListener, UOwnedListener, UStatus, UUri};
+use up_rust::{transport::ComparableOwnedListener, UOwnedListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 

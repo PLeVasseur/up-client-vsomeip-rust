@@ -31,7 +31,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
-use up_rust::{ComparableOwnedListener, UCode, UOwnedListener, UStatus, UUri, UUID};
+use up_rust::{transport::ComparableOwnedListener, UCode, UOwnedListener, UStatus, UUri, UUID};
 use vsomeip_config::extract_application;
 pub use vsomeip_config::VsomeipApplicationConfig;
 

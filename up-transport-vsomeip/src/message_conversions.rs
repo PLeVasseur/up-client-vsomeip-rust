@@ -20,7 +20,7 @@ use cxx::UniquePtr;
 use log::trace;
 use std::sync::Arc;
 use std::time::Duration;
-use up_rust::{UCode, UOwnedFrame, UStatus, UUri};
+use up_rust::{validate_owned_frame_for_transport, UCode, UOwnedFrame, UStatus, UUri};
 use vsomeip_sys::glue::{make_message_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
@@ -207,6 +207,7 @@ impl VsomeipMessageToUFrame {
         };
 
         let frame = decode_frame_payload(payload_bytes)?;
+        validate_owned_frame_for_transport(&frame)?;
         match msg_type {
             message_type_e::MT_REQUEST => {
                 let request_id = vsomeip_message.get_message_base_pinned().get_request();
