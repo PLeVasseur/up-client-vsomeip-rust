@@ -379,6 +379,42 @@ mod tests {
     }
 
     #[test]
+    fn rejects_invalid_optional_marker_in_metadata() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let frame = UOwnedFrame::new(UFrameMetadata::publish(source), [1_u8, 2, 3].as_slice());
+        let mut encoded = encode_frame_payload(&frame).unwrap();
+        let ttl_marker_index = FRAME_PAYLOAD_MAGIC.len() + 1 + 8 + 8 + 1 + 1;
+        *encoded
+            .get_mut(ttl_marker_index)
+            .expect("encoded frame contains TTL marker") = 2;
+
+        let error = decode_frame_payload(encoded).unwrap_err();
+
+        assert_eq!(error.get_code(), UCode::INVALID_ARGUMENT);
+    }
+
+    #[test]
+    fn preserves_expired_ttl_metadata_for_delivery_layer() {
+        let expired_id = UUID::from_u64_pair(0x018D_548E_A8E0_7000, 0x8000_0000_0000_0000)
+            .expect("valid expired UUID");
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let attributes = UAttributes::new(expired_id, source, None, UMessageType::Publish)
+            .with_priority(UPriority::CS1)
+            .with_ttl(1);
+        let frame = UOwnedFrame::new(
+            UFrameMetadata::new(
+                attributes,
+                UEncoding::without_schema_ref("raw", "application/octet-stream"),
+            ),
+            [1_u8, 2, 3].as_slice(),
+        );
+
+        let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
+
+        assert!(decoded.metadata().attributes().is_expired());
+    }
+
+    #[test]
     fn frame_payload_preserves_protobuf_payload_as_payload_only() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
         let mut value = StringValue::new();
