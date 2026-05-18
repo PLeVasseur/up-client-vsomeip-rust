@@ -11,6 +11,21 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+//! Native owned-frame uProtocol transport over COVESA vSomeIP.
+//!
+//! [`UPTransportVsomeip`] implements [`up_rust::UOwnedTransport`]. vSomeIP exposes
+//! payload bytes to this Rust binding but does not provide a uProtocol-sized
+//! metadata channel or true shared-memory transmit/receive loans, so this crate
+//! intentionally does not implement [`up_rust::zero_copy::UZeroCopyTransport`].
+//!
+//! To preserve native frame metadata, the transport encodes a compact
+//! binding-specific prefix before the application payload inside the SOME/IP
+//! payload. That prefix is transport metadata, not a generated protobuf transport
+//! envelope, and is removed before delivering a [`up_rust::UOwnedFrame`] to
+//! application listeners.
+
+#![warn(rustdoc::bare_urls, rustdoc::broken_intra_doc_links)]
+
 use crate::determine_message_type::{determine_type, RegistrationType};
 use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
 use crate::storage::UPTransportVsomeipStorage;
@@ -122,17 +137,24 @@ pub(crate) fn get_callback_runtime_handle(
 }
 
 const DEFAULT_NUM_THREADS: u8 = 10;
+
+/// Configuration for the dedicated Tokio runtime used by vSomeIP callbacks.
+///
+/// The transport runs callback work on an internal runtime so the C++ vSomeIP
+/// callback thread is not required to own the application's async runtime.
 pub struct RuntimeConfig {
     num_threads: u8,
 }
 
-/// Native owned-frame transport implementation over top of the C++ vsomeip library.
+/// Native owned-frame transport implementation over the C++ vSomeIP library.
 ///
-/// We hold a transport_inner internally which does the nitty-gritty
-/// implementation of the transport
+/// The transport maps native [`up_rust::UOwnedFrame`] metadata and payload bytes
+/// to vSomeIP messages. Because vSomeIP does not expose all uProtocol frame
+/// metadata as protocol-native fields, this binding stores a compact native-frame
+/// prefix in the SOME/IP payload before the application payload.
 ///
-/// We do so in order to separate the "handle" to the inner transport
-/// and the "engine" of the innner transport to allow mocking of them.
+/// `UPTransportVsomeip` is an owned-buffer transport. It does not claim zero-copy
+/// capability.
 pub struct UPTransportVsomeip {
     storage: Arc<UPTransportVsomeipStorage>,
     engine: UPTransportVsomeipEngine,
@@ -143,7 +165,7 @@ pub struct UPTransportVsomeip {
 }
 
 impl UPTransportVsomeip {
-    /// Creates a UPTransportVsomeip based on a path provided to a vsomeip configuration JSON file
+    /// Creates a transport from a vSomeIP JSON configuration file.
     ///
     /// # Parameters
     ///
@@ -153,7 +175,13 @@ impl UPTransportVsomeip {
     /// * `ue_id` - the ue_id of the uEntity
     /// * `config_path` - path to a JSON vsomeip configuration file
     ///
-    /// Further details on vsomeip configuration files can be found in the COVESA [vsomeip repo](https://github.com/COVESA/vsomeip)
+    /// Further details on vSomeIP configuration files can be found in the COVESA
+    /// [vSomeIP repository](https://github.com/COVESA/vsomeip).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file does not exist, cannot be parsed, or
+    /// the vSomeIP application cannot be initialized.
     pub fn new_with_config(
         uri: UUri,
         remote_authority_name: &AuthorityName,
@@ -178,7 +206,8 @@ impl UPTransportVsomeip {
         )
     }
 
-    /// Creates a UPTransportVsomeip
+    /// Creates a transport from an already parsed vSomeIP application
+    /// configuration.
     ///
     /// # Parameters
     ///
@@ -186,6 +215,10 @@ impl UPTransportVsomeip {
     /// * `remote_authority_name` - authority_name to attach for messages originating from SOME/IP network
     ///   Should be set to `IP:port` of the endpoint mDevice
     /// * `ue_id` - the ue_id of the uEntity
+    /// # Errors
+    ///
+    /// Returns an error if the local URI is not valid for this transport or the
+    /// vSomeIP application cannot be initialized.
     pub fn new(
         vsomeip_application_config: VsomeipApplicationConfig,
         uri: UUri,
