@@ -372,7 +372,7 @@ fn byte_to_priority(value: u8) -> Result<UPriority, UStatus> {
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::StringValue;
-    use up_rust::{wire::WireFormat, ProtobufWire};
+    use up_rust::{payload::UWireError, ProtobufPayload};
 
     use super::*;
 
@@ -458,7 +458,7 @@ mod tests {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
         let mut value = StringValue::new();
         value.value = "protobuf payload".to_string();
-        let frame = UOwnedFrame::from_serializable::<ProtobufWire, _>(
+        let frame = UOwnedFrame::from_serializable::<ProtobufPayload, _>(
             UFrameMetadata::publish(source),
             &value,
         )
@@ -466,13 +466,34 @@ mod tests {
 
         let encoded = encode_frame_payload(&frame).unwrap();
         let decoded = decode_frame_payload(encoded).unwrap();
-        let decoded_payload: StringValue = decoded.deserialize::<ProtobufWire, _>().unwrap();
+        let decoded_payload: StringValue = decoded.deserialize::<ProtobufPayload, _>().unwrap();
 
         assert_eq!(
             decoded.metadata().encoding(),
-            Some(&ProtobufWire::encoding())
+            Some(&ProtobufPayload::encoding())
         );
         assert_eq!(decoded_payload.value, value.value);
+    }
+
+    #[test]
+    fn frame_payload_rejects_wrong_inner_payload_codec_after_decode() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let frame = UOwnedFrame::new(
+            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
+                "raw-bytes",
+                "application/octet-stream",
+            )),
+            [0x0a_u8].as_slice(),
+        );
+
+        let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
+        let result = decoded.deserialize::<ProtobufPayload, StringValue>();
+
+        assert_eq!(decoded.metadata().encoding(), frame.metadata().encoding());
+        assert!(matches!(
+            result,
+            Err(UWireError::UnsupportedEncoding { .. })
+        ));
     }
 
     #[test]
