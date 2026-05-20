@@ -25,6 +25,7 @@
 //! application listeners.
 
 #![warn(rustdoc::bare_urls, rustdoc::broken_intra_doc_links)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 use crate::determine_message_type::{determine_type, RegistrationType};
 use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
@@ -144,6 +145,28 @@ const DEFAULT_NUM_THREADS: u8 = 10;
 /// callback thread is not required to own the application's async runtime.
 pub struct RuntimeConfig {
     num_threads: u8,
+}
+
+impl RuntimeConfig {
+    /// Creates callback runtime configuration with `num_threads` worker threads.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UCode::INVALID_ARGUMENT`] when `num_threads` is zero.
+    pub fn try_new(num_threads: u8) -> Result<Self, UStatus> {
+        if num_threads == 0 {
+            return Err(UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                "runtime thread count must be greater than zero",
+            ));
+        }
+        Ok(Self { num_threads })
+    }
+
+    /// Returns the configured callback runtime worker-thread count.
+    pub fn num_threads(&self) -> u8 {
+        self.num_threads
+    }
 }
 
 /// Native owned-frame transport implementation over the C++ vSomeIP library.
