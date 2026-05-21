@@ -19,8 +19,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri,
-    UUID,
+    PayloadEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UOwnedListener, UOwnedTransport,
+    UUri, UUID,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -84,8 +84,8 @@ fn service_uuri() -> UUri {
     .unwrap()
 }
 
-fn text_encoding() -> UEncoding {
-    UEncoding::from_content_type("text/plain")
+fn text_encoding() -> PayloadEncoding {
+    PayloadEncoding::from_content_type("text/plain")
 }
 
 fn request_frame(method: UUri, reply_to: UUri, payload: Vec<u8>) -> UOwnedFrame {

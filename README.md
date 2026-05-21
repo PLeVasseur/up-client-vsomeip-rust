@@ -19,18 +19,18 @@ See `vsomeip-sys/README.md` for more details on options.
 
 This library leverages the [up-rust](https://github.com/eclipse-uprotocol/up-rust) library for data types and models specified by uProtocol.
 
-This crate uses native `UOwnedFrame` values instead of generated `UMessage` transport envelopes. The vSomeIP binding serializes a compact native-frame prefix before the application payload so it can preserve `UAttributes` and `UEncoding` across SOME/IP. `UEncoding.schema_ref` is preserved distinctly from the payload bytes and participates in typed decoder compatibility checks after receive. The transport remains owned-buffer based; it does not claim `UZeroCopyTransport` capability.
+This crate uses native `UOwnedFrame` values instead of generated `UMessage` transport envelopes. The vSomeIP binding serializes a compact native-frame prefix before the application payload so it can preserve `UAttributes` and `PayloadEncoding` across SOME/IP. Standard encodings carry upstream `UPayloadFormat` values; custom encodings carry a native custom ID plus content type. The transport remains owned-buffer based; it does not claim `UZeroCopyTransport` capability.
 
 | uProtocol frame part | SOME/IP representation |
 | --- | --- |
 | SOME/IP service/instance/method/event IDs | Derived from configured URI mappings |
 | `UAttributes` | Binding-specific `USIP` prefix inside SOME/IP payload |
-| `UEncoding.format_id` / `content_type` / `schema_ref` | `USIP` prefix |
+| `PayloadEncoding` | `USIP` prefix |
 | Application payload bytes | SOME/IP payload bytes after the prefix |
 
 The `USIP` prefix is transport-native metadata, not a generated protobuf envelope. Application listeners receive a reconstructed `UOwnedFrame` whose payload excludes the prefix.
 
-Payload codecs are selected by the application. The transport forwards the serialized bytes and preserves the reconstructed `UEncoding` for typed receive checks:
+Payload codecs are selected by the application. The transport forwards the serialized bytes and preserves the reconstructed `PayloadEncoding` for typed receive checks:
 
 ```rust
 use up_rust::{payload::RawBytes, transport::UOwnedTransportExt, UFrameMetadata};

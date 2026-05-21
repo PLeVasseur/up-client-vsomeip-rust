@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    UCode, UEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri,
+    PayloadEncoding, UCode, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -103,7 +103,7 @@ impl UOwnedListener for RequestListener {
             frame.metadata().attributes().id().clone(),
             invoked_method,
         )
-        .with_encoding(UEncoding::from_content_type("text/plain"));
+        .with_encoding(PayloadEncoding::from_content_type("text/plain"));
         let response_header = UFrameMetadata::new(
             response_header
                 .attributes()
@@ -124,7 +124,7 @@ impl UOwnedListener for RequestListener {
 fn request_frame(method: UUri, reply_to: UUri, ttl: u32, payload: Vec<u8>) -> UOwnedFrame {
     UOwnedFrame::new(
         UFrameMetadata::request(method, reply_to, ttl)
-            .with_encoding(UEncoding::from_content_type("text/plain")),
+            .with_encoding(PayloadEncoding::from_content_type("text/plain")),
         payload,
     )
 }

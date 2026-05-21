@@ -13,8 +13,8 @@
 
 use bytes::Bytes;
 use up_rust::{
-    UAttributes, UCode, UEncoding, UFrameMetadata, UMessageType, UOwnedFrame, UPriority, UStatus,
-    UUri, UUID,
+    PayloadEncoding, UAttributes, UCode, UFrameMetadata, UMessageType, UOwnedFrame, UPayloadFormat,
+    UPriority, UStatus, UUri, UUID,
 };
 
 const FRAME_PAYLOAD_MAGIC: &[u8; 4] = b"USIP";
@@ -166,13 +166,24 @@ fn write_optional_string(dst: &mut Vec<u8>, value: Option<&str>) -> Result<(), U
     Ok(())
 }
 
-fn write_optional_encoding(dst: &mut Vec<u8>, value: Option<&UEncoding>) -> Result<(), UStatus> {
+fn write_optional_encoding(
+    dst: &mut Vec<u8>,
+    value: Option<&PayloadEncoding>,
+) -> Result<(), UStatus> {
     match value {
         Some(encoding) => {
             dst.push(1);
-            append_string(dst, encoding.format_id())?;
-            append_string(dst, encoding.content_type())?;
-            append_string(dst, encoding.schema_ref().unwrap_or_default())?;
+            match encoding {
+                PayloadEncoding::Standard(format) => {
+                    dst.push(0);
+                    dst.push(format.value());
+                }
+                PayloadEncoding::Custom(custom) => {
+                    dst.push(1);
+                    append_string(dst, custom.id())?;
+                    append_string(dst, custom.content_type())?;
+                }
+            }
         }
         None => dst.push(0),
     }
@@ -253,30 +264,38 @@ fn take_optional_string(src: &mut &[u8]) -> Result<Option<String>, UStatus> {
     }
 }
 
-fn take_optional_encoding(src: &mut &[u8]) -> Result<Option<UEncoding>, UStatus> {
+fn take_optional_encoding(src: &mut &[u8]) -> Result<Option<PayloadEncoding>, UStatus> {
     match take_u8(src)? {
         0 => Ok(None),
-        1 => {
-            let format_id = take_string(src)?;
-            let content_type = take_string(src)?;
-            let schema_ref = take_string(src)?;
-            let schema_ref = if schema_ref.is_empty() {
-                None
-            } else {
-                Some(schema_ref)
-            };
-            UEncoding::try_new(format_id, content_type, schema_ref)
-                .map(Some)
-                .map_err(|err| {
-                    UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
-                        format!("invalid payload encoding metadata: {err}"),
-                    )
-                })
-        }
+        1 => take_payload_encoding(src).map(Some),
         _ => Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
             "invalid optional value",
+        )),
+    }
+}
+
+fn take_payload_encoding(src: &mut &[u8]) -> Result<PayloadEncoding, UStatus> {
+    match take_u8(src)? {
+        0 => {
+            let value = take_u8(src)?;
+            let format = UPayloadFormat::from_u8(value).ok_or_else(|| {
+                UStatus::fail_with_code(
+                    UCode::INVALID_ARGUMENT,
+                    format!("invalid standard payload format {value}"),
+                )
+            })?;
+            Ok(PayloadEncoding::standard(format))
+        }
+        1 => PayloadEncoding::try_custom(take_string(src)?, take_string(src)?).map_err(|err| {
+            UStatus::fail_with_code(
+                UCode::INVALID_ARGUMENT,
+                format!("invalid custom payload encoding metadata: {err}"),
+            )
+        }),
+        _ => Err(UStatus::fail_with_code(
+            UCode::INVALID_ARGUMENT,
+            "invalid payload encoding kind",
         )),
     }
 }
@@ -393,7 +412,7 @@ mod tests {
         let frame = UOwnedFrame::new(
             UFrameMetadata::new(
                 attributes,
-                UEncoding::new("custom", "application/custom", Some("schema://custom")),
+                PayloadEncoding::custom("custom", "application/custom"),
             ),
             [1_u8, 2, 3, 4].as_slice(),
         );
@@ -415,10 +434,8 @@ mod tests {
     fn rejects_invalid_optional_marker_in_metadata() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
         let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
-                "raw",
-                "application/octet-stream",
-            )),
+            UFrameMetadata::publish(source)
+                .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [1_u8, 2, 3].as_slice(),
         );
         let mut encoded = encode_frame_payload(&frame).unwrap();
@@ -441,10 +458,7 @@ mod tests {
             .with_priority(UPriority::CS1)
             .with_ttl(1);
         let frame = UOwnedFrame::new(
-            UFrameMetadata::new(
-                attributes,
-                UEncoding::without_schema_ref("raw", "application/octet-stream"),
-            ),
+            UFrameMetadata::new(attributes, PayloadEncoding::standard(UPayloadFormat::Raw)),
             [1_u8, 2, 3].as_slice(),
         );
 
@@ -479,10 +493,8 @@ mod tests {
     fn frame_payload_rejects_wrong_inner_payload_codec_after_decode() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
         let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
-                "raw-bytes",
-                "application/octet-stream",
-            )),
+            UFrameMetadata::publish(source)
+                .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [0x0a_u8].as_slice(),
         );
 
@@ -512,10 +524,8 @@ mod tests {
     fn frame_payload_round_trips_present_empty_payload() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
         let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source).with_encoding(UEncoding::without_schema_ref(
-                "raw",
-                "application/octet-stream",
-            )),
+            UFrameMetadata::publish(source)
+                .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [].as_slice(),
         );
 
