@@ -728,7 +728,9 @@ impl UPTransportVsomeipEngine {
         let payload = encode_frame_payload(&frame)?;
         let mut vsomeip_payload =
             make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
-        vsomeip_payload.set_data_safe(&payload);
+        vsomeip_payload
+            .try_set_data_safe(&payload)
+            .map_err(|err| UStatus::fail_with_code(UCode::INVALID_ARGUMENT, err.to_string()))?;
         let attachable_payload = vsomeip_payload.get_shared_ptr();
 
         match frame.metadata().attributes().message_type() {

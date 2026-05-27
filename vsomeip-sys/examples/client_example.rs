@@ -78,7 +78,9 @@ fn main() {
         let payload_string = "Hello, vsomeip!";
         let payload_data = payload_string.as_bytes();
 
-        payload_wrapper.set_data_safe(payload_data);
+        payload_wrapper
+            .try_set_data_safe(payload_data)
+            .expect("example payload length should fit vSomeIP");
         request.set_message_payload(&mut payload_wrapper);
 
         let shared_ptr_message = request.as_ref().unwrap().get_shared_ptr();

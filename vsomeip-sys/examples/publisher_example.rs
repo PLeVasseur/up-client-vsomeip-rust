@@ -73,7 +73,9 @@ fn main() {
             payload_data.push((i as u16 % 256) as u8);
         }
 
-        payload_wrapper.set_data_safe(&payload_data);
+        payload_wrapper
+            .try_set_data_safe(&payload_data)
+            .expect("example payload length should fit vSomeIP");
 
         println!("packed message with payload:\n{payload_data:?}");
 

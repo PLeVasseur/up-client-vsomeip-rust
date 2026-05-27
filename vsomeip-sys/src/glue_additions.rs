@@ -15,9 +15,40 @@ use crate::{glue, vsomeip};
 use cxx::{SharedPtr, UniquePtr};
 use glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use log::{error, trace};
+use std::fmt;
 use std::pin::Pin;
 use std::slice;
 use vsomeip::message;
+
+/// Error returned when a Rust payload cannot be represented by the vSomeIP C++ API.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PayloadLengthError {
+    len: usize,
+}
+
+impl PayloadLengthError {
+    /// Returns the rejected payload length in bytes.
+    #[must_use]
+    pub fn payload_len(&self) -> usize {
+        self.len
+    }
+}
+
+impl fmt::Display for PayloadLengthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "payload length {} exceeds vSomeIP u32 payload length limit",
+            self.len
+        )
+    }
+}
+
+impl std::error::Error for PayloadLengthError {}
+
+fn payload_len_u32(len: usize) -> Result<u32, PayloadLengthError> {
+    u32::try_from(len).map_err(|_| PayloadLengthError { len })
+}
 
 pub fn make_application_wrapper(
     app_shared_ptr: SharedPtr<vsomeip::application>,
@@ -501,18 +532,37 @@ impl PayloadWrapper {
         unsafe { Pin::new_unchecked(payload) }
     }
 
-    /// Sets a vsomeip [vsomeip::payload]'s byte buffer
+    /// Sets a vsomeip [vsomeip::payload]'s byte buffer.
     ///
     /// # Rationale
     ///
-    /// We expose a safe API which is idiomatic to Rust, passing in a slice of u8 bytes
+    /// We expose a safe API which is idiomatic to Rust, passing in a slice of u8 bytes.
+    /// Prefer [`Self::try_set_data_safe`] when callers can report oversize
+    /// payloads instead of panicking.
     ///
     /// # TODO
     ///
     /// Add some runtime safety checks on the pointer
+    /// # Panics
+    ///
+    /// Panics if `data.len()` exceeds the `u32` length accepted by vSomeIP.
     pub fn set_data_safe(&self, data: &[u8]) {
-        // Get the length of the data
-        let length = data.len() as u32;
+        self.try_set_data_safe(data)
+            .expect("payload length should fit vSomeIP u32 length limit");
+    }
+
+    /// Sets a vsomeip [vsomeip::payload]'s byte buffer.
+    ///
+    /// Returns [`PayloadLengthError`] instead of truncating when the Rust slice
+    /// length cannot fit the `u32` length parameter expected by vSomeIP.
+    ///
+    /// Safety invariant: this safe wrapper is sound only if the external C++
+    /// vSomeIP API copies `data` during `set_data` or otherwise does not retain
+    /// the borrowed Rust pointer after the call returns. Rust guarantees only
+    /// that the slice pointer is non-null, properly aligned for `u8`, and valid
+    /// for `length` bytes during the call.
+    pub fn try_set_data_safe(&self, data: &[u8]) -> Result<(), PayloadLengthError> {
+        let length = payload_len_u32(data.len())?;
 
         trace!("length of payload: {length}");
 
@@ -527,6 +577,7 @@ impl PayloadWrapper {
         // - External C++ contract: vsomeip copies the bytes during `set_data` or
         //   otherwise does not retain `data_ptr` beyond the call.
         unsafe { self.get_pinned().set_data(data_ptr, length) };
+        Ok(())
     }
 
     /// Gets a vsomeip [vsomeip::payload]'s byte buffer
@@ -571,5 +622,22 @@ impl PayloadWrapper {
         trace!("after conversion to vec: {data_vec:?}");
 
         data_vec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_len_u32_rejects_lengths_that_vsomeip_cannot_represent() {
+        let error = payload_len_u32(u32::MAX as usize + 1).unwrap_err();
+
+        assert_eq!(error.payload_len(), u32::MAX as usize + 1);
+    }
+
+    #[test]
+    fn payload_len_u32_accepts_vsomeip_maximum() {
+        assert_eq!(payload_len_u32(u32::MAX as usize).unwrap(), u32::MAX);
     }
 }

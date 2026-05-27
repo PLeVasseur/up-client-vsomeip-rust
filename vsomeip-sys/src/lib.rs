@@ -176,7 +176,9 @@ mod tests {
 
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
 
-        (*payload_wrapper).set_data_safe(&data);
+        (*payload_wrapper)
+            .try_set_data_safe(&data)
+            .expect("test payload length should fit vSomeIP");
 
         let data_vec = (*payload_wrapper).get_data_safe();
         println!("{:?}", data_vec);
@@ -437,7 +439,9 @@ mod tests {
             let vsomeip_payload =
                 make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
             let payload = [1, 2, 3, 4];
-            vsomeip_payload.set_data_safe(&payload);
+            vsomeip_payload
+                .try_set_data_safe(&payload)
+                .expect("test payload length should fit vSomeIP");
             let attachable_payload = vsomeip_payload.get_shared_ptr();
             publisher_app_wrapper.get_pinned().notify(
                 service_id,
