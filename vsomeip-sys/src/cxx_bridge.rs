@@ -20,6 +20,14 @@ pub mod handler_registration {
         include!("include/application_wrapper.h");
         include!("application_registrations.h");
 
+        /// Requests one event group for one SOME/IP event.
+        ///
+        /// # Safety
+        ///
+        /// `_application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the duration of this call. The C++ glue must
+        /// not retain the raw pointer after returning. This is an external
+        /// C++/vsomeip contract and is not Miri-feasible.
         pub unsafe fn request_single_event(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,
@@ -28,6 +36,14 @@ pub mod handler_registration {
             _eventgroup: u16,
         );
 
+        /// Offers one event group for one SOME/IP event.
+        ///
+        /// # Safety
+        ///
+        /// `_application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the duration of this call. The C++ glue must
+        /// not retain the raw pointer after returning. This is an external
+        /// C++/vsomeip contract and is not Miri-feasible.
         pub unsafe fn offer_single_event(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,
@@ -57,6 +73,16 @@ pub mod handler_registration {
         /// * _instance - A SOME/IP [instance_t](crate::vsomeip::instance_t), i.e instance ID
         /// * _method - A SOME/IP [method_t](crate::vsomeip::method_t), i.e method/event ID
         /// * _fn_ptr_handler - A [MessageHandlerFnPtr](crate::extern_callback_wrappers::MessageHandlerFnPtr)
+        ///
+        /// # Safety
+        ///
+        /// `_application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the registration lifetime. `_fn_ptr_handler`
+        /// must use the declared extern "C" ABI and remain callable for as long
+        /// as vsomeip may invoke the handler, including from vsomeip runtime
+        /// threads. The C++ glue may store the callback in a `std::function`;
+        /// that lifetime/threading behavior is an external C++/vsomeip contract
+        /// and is not Miri-feasible.
         pub unsafe fn register_message_handler_fn_ptr(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,
@@ -87,6 +113,16 @@ pub mod handler_registration {
         /// * _fn_ptr_handler - A [AvailabilityHandlerFnPtr](crate::extern_callback_wrappers::AvailabilityHandlerFnPtr)
         /// * _major - A SOME/IP [major_version_t](crate::vsomeip::major_version_t), i.e the major version
         /// * _minor - A SOME/IP [minor_version_t](crate::vsomeip::minor_version_t), i.e the major version
+        ///
+        /// # Safety
+        ///
+        /// `_application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the registration lifetime. `_fn_ptr_handler`
+        /// must use the declared extern "C" ABI and remain callable for as long
+        /// as vsomeip may invoke the handler, including from vsomeip runtime
+        /// threads. The C++ glue may store the callback in a lambda; that
+        /// lifetime/threading behavior is an external C++/vsomeip contract and is
+        /// not Miri-feasible.
         pub unsafe fn register_availability_handler_fn_ptr(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,
@@ -119,6 +155,16 @@ pub mod handler_registration {
         /// * _event - A SOME/IP [event_t](crate::vsomeip::event_t)
         /// * _fn_ptr_handler - A [SubscriptionStatusHandlerFnPtr](crate::extern_callback_wrappers::SubscriptionStatusHandlerFnPtr)
         /// * _is_selective - If true the callback is called even when there's an error registering the subscription
+        ///
+        /// # Safety
+        ///
+        /// `_application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the registration lifetime. `_fn_ptr_handler`
+        /// must use the declared extern "C" ABI and remain callable for as long
+        /// as vsomeip may invoke the handler, including from vsomeip runtime
+        /// threads. The C++ glue may store the callback in a lambda; that
+        /// lifetime/threading behavior is an external C++/vsomeip contract and is
+        /// not Miri-feasible.
         pub unsafe fn register_subscription_status_handler_fn_ptr(
             _application_wrapper: *mut ApplicationWrapper,
             _service: u16,
@@ -131,6 +177,16 @@ pub mod handler_registration {
 
         type state_handler_fn_ptr = crate::extern_callback_wrappers::AvailableStateHandlerFnPtr;
 
+        /// Registers an application state handler.
+        ///
+        /// # Safety
+        ///
+        /// `application_wrapper` must be non-null and point to a live
+        /// `ApplicationWrapper` for the registration lifetime. `_fn_ptr_handler`
+        /// must use the declared extern "C" ABI and remain callable for as long
+        /// as vsomeip may invoke the handler, including from vsomeip runtime
+        /// threads. The C++ glue may store the callback; that lifetime/threading
+        /// behavior is an external C++/vsomeip contract and is not Miri-feasible.
         pub unsafe fn register_state_handler_fn_ptr(
             application_wrapper: *mut ApplicationWrapper,
             _fn_ptr_handler: state_handler_fn_ptr,
@@ -149,8 +205,12 @@ mod autocxx_failed {
 
         /// # Safety
         ///
-        /// We are simply creating a binding here for one that autocxx failed to generate
-        #[allow(clippy::missing_safety_doc)]
+        /// `_data` must be non-null and valid for reads of `_length` bytes for
+        /// the duration of the call. The pinned payload must point to a live
+        /// vsomeip payload object. The C++ `set_data` implementation must copy
+        /// the bytes or otherwise not retain `_data` beyond the call. This is an
+        /// external C++/vsomeip contract and is not Miri-feasible.
+        #[allow(clippy::missing_safety_doc, clippy::multiple_unsafe_ops_per_block)]
         pub(crate) unsafe fn set_data(self: Pin<&mut payload>, _data: *const u8, _length: u32);
 
         pub fn get_data(self: &payload) -> *const u8;

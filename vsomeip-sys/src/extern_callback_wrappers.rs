@@ -29,6 +29,16 @@ pub struct AvailabilityHandlerFnPtr(
     ),
 );
 
+// SAFETY:
+// - `AvailabilityHandlerFnPtr` is `#[repr(transparent)]` over the extern "C"
+//   function pointer used by the C++ glue type.
+// - Per https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation:
+//
+//   "Structs and enums with this representation have the same layout and ABI as
+//   the only non-size 0 non-alignment 1 field, if present, or unit otherwise."
+//
+// - External CXX contract: the `type_id!` string must match the C++ bridge
+//   declaration for this glue callback wrapper.
 unsafe impl ExternType for AvailabilityHandlerFnPtr {
     type Id = type_id!("glue::availability_handler_fn_ptr");
     type Kind = cxx::kind::Trivial;
@@ -44,6 +54,16 @@ unsafe impl ExternType for AvailabilityHandlerFnPtr {
 #[derive(Debug)]
 pub struct MessageHandlerFnPtr(pub extern "C" fn(&SharedPtr<vsomeip::message>));
 
+// SAFETY:
+// - `MessageHandlerFnPtr` is `#[repr(transparent)]` over the extern "C"
+//   function pointer used by the C++ glue type.
+// - Per https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation:
+//
+//   "Structs and enums with this representation have the same layout and ABI as
+//   the only non-size 0 non-alignment 1 field, if present, or unit otherwise."
+//
+// - External CXX contract: the `type_id!` string must match the C++ bridge
+//   declaration for this glue callback wrapper.
 unsafe impl ExternType for MessageHandlerFnPtr {
     type Id = type_id!("glue::message_handler_fn_ptr");
     type Kind = cxx::kind::Trivial;
@@ -66,6 +86,16 @@ pub struct SubscriptionStatusHandlerFnPtr(
     ),
 );
 
+// SAFETY:
+// - `SubscriptionStatusHandlerFnPtr` is `#[repr(transparent)]` over the extern
+//   "C" function pointer used by the C++ glue type.
+// - Per https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation:
+//
+//   "Structs and enums with this representation have the same layout and ABI as
+//   the only non-size 0 non-alignment 1 field, if present, or unit otherwise."
+//
+// - External CXX contract: the `type_id!` string must match the C++ bridge
+//   declaration for this glue callback wrapper.
 unsafe impl ExternType for SubscriptionStatusHandlerFnPtr {
     type Id = type_id!("glue::subscription_status_handler_fn_ptr");
     type Kind = cxx::kind::Trivial;
@@ -82,6 +112,16 @@ pub struct AvailableStateHandlerFnPtr(
     pub extern "C" fn(registration_state: crate::ffi::vsomeip_v3::state_type_e),
 );
 
+// SAFETY:
+// - `AvailableStateHandlerFnPtr` is `#[repr(transparent)]` over the extern "C"
+//   function pointer used by the C++ glue type.
+// - Per https://doc.rust-lang.org/reference/type-layout.html#the-transparent-representation:
+//
+//   "Structs and enums with this representation have the same layout and ABI as
+//   the only non-size 0 non-alignment 1 field, if present, or unit otherwise."
+//
+// - External CXX contract: the `type_id!` string must match the C++ bridge
+//   declaration for this glue callback wrapper.
 unsafe impl ExternType for AvailableStateHandlerFnPtr {
     type Id = type_id!("glue::state_handler_fn_ptr");
     type Kind = cxx::kind::Trivial;

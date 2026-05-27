@@ -17,7 +17,7 @@ use glue::{ApplicationWrapper, MessageWrapper, PayloadWrapper, RuntimeWrapper};
 use log::{error, trace};
 use std::pin::Pin;
 use std::slice;
-use vsomeip::{message, message_base};
+use vsomeip::message;
 
 pub fn make_application_wrapper(
     app_shared_ptr: SharedPtr<vsomeip::application>,
@@ -47,7 +47,17 @@ impl RuntimeWrapper {
     /// Add some runtime safety checks on the pointer
     #[allow(clippy::mut_from_ref)]
     pub fn get_pinned(&self) -> Pin<&mut vsomeip::runtime> {
-        unsafe { Pin::new_unchecked(self.get_mut().as_mut().unwrap()) }
+        // SAFETY:
+        // - The wrapper owns a `UniquePtr` to a C++ runtime object; `get_mut`
+        //   returns the mutable Rust view of that pointee when present.
+        let runtime = unsafe { self.get_mut().as_mut().unwrap() };
+        // SAFETY:
+        // - The C++ object is not moved while the returned `Pin<&mut runtime>`
+        //   is alive; this is the bridge invariant required by `Pin`.
+        // - Per https://doc.rust-lang.org/stable/std/pin/struct.Pin.html#method.new_unchecked,
+        //   callers must guarantee "the value's data will not be moved nor have
+        //   its storage invalidated until it gets dropped."
+        unsafe { Pin::new_unchecked(runtime) }
     }
 }
 
@@ -75,7 +85,18 @@ impl ApplicationWrapper {
     /// should probably do a sleep of half a second or something
     #[allow(clippy::mut_from_ref)]
     pub fn get_pinned(&self) -> Pin<&mut vsomeip::application> {
-        unsafe { Pin::new_unchecked(self.get_mut().as_mut().unwrap()) }
+        // SAFETY:
+        // - The wrapper owns a `UniquePtr` to a C++ application object;
+        //   `get_mut` returns the mutable Rust view of that pointee when present.
+        let application = unsafe { self.get_mut().as_mut().unwrap() };
+        // SAFETY:
+        // - The C++ object is not moved while the returned `Pin<&mut
+        //   application>` is alive; this is the bridge invariant required by
+        //   `Pin`.
+        // - Per https://doc.rust-lang.org/stable/std/pin/struct.Pin.html#method.new_unchecked,
+        //   callers must guarantee "the value's data will not be moved nor have
+        //   its storage invalidated until it gets dropped."
+        unsafe { Pin::new_unchecked(application) }
     }
 
     /// Requests a single [eventgroup_t][crate::vsomeip::eventgroup_t] for the application
@@ -98,9 +119,13 @@ impl ApplicationWrapper {
         notifier: u16,
         eventgroup: u16,
     ) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for the duration of this call.
+        // - External C++ contract: the glue function does not store the wrapper
+        //   pointer beyond the call and only forwards POD service IDs.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             request_single_event(
                 application_wrapper_ptr,
                 service,
@@ -131,9 +156,13 @@ impl ApplicationWrapper {
         notifier: u16,
         eventgroup: u16,
     ) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for the duration of this call.
+        // - External C++ contract: the glue function does not store the wrapper
+        //   pointer beyond the call and only forwards POD service IDs.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             offer_single_event(
                 application_wrapper_ptr,
                 service,
@@ -164,9 +193,14 @@ impl ApplicationWrapper {
         method: u16,
         fn_ptr_handler: MessageHandlerFnPtr,
     ) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for registration.
+        // - External C++ contract: vsomeip may store and invoke the callback on
+        //   runtime threads; the function pointer uses the declared extern "C"
+        //   ABI and must remain valid for the application lifetime.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             register_message_handler_fn_ptr(
                 application_wrapper_ptr,
                 service,
@@ -197,9 +231,14 @@ impl ApplicationWrapper {
         major_version: u8,
         minor_version: u32,
     ) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for registration.
+        // - External C++ contract: vsomeip may store and invoke the callback on
+        //   runtime threads; the function pointer uses the declared extern "C"
+        //   ABI and must remain valid for the application lifetime.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             register_availability_handler_fn_ptr(
                 application_wrapper_ptr,
                 service,
@@ -232,9 +271,14 @@ impl ApplicationWrapper {
         fn_ptr_handler: SubscriptionStatusHandlerFnPtr,
         is_selective: bool,
     ) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for registration.
+        // - External C++ contract: vsomeip may store and invoke the callback on
+        //   runtime threads; the function pointer uses the declared extern "C"
+        //   ABI and must remain valid for the application lifetime.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             register_subscription_status_handler_fn_ptr(
                 application_wrapper_ptr,
                 service,
@@ -248,9 +292,14 @@ impl ApplicationWrapper {
     }
 
     pub fn register_state_handler_fn_ptr_safe(&self, fn_ptr_handler: AvailableStateHandlerFnPtr) {
+        let application_wrapper_ptr = self as *const ApplicationWrapper as *mut ApplicationWrapper;
+        // SAFETY:
+        // - `application_wrapper_ptr` is derived from `self` and remains valid
+        //   for registration.
+        // - External C++ contract: vsomeip may store and invoke the callback on
+        //   runtime threads; the function pointer uses the declared extern "C"
+        //   ABI and must remain valid for the application lifetime.
         unsafe {
-            let application_wrapper_ptr =
-                self as *const ApplicationWrapper as *mut ApplicationWrapper;
             register_state_handler_fn_ptr(application_wrapper_ptr, fn_ptr_handler);
         }
     }
@@ -274,7 +323,15 @@ impl MessageWrapper {
     /// Add some runtime safety checks on the pointer
     #[allow(clippy::mut_from_ref)]
     pub fn get_pinned(&self) -> Pin<&mut vsomeip::message> {
-        unsafe { Pin::new_unchecked(self.get_mut().as_mut().unwrap()) }
+        // SAFETY: `get_mut` returns the C++ message pointee managed by this
+        // wrapper when present.
+        let message = unsafe { self.get_mut().as_mut().unwrap() };
+        // SAFETY:
+        // - The C++ message object is not moved while the returned pin is alive.
+        // - Per https://doc.rust-lang.org/stable/std/pin/struct.Pin.html#method.new_unchecked,
+        //   callers must guarantee "the value's data will not be moved nor have
+        //   its storage invalidated until it gets dropped."
+        unsafe { Pin::new_unchecked(message) }
     }
 
     /// Gets a `Pin<&mut message_base>` from a [MessageWrapper]
@@ -298,23 +355,25 @@ impl MessageWrapper {
     /// Add some runtime safety checks on the pointer
     #[allow(clippy::mut_from_ref)]
     pub fn get_message_base_pinned(&self) -> Pin<&mut vsomeip::message_base> {
-        unsafe {
-            let msg_ptr: *mut message = self.get_mut();
-            if msg_ptr.is_null() {
-                panic!("msg_ptr is null");
-            }
-
-            // Convert the raw pointer to a mutable reference
-            let msg_ref: &mut message = &mut *msg_ptr;
-
-            // Pin the mutable reference
-            let pinned_msg_ref: Pin<&mut message> = Pin::new_unchecked(msg_ref);
-
-            // Use the upcast function to get a pinned mutable reference to message_base
-            let pinned_base_ref: Pin<&mut message_base> = upcast(pinned_msg_ref);
-
-            pinned_base_ref
+        let msg_ptr: *mut message = self.get_mut();
+        if msg_ptr.is_null() {
+            panic!("msg_ptr is null");
         }
+
+        // SAFETY:
+        // - `msg_ptr` was returned from this wrapper and checked for null.
+        // - The wrapper owns the mutable access path for the duration of the
+        //   returned pin.
+        let msg_ref: &mut message = unsafe { &mut *msg_ptr };
+
+        // SAFETY:
+        // - The C++ message object is not moved while the returned pin is alive.
+        // - Per https://doc.rust-lang.org/stable/std/pin/struct.Pin.html#method.new_unchecked,
+        //   callers must guarantee "the value's data will not be moved nor have
+        //   its storage invalidated until it gets dropped."
+        let pinned_msg_ref: Pin<&mut message> = unsafe { Pin::new_unchecked(msg_ref) };
+
+        upcast(pinned_msg_ref)
     }
 
     /// Sets a vsomeip [vsomeip::message]'s [vsomeip::payload]
@@ -330,11 +389,14 @@ impl MessageWrapper {
     ///
     /// Add some runtime safety checks on the pointers
     pub fn set_message_payload(&self, payload_wrapper: &mut UniquePtr<PayloadWrapper>) {
-        unsafe {
-            let message_ptr = MessageWrapper::get_mut(self);
-            let payload_ptr = PayloadWrapper::get_mut(payload_wrapper);
-            set_payload_raw(message_ptr, payload_ptr);
-        }
+        let message_ptr = MessageWrapper::get_mut(self);
+        let payload_ptr = PayloadWrapper::get_mut(payload_wrapper);
+        // SAFETY:
+        // - Both raw pointers are obtained from live wrapper objects and are
+        //   valid for this call.
+        // - External C++ contract: `set_payload_raw` stores the payload through
+        //   vsomeip shared ownership, not through borrowed Rust references.
+        unsafe { set_payload_raw(message_ptr, payload_ptr) };
     }
 
     /// Gets a vsomeip [vsomeip::message]'s [vsomeip::payload]
@@ -357,6 +419,10 @@ impl MessageWrapper {
             return None;
         }
 
+        // SAFETY:
+        // - `message_ptr` is non-null and came from a live `MessageWrapper`.
+        // - External C++ contract: the returned payload pointer, when non-null,
+        //   denotes the message's current payload object.
         let payload_ptr = unsafe { get_payload_raw(message_ptr) };
 
         if (payload_ptr as *const ()).is_null() {
@@ -364,7 +430,10 @@ impl MessageWrapper {
             return None;
         }
 
-        // Use the intermediate function to create a UniquePtr<PayloadWrapper>
+        // SAFETY:
+        // - `payload_ptr` was checked for null and came from the C++ message.
+        // - External C++ contract: the helper wraps the payload pointer without
+        //   invalidating the message's shared ownership.
         let payload_wrapper = unsafe { create_payload_wrapper(payload_ptr) };
 
         if payload_wrapper.is_null() {
@@ -395,7 +464,15 @@ impl PayloadWrapper {
     /// Add some runtime safety checks on the pointer
     #[allow(clippy::mut_from_ref)]
     pub fn get_pinned(&self) -> Pin<&mut vsomeip::payload> {
-        unsafe { Pin::new_unchecked(self.get_mut().as_mut().unwrap()) }
+        // SAFETY: `get_mut` returns the C++ payload pointee managed by this
+        // wrapper when present.
+        let payload = unsafe { self.get_mut().as_mut().unwrap() };
+        // SAFETY:
+        // - The C++ payload object is not moved while the returned pin is alive.
+        // - Per https://doc.rust-lang.org/stable/std/pin/struct.Pin.html#method.new_unchecked,
+        //   callers must guarantee "the value's data will not be moved nor have
+        //   its storage invalidated until it gets dropped."
+        unsafe { Pin::new_unchecked(payload) }
     }
 
     /// Sets a vsomeip [vsomeip::payload]'s byte buffer
@@ -418,9 +495,12 @@ impl PayloadWrapper {
 
         trace!("data_ptr: {data_ptr:?}");
 
-        unsafe {
-            self.get_pinned().set_data(data_ptr, length);
-        }
+        // SAFETY:
+        // - `data_ptr` is derived from `data` and is valid for `length` bytes for
+        //   the duration of this call.
+        // - External C++ contract: vsomeip copies the bytes during `set_data` or
+        //   otherwise does not retain `data_ptr` beyond the call.
+        unsafe { self.get_pinned().set_data(data_ptr, length) };
     }
 
     /// Gets a vsomeip [vsomeip::payload]'s byte buffer
@@ -446,7 +526,15 @@ impl PayloadWrapper {
 
         trace!("Before slice::from_raw_parts");
 
-        // Convert the raw pointer and length to a slice
+        // SAFETY:
+        // - Null pointers are handled above by returning an empty Vec.
+        // - For non-null `data_ptr`, vsomeip reports `length` initialized bytes
+        //   that remain valid for the duration of this call.
+        // - Per https://doc.rust-lang.org/stable/std/slice/fn.from_raw_parts.html#safety,
+        //   `data` must be "non-null, valid for reads for
+        //   `len * size_of::<T>()` many bytes," properly aligned, and contained
+        //   within a single allocation; those properties are supplied by the
+        //   vsomeip payload API.
         let data_slice: &[u8] = unsafe { slice::from_raw_parts(data_ptr, length as usize) };
 
         trace!("After slice::from_raw_parts");

@@ -19,16 +19,20 @@ use std::io;
 
 #[cfg(feature = "bundled")]
 fn vsomeip_includes() -> PathBuf {
-    let crate_root =
-        env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR environment variable is not set");
-    PathBuf::from(&crate_root).join("vsomeip").join("interface")
+    vendored_vsomeip_includes()
 }
 
 #[cfg(not(feature = "bundled"))]
 fn vsomeip_includes() -> PathBuf {
-    let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH")
-        .expect("You must supply the path to a vsomeip library install, e.g. /usr/local");
-    PathBuf::from(&vsomeip_install_path).join("include")
+    env::var_os("VSOMEIP_INSTALL_PATH")
+        .map(|path| PathBuf::from(path).join("include"))
+        .unwrap_or_else(vendored_vsomeip_includes)
+}
+
+fn vendored_vsomeip_includes() -> PathBuf {
+    let crate_root =
+        env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR environment variable is not set");
+    PathBuf::from(&crate_root).join("vsomeip").join("interface")
 }
 
 #[cfg(feature = "bundled")]
@@ -45,18 +49,18 @@ fn vsomeip_install_path() -> String {
 }
 
 #[cfg(feature = "bundled")]
-fn vsomeip_lib_path() -> String {
+fn vsomeip_lib_path() -> Option<String> {
     let vsomeip_install_path = vsomeip_install_path();
     let vsomeip_lib_path = PathBuf::from(&vsomeip_install_path).join("lib");
-    format!("{}", vsomeip_lib_path.display())
+    Some(format!("{}", vsomeip_lib_path.display()))
 }
 
 #[cfg(not(feature = "bundled"))]
-fn vsomeip_lib_path() -> String {
-    let vsomeip_install_path = env::var("VSOMEIP_INSTALL_PATH")
-        .expect("You must supply the path to a vsomeip library install, e.g. /usr/local");
-    let vsomeip_lib_path = PathBuf::from(&vsomeip_install_path).join("lib");
-    format!("{}", vsomeip_lib_path.display())
+fn vsomeip_lib_path() -> Option<String> {
+    env::var_os("VSOMEIP_INSTALL_PATH").map(|path| {
+        let vsomeip_lib_path = PathBuf::from(path).join("lib");
+        format!("{}", vsomeip_lib_path.display())
+    })
 }
 
 fn main() -> miette::Result<()> {
@@ -287,8 +291,9 @@ mod bindings {
             .compile("autocxx-portion");
         println!("cargo:rerun-if-changed=src/lib.rs");
         println!("cargo:rustc-link-lib=vsomeip3");
-        let vsomeip_lib_path = vsomeip_lib_path();
-        println!("cargo:rustc-link-search=native={}", vsomeip_lib_path);
+        if let Some(vsomeip_lib_path) = vsomeip_lib_path() {
+            println!("cargo:rustc-link-search=native={}", vsomeip_lib_path);
+        }
 
         let include_dir = project_root.join("src/glue"); // Update the path as necessary
 
