@@ -42,6 +42,11 @@ impl RuntimeWrapper {
     /// Since we use a UniquePtr<[RuntimeWrapper]>, we then need a way to drill down and extract
     /// the `Pin<&mut runtime>`.
     ///
+    /// Safety invariant: this safe wrapper is sound only while the underlying
+    /// C++ `runtime` object remains owned by the wrapper, non-null, and unmoved
+    /// for the returned pin lifetime. That is an external vsomeip/C++ contract;
+    /// Rust only checks the wrapper pointer before pinning.
+    ///
     /// # TODO
     ///
     /// Add some runtime safety checks on the pointer
@@ -73,6 +78,11 @@ impl ApplicationWrapper {
     ///
     /// Since we use a UniquePtr<[ApplicationWrapper]>, we then need a way to drill down and extract
     /// the `Pin<&mut application>`.
+    ///
+    /// Safety invariant: this safe wrapper is sound only while the underlying
+    /// C++ `application` object remains owned by the wrapper, non-null, and
+    /// unmoved for the returned pin lifetime. That is an external vsomeip/C++
+    /// contract; Rust only checks the wrapper pointer before pinning.
     ///
     /// # TODO
     ///
@@ -318,6 +328,11 @@ impl MessageWrapper {
     /// Since we use a UniquePtr<[MessageWrapper]>, we then need a way to drill down and extract
     /// the `Pin<&mut message>`.
     ///
+    /// Safety invariant: this safe wrapper is sound only while the underlying
+    /// C++ `message` object remains owned by the wrapper, non-null, and unmoved
+    /// for the returned pin lifetime. That is an external vsomeip/C++ contract;
+    /// Rust only checks the wrapper pointer before pinning.
+    ///
     /// # TODO
     ///
     /// Add some runtime safety checks on the pointer
@@ -349,6 +364,12 @@ impl MessageWrapper {
     ///
     /// Since we use a UniquePtr<[MessageWrapper]>, we then need a way to drill down and extract
     /// the `Pin<&mut message_base>`.
+    ///
+    /// Safety invariant: the derived `message_base` reference must point into the
+    /// same live C++ `message` object and must not outlive or out-alias the
+    /// wrapper's mutable access path. C++ object layout and virtual-base behavior
+    /// are external vsomeip/C++ contracts; Rust only checks for a non-null
+    /// pointer before pinning.
     ///
     /// # TODO
     ///
@@ -458,6 +479,11 @@ impl PayloadWrapper {
     ///
     /// Since we use a UniquePtr<[PayloadWrapper]>, we then need a way to drill down and extract
     /// the `Pin<&mut payload>`.
+    ///
+    /// Safety invariant: this safe wrapper is sound only while the underlying
+    /// C++ `payload` object remains owned by the wrapper, non-null, and unmoved
+    /// for the returned pin lifetime. That is an external vsomeip/C++ contract;
+    /// Rust only checks the wrapper pointer before pinning.
     ///
     /// # TODO
     ///

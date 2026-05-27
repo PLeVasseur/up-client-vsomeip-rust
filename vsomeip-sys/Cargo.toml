@@ -56,6 +56,10 @@ unsafe_op_in_unsafe_fn = "warn"
 missing_unsafe_on_extern = "warn"
 unsafe_attr_outside_unsafe = "warn"
 unused_unsafe = "warn"
+deprecated_safe_2024 = "warn"
+ffi_unwind_calls = "warn"
+static_mut_refs = "warn"
+clashing_extern_declarations = "warn"
 
 # Keep safety lints at warn in this package because autocxx/cxx generated code
 # can be attributed to this crate. Other workspace members inherit deny-level
@@ -69,6 +73,7 @@ unnecessary_safety_doc = "warn"
 borrow_as_ptr = "warn"
 ptr_as_ptr = "warn"
 as_ptr_cast_mut = "warn"
+as_pointer_underscore = "warn"
 not_unsafe_ptr_arg_deref = "warn"
 transmute_ptr_to_ptr = "warn"
 transmute_ptr_to_ref = "warn"
