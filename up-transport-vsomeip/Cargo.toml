@@ -49,10 +49,10 @@ tempfile = "3.16.0"
 env_logger = { version = "0.11.3" }
 protobuf = { version = "3.7.2" }
 test-case = { version = "3.3" }
-up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "303e1ad44c3a26179e15fe1f677ea578b1f1d2c6", default-features = false, features = ["protobuf-wire"] }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "6db506f0deff5de4f1093d1378d7dd40d3bb9f5d", default-features = false, features = ["protobuf-wire"] }
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
+[lints]
+workspace = true

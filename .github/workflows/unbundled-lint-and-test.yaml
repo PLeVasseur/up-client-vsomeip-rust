@@ -28,6 +28,7 @@ on:
       - "**/include/**"
       - "**/src/**"
       - "**/Cargo.*"
+      - "clippy.toml"
       - "build/**"
   workflow_call:
   workflow_dispatch:
@@ -200,9 +201,14 @@ jobs:
       - name: cargo fmt
         working-directory: ${{github.workspace}}
         run: cargo fmt -- --check
-      - name: cargo clippy
+      - name: cargo clippy deny gates
         working-directory: ${{github.workspace}}
-        run: cargo clippy --no-default-features --all-targets -- -W warnings -D warnings
+        run: |
+          cargo clippy -p up-transport-vsomeip --no-default-features --all-targets --no-deps -- -W warnings -D warnings
+          cargo clippy -p vsomeip-proc-macro --all-targets -- -W warnings -D warnings
+      - name: cargo clippy generated bridge warning audit
+        working-directory: ${{github.workspace}}
+        run: cargo clippy -p vsomeip-sys --no-default-features --lib -- -W warnings -W clippy::missing_safety_doc -W clippy::undocumented_unsafe_blocks -W clippy::multiple_unsafe_ops_per_block -W clippy::unnecessary_safety_comment -W clippy::unnecessary_safety_doc
 
   test:
     name: Test

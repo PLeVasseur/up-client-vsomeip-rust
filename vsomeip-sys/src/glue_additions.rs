@@ -414,7 +414,7 @@ impl MessageWrapper {
     pub fn get_message_payload(&self) -> Option<UniquePtr<PayloadWrapper>> {
         let message_ptr = MessageWrapper::get_mut(self) as *const vsomeip::message;
 
-        if (message_ptr as *const ()).is_null() {
+        if message_ptr.cast::<()>().is_null() {
             error!("message_ptr is null");
             return None;
         }
@@ -425,7 +425,7 @@ impl MessageWrapper {
         //   denotes the message's current payload object.
         let payload_ptr = unsafe { get_payload_raw(message_ptr) };
 
-        if (payload_ptr as *const ()).is_null() {
+        if payload_ptr.cast::<()>().is_null() {
             error!("payload_ptr is null");
             return None;
         }

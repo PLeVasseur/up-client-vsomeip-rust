@@ -34,7 +34,7 @@ keywords = ["uProtocol", "SDK", "vsomeip", "SOMEIP"]
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/eclipse-uprotocol/up-transport-vsomeip-rust"
-rust-version = "1.82"
+rust-version = "1.88"
 version = "0.5.0"
 
 [workspace.dependencies]
@@ -50,6 +50,26 @@ regex = { version = "1.10" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 tokio = { version = "1.35.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "tracing"] }
-up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "303e1ad44c3a26179e15fe1f677ea578b1f1d2c6", default-features = false }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "6db506f0deff5de4f1093d1378d7dd40d3bb9f5d", default-features = false }
 vsomeip-proc-macro = { version = "0.5.0", path = "vsomeip-proc-macro" }
 vsomeip-sys = { version = "0.5.0", path = "vsomeip-sys", default-features = false }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
+unsafe_op_in_unsafe_fn = "deny"
+missing_unsafe_on_extern = "deny"
+unsafe_attr_outside_unsafe = "deny"
+unused_unsafe = "deny"
+
+[workspace.lints.clippy]
+missing_safety_doc = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+unnecessary_safety_comment = "deny"
+unnecessary_safety_doc = "deny"
+borrow_as_ptr = "deny"
+ptr_as_ptr = "deny"
+as_ptr_cast_mut = "deny"
+not_unsafe_ptr_arg_deref = "deny"
+transmute_ptr_to_ptr = "deny"
+transmute_ptr_to_ref = "deny"

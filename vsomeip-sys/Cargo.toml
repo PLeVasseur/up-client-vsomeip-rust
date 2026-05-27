@@ -49,3 +49,26 @@ miette = { version = "5", features = ["fancy"] }
 
 [dev-dependencies]
 tempfile = "3.16.0"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
+unsafe_op_in_unsafe_fn = "warn"
+missing_unsafe_on_extern = "warn"
+unsafe_attr_outside_unsafe = "warn"
+unused_unsafe = "warn"
+
+# Keep safety lints at warn in this package because autocxx/cxx generated code
+# can be attributed to this crate. Other workspace members inherit deny-level
+# linting; the ledger tracks this scoped exception.
+[lints.clippy]
+missing_safety_doc = "warn"
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+borrow_as_ptr = "warn"
+ptr_as_ptr = "warn"
+as_ptr_cast_mut = "warn"
+not_unsafe_ptr_arg_deref = "warn"
+transmute_ptr_to_ptr = "warn"
+transmute_ptr_to_ref = "warn"
