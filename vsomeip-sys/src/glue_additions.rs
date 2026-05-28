@@ -384,8 +384,8 @@ impl MessageWrapper {
     ///
     /// # Rationale
     ///
-    /// In order to use the methods implemented on [message_base] which are inherited by [message],
-    /// we must explicitly upcast into a [message_base] and return a `Pin<&mut message_base>`
+    /// In order to use the methods implemented on [vsomeip::message_base] which are inherited by [vsomeip::message],
+    /// we must explicitly upcast into a [vsomeip::message_base] and return a `Pin<&mut message_base>`
     ///
     /// It appears like cxx may never handle the case of calling virtual methods of base classes,
     /// so this is the workaround that works
@@ -553,7 +553,7 @@ impl PayloadWrapper {
 
     /// Sets a vsomeip [vsomeip::payload]'s byte buffer.
     ///
-    /// Returns [`PayloadLengthError`] instead of truncating when the Rust slice
+    /// Returns `PayloadLengthError` instead of truncating when the Rust slice
     /// length cannot fit the `u32` length parameter expected by vSomeIP.
     ///
     /// Safety invariant: this safe wrapper is sound only if the external C++

@@ -49,7 +49,7 @@ tempfile = "3.16.0"
 env_logger = { version = "0.11.3" }
 protobuf = { version = "3.7.2" }
 test-case = { version = "3.3" }
-up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "425c4c578896533c1717e79e11463d8cb683ef8f", default-features = false, features = ["protobuf-wire"] }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "d88906120769088c0c31c6fd579a146d7d96ec1a", default-features = false, features = ["protobuf-wire"] }
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
