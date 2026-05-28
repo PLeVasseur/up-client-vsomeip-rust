@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::{
-    PayloadEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
+    PayloadEncoding, UCode, UFrameBuilder, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus,
+    UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -92,11 +93,9 @@ async fn main() -> Result<(), UStatus> {
         tokio::time::sleep(Duration::from_millis(1000)).await;
         let payload = format!("me_client@i={i}").into_bytes();
         i += 1;
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::request(method.clone(), client_uuri.clone(), REQUEST_TTL)
-                .with_encoding(PayloadEncoding::from_content_type("text/plain")),
-            payload,
-        );
+        let frame = UFrameBuilder::request(method.clone(), client_uuri.clone(), REQUEST_TTL)
+            .build_with_payload(payload, PayloadEncoding::from_content_type("text/plain"))
+            .map_err(|error| UStatus::fail_with_code(UCode::INVALID_ARGUMENT, error.to_string()))?;
         client.send_owned(frame).await?;
     }
 }

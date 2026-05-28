@@ -21,6 +21,12 @@ This library leverages the [up-rust](https://github.com/eclipse-uprotocol/up-rus
 
 This crate uses native `UOwnedFrame` values instead of generated `UMessage` transport envelopes. The vSomeIP binding serializes a compact native-frame prefix before the application payload so it can preserve `UAttributes` and `PayloadEncoding` across SOME/IP. Standard encodings carry upstream `UPayloadFormat` values; custom encodings carry a native custom ID plus content type. The transport remains owned-buffer based; it does not claim `UZeroCopyTransport` capability.
 
+Stable-container payloads are preserved as owned SOME/IP payload bytes plus native
+`PayloadEncoding` metadata, including the `up.stable-container` custom encoding.
+The C++/SOME-IP path does not expose loan-backed typed stable-container
+borrowing; application code receives owned bytes after the `USIP` prefix is
+decoded.
+
 | uProtocol frame part | SOME/IP representation |
 | --- | --- |
 | SOME/IP service/instance/method/event IDs | Derived from configured URI mappings |

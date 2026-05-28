@@ -391,9 +391,30 @@ fn byte_to_priority(value: u8) -> Result<UPriority, UStatus> {
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::StringValue;
-    use up_rust::{payload::UWireError, ProtobufPayload};
+    use up_rust::{
+        payload::{PlacementDefault, StableContainerPayload, UWireError},
+        ProtobufPayload,
+    };
 
     use super::*;
+
+    #[repr(C)]
+    #[derive(
+        Clone,
+        Copy,
+        Debug,
+        Default,
+        Eq,
+        PartialEq,
+        PlacementDefault,
+        up_rust::StablePayload,
+        up_rust::ByteBackedStablePayload,
+    )]
+    #[stable_payload(type_name = "example.vehicle.VehiclePose")]
+    struct VehiclePose {
+        x: u32,
+        y: u32,
+    }
 
     #[test]
     fn frame_payload_round_trips_metadata_and_payload() {
@@ -487,6 +508,27 @@ mod tests {
             Some(&ProtobufPayload::encoding())
         );
         assert_eq!(decoded_payload.value, value.value);
+    }
+
+    #[test]
+    fn frame_payload_preserves_stable_container_encoding_and_payload_bytes() {
+        let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
+        let pose = VehiclePose { x: 3, y: 5 };
+        let frame =
+            UOwnedFrame::from_payload_as::<StableContainerPayload<VehiclePose>, VehiclePose>(
+                UFrameMetadata::publish(source),
+                &pose,
+            )
+            .unwrap();
+        let expected_payload = frame.payload_bytes().to_vec();
+
+        let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
+
+        assert_eq!(
+            decoded.metadata().encoding(),
+            Some(&StableContainerPayload::<VehiclePose>::encoding())
+        );
+        assert_eq!(decoded.payload_bytes(), expected_payload.as_slice());
     }
 
     #[test]

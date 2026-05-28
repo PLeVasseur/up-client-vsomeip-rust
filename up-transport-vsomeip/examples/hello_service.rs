@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::thread;
 use up_rust::{
-    PayloadEncoding, UFrameMetadata, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
+    PayloadEncoding, UFrameBuilder, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -57,15 +57,16 @@ impl UOwnedListener for ServiceRequestHandler {
         let Some(invoked_method) = frame.metadata().attributes().sink().cloned() else {
             return;
         };
-        let response = UOwnedFrame::new(
-            UFrameMetadata::response(
-                reply_to,
-                frame.metadata().attributes().id().clone(),
-                invoked_method,
-            )
-            .with_encoding(PayloadEncoding::from_content_type("text/plain")),
+        let response = UFrameBuilder::response(
+            reply_to,
+            frame.metadata().attributes().id().clone(),
+            invoked_method,
+        )
+        .build_with_payload(
             format!("The response to the request: {request}").into_bytes(),
-        );
+            PayloadEncoding::from_content_type("text/plain"),
+        )
+        .expect("response frame attributes should be valid");
 
         if let Some(transport) = self.transport.upgrade() {
             transport
