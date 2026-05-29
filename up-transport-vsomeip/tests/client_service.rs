@@ -98,20 +98,23 @@ impl UOwnedListener for RequestListener {
             .sink()
             .expect("Request frame has no invoked method")
             .clone();
-        let response_header = UFrameMetadata::response(
+        let response_header = UFrameMetadata::try_response(
             reply_to,
             frame.metadata().attributes().id().clone(),
             invoked_method,
         )
+        .expect("valid response metadata")
         .with_encoding(PayloadEncoding::from_content_type("text/plain"));
-        let response_header = UFrameMetadata::new(
+        let response_header = UFrameMetadata::try_new(
             response_header
                 .attributes()
                 .clone()
                 .with_comm_status(UCode::OK),
             response_header.encoding().cloned(),
-        );
-        let response_msg = UOwnedFrame::new(response_header, response_payload_bytes);
+        )
+        .expect("valid response metadata with commstatus");
+        let response_msg = UOwnedFrame::try_with_payload(response_header, response_payload_bytes)
+            .expect("valid response frame");
         if let Some(client) = self.client.upgrade() {
             let send_res = client.send_owned(response_msg).await;
             if let Err(err) = send_res {
@@ -122,11 +125,13 @@ impl UOwnedListener for RequestListener {
 }
 
 fn request_frame(method: UUri, reply_to: UUri, ttl: u32, payload: Vec<u8>) -> UOwnedFrame {
-    UOwnedFrame::new(
-        UFrameMetadata::request(method, reply_to, ttl)
+    UOwnedFrame::try_with_payload(
+        UFrameMetadata::try_request(method, reply_to, ttl)
+            .expect("valid request metadata")
             .with_encoding(PayloadEncoding::from_content_type("text/plain")),
         payload,
     )
+    .expect("valid request frame")
 }
 
 #[tokio::test(flavor = "multi_thread")]

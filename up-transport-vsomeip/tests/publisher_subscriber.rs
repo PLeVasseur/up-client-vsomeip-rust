@@ -57,13 +57,16 @@ impl UOwnedListener for SubscriberListener {
 }
 
 fn publish_frame(topic: UUri, payload: Vec<u8>) -> UOwnedFrame {
-    UOwnedFrame::new(
-        UFrameMetadata::new(
-            UAttributes::new(UUID::build(), topic, None, UMessageType::Publish),
+    UOwnedFrame::try_with_payload(
+        UFrameMetadata::try_new(
+            UAttributes::try_new(UUID::build(), topic, None, UMessageType::Publish)
+                .expect("valid publish attributes"),
             PayloadEncoding::from_content_type("text/plain"),
-        ),
+        )
+        .expect("valid publish metadata"),
         payload,
     )
+    .expect("valid publish frame")
 }
 
 pub async fn spawn_artifical_load(duration: Duration) {

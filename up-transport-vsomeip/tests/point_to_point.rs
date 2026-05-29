@@ -89,10 +89,13 @@ fn text_encoding() -> PayloadEncoding {
 }
 
 fn request_frame(method: UUri, reply_to: UUri, payload: Vec<u8>) -> UOwnedFrame {
-    UOwnedFrame::new(
-        UFrameMetadata::request(method, reply_to, 1000).with_encoding(text_encoding()),
+    UOwnedFrame::try_with_payload(
+        UFrameMetadata::try_request(method, reply_to, 1000)
+            .expect("valid request metadata")
+            .with_encoding(text_encoding()),
         payload,
     )
+    .expect("valid request frame")
 }
 
 fn response_frame(
@@ -101,11 +104,13 @@ fn response_frame(
     invoked_method: UUri,
     payload: Vec<u8>,
 ) -> UOwnedFrame {
-    UOwnedFrame::new(
-        UFrameMetadata::response(reply_to, request_id, invoked_method)
+    UOwnedFrame::try_with_payload(
+        UFrameMetadata::try_response(reply_to, request_id, invoked_method)
+            .expect("valid response metadata")
             .with_encoding(text_encoding()),
         payload,
     )
+    .expect("valid response frame")
 }
 
 pub struct PointToPointListener {

@@ -36,6 +36,11 @@ decoded.
 
 The `USIP` prefix is transport-native metadata, not a generated protobuf envelope. Application listeners receive a reconstructed `UOwnedFrame` whose payload excludes the prefix.
 
+Native-frame conformance coverage includes `USIP` prefix validation, standard and
+custom payload encoding preservation, stable-container metadata preservation as
+owned bytes, rejection of payload bytes without encoding metadata, and exact
+delivery of application payload bytes without exposing the prefix.
+
 Payload codecs are selected by the application. The transport forwards the serialized bytes and preserves the reconstructed `PayloadEncoding` for typed receive checks:
 
 ```rust

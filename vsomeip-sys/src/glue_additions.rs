@@ -556,11 +556,12 @@ impl PayloadWrapper {
     /// Returns `PayloadLengthError` instead of truncating when the Rust slice
     /// length cannot fit the `u32` length parameter expected by vSomeIP.
     ///
-    /// Safety invariant: this safe wrapper is sound only if the external C++
-    /// vSomeIP API copies `data` during `set_data` or otherwise does not retain
-    /// the borrowed Rust pointer after the call returns. Rust guarantees only
-    /// that the slice pointer is non-null, properly aligned for `u8`, and valid
-    /// for `length` bytes during the call.
+    /// Safety invariant: this safe wrapper is sound for the pinned COVESA
+    /// vSomeIP 3.4.10 API because `payload::set_data` copies `data` into
+    /// vSomeIP-owned payload storage during the call and does not retain the
+    /// borrowed Rust pointer after the call returns. Rust guarantees only that
+    /// the slice pointer is non-null, properly aligned for `u8`, and valid for
+    /// `length` bytes during the call.
     pub fn try_set_data_safe(&self, data: &[u8]) -> Result<(), PayloadLengthError> {
         let length = payload_len_u32(data.len())?;
 
@@ -574,8 +575,9 @@ impl PayloadWrapper {
         // SAFETY:
         // - `data_ptr` is derived from `data` and is valid for `length` bytes for
         //   the duration of this call.
-        // - External C++ contract: vsomeip copies the bytes during `set_data` or
-        //   otherwise does not retain `data_ptr` beyond the call.
+        // - External C++ contract pinned to COVESA vSomeIP 3.4.10:
+        //   `payload::set_data` copies the bytes into vSomeIP-owned payload
+        //   storage and does not retain `data_ptr` beyond the call.
         unsafe { self.get_pinned().set_data(data_ptr, length) };
         Ok(())
     }

@@ -377,13 +377,12 @@ impl VsomeipMessageToUFrame {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
     use up_rust::{UAttributes, UFrameMetadata, UMessageType, UUID};
 
     use super::*;
 
     fn frame_with_attributes(attributes: UAttributes) -> UOwnedFrame {
-        UOwnedFrame::new(UFrameMetadata::new(attributes, None), Bytes::new())
+        UOwnedFrame::without_payload_unchecked(UFrameMetadata::new_unchecked(attributes, None))
     }
 
     #[test]
@@ -393,7 +392,7 @@ mod tests {
         assert_ne!(instance_id, 1);
         let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
         let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
-        let frame = frame_with_attributes(UAttributes::new(
+        let frame = frame_with_attributes(UAttributes::new_unchecked(
             UUID::build(),
             source,
             None,
@@ -420,7 +419,7 @@ mod tests {
         let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
         let (_, event_id) = split_u32_to_u16(source.resource_id_raw());
         let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
-        let frame = frame_with_attributes(UAttributes::new(
+        let frame = frame_with_attributes(UAttributes::new_unchecked(
             UUID::build(),
             source,
             None,
@@ -449,7 +448,7 @@ mod tests {
         let (instance_id, service_id) = split_ue_id_to_instance_service(source.ue_id());
         let (_, method_id) = split_u32_to_u16(source.resource_id_raw());
         let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
-        let frame = frame_with_attributes(UAttributes::new(
+        let frame = frame_with_attributes(UAttributes::new_unchecked(
             UUID::build(),
             source,
             None,
@@ -479,7 +478,7 @@ mod tests {
         let (_, method_id) = split_u32_to_u16(source.resource_id_raw());
         let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major());
         let frame = frame_with_attributes(
-            UAttributes::new(UUID::build(), source, None, UMessageType::Response)
+            UAttributes::new_unchecked(UUID::build(), source, None, UMessageType::Response)
                 .with_comm_status(UCode::UNAVAILABLE),
         );
 

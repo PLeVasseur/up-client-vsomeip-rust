@@ -97,7 +97,8 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
     let permission_level = take_optional_u32(&mut bytes)?;
     let commstatus = take_optional_code(&mut bytes)?;
 
-    let mut attributes = UAttributes::new(id, source, sink, message_type).with_priority(priority);
+    let mut attributes =
+        UAttributes::new_unchecked(id, source, sink, message_type).with_priority(priority);
     if let Some(ttl) = ttl {
         attributes = attributes.with_ttl(ttl);
     }
@@ -117,11 +118,14 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
         attributes = attributes.with_comm_status(commstatus);
     }
 
-    let metadata = UFrameMetadata::new(attributes, encoding);
+    let metadata = UFrameMetadata::new_unchecked(attributes, encoding);
     if metadata.encoding().is_some() {
-        Ok(UOwnedFrame::new(metadata, Bytes::copy_from_slice(bytes)))
+        Ok(UOwnedFrame::with_payload_unchecked(
+            metadata,
+            Bytes::copy_from_slice(bytes),
+        ))
     } else if bytes.is_empty() {
-        Ok(UOwnedFrame::without_payload(metadata))
+        Ok(UOwnedFrame::without_payload_unchecked(metadata))
     } else {
         Err(UStatus::fail_with_code(
             UCode::INVALID_ARGUMENT,
@@ -422,7 +426,7 @@ mod tests {
         let sink = UUri::try_from("//service/B8000/1/0").unwrap();
         let request_id = UUID::build();
         let attributes =
-            UAttributes::new(UUID::build(), source, Some(sink), UMessageType::Response)
+            UAttributes::new_unchecked(UUID::build(), source, Some(sink), UMessageType::Response)
                 .with_priority(UPriority::CS4)
                 .with_ttl(1234)
                 .with_request_id(request_id)
@@ -430,8 +434,8 @@ mod tests {
                 .with_token("token")
                 .with_permission_level(9)
                 .with_comm_status(UCode::UNAVAILABLE);
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::new(
+        let frame = UOwnedFrame::with_payload_unchecked(
+            UFrameMetadata::new_unchecked(
                 attributes,
                 PayloadEncoding::custom("custom", "application/custom"),
             ),
@@ -454,8 +458,8 @@ mod tests {
     #[test]
     fn rejects_invalid_optional_marker_in_metadata() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source)
+        let frame = UOwnedFrame::with_payload_unchecked(
+            UFrameMetadata::publish_unchecked(source)
                 .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [1_u8, 2, 3].as_slice(),
         );
@@ -475,11 +479,15 @@ mod tests {
         let expired_id = UUID::from_u64_pair(0x018D_548E_A8E0_7000, 0x8000_0000_0000_0000)
             .expect("valid expired UUID");
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let attributes = UAttributes::new(expired_id, source, None, UMessageType::Publish)
-            .with_priority(UPriority::CS1)
-            .with_ttl(1);
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::new(attributes, PayloadEncoding::standard(UPayloadFormat::Raw)),
+        let attributes =
+            UAttributes::new_unchecked(expired_id, source, None, UMessageType::Publish)
+                .with_priority(UPriority::CS1)
+                .with_ttl(1);
+        let frame = UOwnedFrame::with_payload_unchecked(
+            UFrameMetadata::new_unchecked(
+                attributes,
+                PayloadEncoding::standard(UPayloadFormat::Raw),
+            ),
             [1_u8, 2, 3].as_slice(),
         );
 
@@ -494,7 +502,7 @@ mod tests {
         let mut value = StringValue::new();
         value.value = "protobuf payload".to_string();
         let frame = UOwnedFrame::from_serializable::<ProtobufPayload, _>(
-            UFrameMetadata::publish(source),
+            UFrameMetadata::try_publish(source).unwrap(),
             &value,
         )
         .unwrap();
@@ -516,7 +524,7 @@ mod tests {
         let pose = VehiclePose { x: 3, y: 5 };
         let frame =
             UOwnedFrame::from_payload_as::<StableContainerPayload<VehiclePose>, VehiclePose>(
-                UFrameMetadata::publish(source),
+                UFrameMetadata::try_publish(source).unwrap(),
                 &pose,
             )
             .unwrap();
@@ -534,11 +542,13 @@ mod tests {
     #[test]
     fn frame_payload_rejects_wrong_inner_payload_codec_after_decode() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source)
+        let frame = UOwnedFrame::try_with_payload(
+            UFrameMetadata::try_publish(source)
+                .unwrap()
                 .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [0x0a_u8].as_slice(),
-        );
+        )
+        .unwrap();
 
         let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
         let result = decoded.deserialize::<ProtobufPayload, StringValue>();
@@ -553,7 +563,8 @@ mod tests {
     #[test]
     fn frame_payload_round_trips_without_payload() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::without_payload(UFrameMetadata::publish(source));
+        let frame =
+            UOwnedFrame::try_without_payload(UFrameMetadata::try_publish(source).unwrap()).unwrap();
 
         let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
 
@@ -565,11 +576,13 @@ mod tests {
     #[test]
     fn frame_payload_round_trips_present_empty_payload() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::new(
-            UFrameMetadata::publish(source)
+        let frame = UOwnedFrame::try_with_payload(
+            UFrameMetadata::try_publish(source)
+                .unwrap()
                 .with_encoding(PayloadEncoding::standard(UPayloadFormat::Raw)),
             [].as_slice(),
-        );
+        )
+        .unwrap();
 
         let decoded = decode_frame_payload(encode_frame_payload(&frame).unwrap()).unwrap();
 
@@ -582,7 +595,8 @@ mod tests {
     #[test]
     fn rejects_payload_bytes_without_payload_encoding() {
         let source = UUri::try_from("//vehicle/A8000/2/8001").unwrap();
-        let frame = UOwnedFrame::without_payload(UFrameMetadata::publish(source));
+        let frame =
+            UOwnedFrame::try_without_payload(UFrameMetadata::try_publish(source).unwrap()).unwrap();
         let mut encoded = encode_frame_payload(&frame).unwrap();
         encoded.push(1);
 

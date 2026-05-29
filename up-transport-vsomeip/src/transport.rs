@@ -21,14 +21,14 @@ use log::trace;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use up_rust::{
-    transport::ComparableOwnedListener, validate_owned_frame_for_transport, LocalUriProvider,
-    UCode, UOwnedFrame, UOwnedListener, UOwnedTransport, UStatus, UUri,
+    transport::{ComparableOwnedListener, UOwnedTransportImpl, ValidatedOwnedFrame},
+    LocalUriProvider, UCode, UOwnedListener, UStatus, UUri,
 };
 
 #[async_trait]
-impl UOwnedTransport for UPTransportVsomeip {
-    async fn send_owned(&self, frame: UOwnedFrame) -> Result<(), UStatus> {
-        validate_owned_frame_for_transport(&frame)?;
+impl UOwnedTransportImpl for UPTransportVsomeip {
+    async fn send_validated_owned(&self, frame: ValidatedOwnedFrame) -> Result<(), UStatus> {
+        let frame = frame.into_inner();
         let attributes = frame.metadata().attributes();
         trace!("Sending native frame with attributes: {:?}", attributes);
 
@@ -65,7 +65,7 @@ impl UOwnedTransport for UPTransportVsomeip {
         Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_SEND_INTERNAL, rx).await
     }
 
-    async fn register_owned_listener(
+    async fn register_validated_owned_listener(
         &self,
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
@@ -114,7 +114,7 @@ impl UOwnedTransport for UPTransportVsomeip {
         Self::await_engine("register", rx).await
     }
 
-    async fn unregister_owned_listener(
+    async fn unregister_validated_owned_listener(
         &self,
         source_filter: &UUri,
         sink_filter: Option<&UUri>,
