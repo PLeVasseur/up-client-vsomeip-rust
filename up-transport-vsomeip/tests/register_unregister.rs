@@ -46,7 +46,7 @@ mod tests {
         )
         .unwrap();
 
-        let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
+        let source_filter = UUri::try_from_parts("foo", 0x01, 1, 0x8001).unwrap();
         let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -91,7 +91,7 @@ mod tests {
         )
         .unwrap();
 
-        let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
+        let source_filter = UUri::any();
         let sink_filter = UUri::try_from_parts("bar", 0x02, 1, 20).unwrap();
         let printing_helper: Arc<dyn UOwnedListener> = Arc::new(PrintingListener);
 

@@ -64,6 +64,10 @@ fn vsomeip_lib_path() -> Option<String> {
 }
 
 fn main() -> miette::Result<()> {
+    println!("cargo:rerun-if-env-changed=VSOMEIP_INSTALL_PATH");
+    println!("cargo:rerun-if-env-changed=GENERIC_CPP_STDLIB_PATH");
+    println!("cargo:rerun-if-env-changed=ARCH_SPECIFIC_CPP_STDLIB_PATH");
+
     #[cfg(feature = "bundled")]
     build::build();
 
