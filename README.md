@@ -25,7 +25,9 @@ Stable-container payloads are preserved as owned SOME/IP payload bytes plus nati
 `PayloadEncoding` metadata, including the `up.stable-container` custom encoding.
 The C++/SOME-IP path does not expose loan-backed typed stable-container
 borrowing; application code receives owned bytes after the `USIP` prefix is
-decoded.
+decoded. Receive decoding owns the vSomeIP payload buffer and slices the
+application payload out of that buffer without an additional payload-byte copy,
+but the result is still an owned frame rather than a receive lease.
 
 | uProtocol frame part | SOME/IP representation |
 | --- | --- |

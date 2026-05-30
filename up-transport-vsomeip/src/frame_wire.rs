@@ -119,11 +119,10 @@ pub(crate) fn decode_frame_payload(payload: Vec<u8>) -> Result<UOwnedFrame, USta
     }
 
     let metadata = UFrameMetadata::new_unchecked(attributes, encoding);
+    let payload_offset = payload.len() - bytes.len();
     if metadata.encoding().is_some() {
-        Ok(UOwnedFrame::with_payload_unchecked(
-            metadata,
-            Bytes::copy_from_slice(bytes),
-        ))
+        let payload = Bytes::from(payload).slice(payload_offset..);
+        Ok(UOwnedFrame::with_payload_unchecked(metadata, payload))
     } else if bytes.is_empty() {
         Ok(UOwnedFrame::without_payload_unchecked(metadata))
     } else {
