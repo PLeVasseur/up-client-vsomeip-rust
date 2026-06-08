@@ -83,7 +83,7 @@ impl InMemoryApplicationStateAvailabilityHandlerRegistry {
             Ok(id)
         } else {
             Err(UStatus::fail_with_code(
-                UCode::RESOURCE_EXHAUSTED,
+                UCode::ResourceExhausted,
                 "No more extern C fns available",
             ))
         }

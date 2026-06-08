@@ -161,7 +161,7 @@ impl UPTransportVsomeip {
     ) -> Result<Self, UStatus> {
         if !config_path.exists() {
             return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
+                UCode::NotFound,
                 format!("Configuration file not found at: {:?}", config_path),
             ));
         }
@@ -208,20 +208,9 @@ impl UPTransportVsomeip {
         config_path: Option<&Path>,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
-        let check_ue_version_major: Result<u8, _> = uri.ue_version_major.try_into();
-        if check_ue_version_major.is_err() {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                format!(
-                    "uri's ue_version_major doesn't fit allotted 8 bits: uri.ue_version_major: {}",
-                    uri.ue_version_major
-                ),
-            ));
-        }
-
         uri.verify_rpc_response().map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("uri provided to transport is incorrect: {e:?}"),
             )
         })?;
@@ -260,14 +249,14 @@ impl UPTransportVsomeip {
         match timeout(Duration::from_secs(crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT), rx).await {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 format!(
                     "Unable to receive status back from internal function: {}",
                     function_id
                 ),
             )),
             Err(_) => Err(UStatus::fail_with_code(
-                UCode::DEADLINE_EXCEEDED,
+                UCode::DeadlineExceeded,
                 format!(
                     "Unable to receive status back from internal function: {} within {} second window.",
                     function_id, crate::transport_engine::INTERNAL_FUNCTION_TIMEOUT
@@ -282,7 +271,7 @@ impl UPTransportVsomeip {
     ) -> Result<(), UStatus> {
         tx.send(transport_command).await.map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 format!(
                     "Unable to transmit request to internal vsomeip application handler, err: {:?}",
                     e
@@ -302,7 +291,7 @@ impl UPTransportVsomeip {
 
         let registration_type_res = determine_type(source_filter, &sink_filter.cloned());
         let Ok(registration_type) = registration_type_res else {
-            return Err(UStatus::fail_with_code(UCode::INVALID_ARGUMENT, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
+            return Err(UStatus::fail_with_code(UCode::InvalidArgument, "Invalid source and sink filters for registerable types: Publish, Request, Response, AllPointToPoint"));
         };
 
         if registration_type == RegistrationType::AllPointToPoint {
@@ -382,7 +371,7 @@ impl UPTransportVsomeip {
 
         let Some(msg_sink) = msg_sink else {
             return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 "Missing sink for message",
             ));
         };
@@ -409,12 +398,12 @@ impl UPTransportVsomeip {
                     }
                     GetMessageHandlerError::ListenerIdAlreadyExists(listener_id) => {
                         return Err(UStatus::fail_with_code(
-                            UCode::INTERNAL,
+                            UCode::Internal,
                             format!("listener_id already exists: {listener_id}"),
                         ));
                     }
                     GetMessageHandlerError::OtherError(s) => {
-                        return Err(UStatus::fail_with_code(UCode::INTERNAL, s));
+                        return Err(UStatus::fail_with_code(UCode::Internal, s));
                     }
                 },
             }
@@ -456,7 +445,7 @@ impl UPTransportVsomeip {
         let Some(config_path) = &self.config_path else {
             let err_msg = "No path to a vsomeip config file was provided";
             error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+            return Err(UStatus::fail_with_code(UCode::NotFound, err_msg));
         };
 
         let service_configs = extract_services(config_path)?;
@@ -466,7 +455,7 @@ impl UPTransportVsomeip {
             let mut point_to_point_listener = self.point_to_point_listener.write().unwrap();
             if point_to_point_listener.is_some() {
                 return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
+                    UCode::AlreadyExists,
                     "We already have a point-to-point UListener registered",
                 ));
             }
@@ -493,7 +482,7 @@ impl UPTransportVsomeip {
                 .get_message_handler(self.storage.clone(), listener_config)
             else {
                 return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
+                    UCode::Internal,
                     "Unable to get message handler for register_point_to_point_listener",
                 ));
             };
@@ -520,7 +509,7 @@ impl UPTransportVsomeip {
                 Self::await_engine(UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL, rx).await;
             if let Err(err) = internal_res {
                 return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
+                    UCode::Internal,
                     format!("Unable to register point to point listener: err: {err:?}"),
                 ));
             }
@@ -534,7 +523,7 @@ impl UPTransportVsomeip {
             let point_to_point_listener = self.point_to_point_listener.read().unwrap();
             let Some(ref point_to_point_listener) = *point_to_point_listener else {
                 return Err(UStatus::fail_with_code(
-                    UCode::ALREADY_EXISTS,
+                    UCode::AlreadyExists,
                     "No point-to-point listener found, we can't unregister it",
                 ));
             };
@@ -544,7 +533,7 @@ impl UPTransportVsomeip {
         let Some(config_path) = &self.config_path else {
             let err_msg = "No path to a vsomeip config file was provided";
             error!("{err_msg}");
-            return Err(UStatus::fail_with_code(UCode::NOT_FOUND, err_msg));
+            return Err(UStatus::fail_with_code(UCode::NotFound, err_msg));
         };
 
         let service_configs = extract_services(config_path)?;
@@ -653,7 +642,7 @@ impl UPTransportVsomeip {
             task::block_in_place(|| self.storage.get_runtime_handle().block_on(internal));
         if let Err(err) = internal_res {
             return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 format!("Unable to start app for app_name: {app_name}, err: {err:?}"),
             ));
         }

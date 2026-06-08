@@ -119,13 +119,7 @@ mod tests {
         test_lib::before_test();
 
         let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_response_test", 0x125);
-        let client_uri = UUri {
-            authority_name: "foo".to_string(),
-            ue_id: 10,
-            ue_version_major: 1,
-            resource_id: 0,
-            ..Default::default()
-        };
+        let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
         let client = UPTransportVsomeip::new(
             vsomeip_app_config,
             client_uri,
@@ -171,13 +165,7 @@ mod tests {
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 
-        let client_uri = UUri {
-            authority_name: "foo".to_string(),
-            ue_id: 10,
-            ue_version_major: 1,
-            resource_id: 0,
-            ..Default::default()
-        };
+        let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
         let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),

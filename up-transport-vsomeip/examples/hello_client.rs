@@ -18,8 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::communication::{CallOptions, InMemoryRpcClient, RpcClient, UPayload};
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY;
-use up_rust::{UStatus, UUri};
+use up_rust::{UPayloadFormat, UStatus, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
@@ -116,7 +115,7 @@ async fn main() -> Result<(), UStatus> {
         let hello_response_vsomeip_unspecified_payload_format = response.unwrap();
         let hello_response_protobuf_payload_format = UPayload::new(
             hello_response_vsomeip_unspecified_payload_format.payload(),
-            UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY,
+            UPayloadFormat::ProtobufWrappedInAny,
         );
 
         let Ok(hello_response) =

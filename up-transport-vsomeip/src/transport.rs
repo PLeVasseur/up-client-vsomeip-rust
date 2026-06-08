@@ -28,31 +28,22 @@ use up_rust::{
 #[async_trait]
 impl UTransport for UPTransportVsomeip {
     async fn send(&self, message: UMessage) -> Result<(), UStatus> {
-        let attributes = message.attributes.as_ref().ok_or(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
-            "Missing uAttributes",
-        ))?;
+        let attributes = message.attributes();
 
         // Validate UAttributes before conversion.
         UAttributesValidators::get_validator_for_attributes(attributes)
             .validate(attributes)
             .map_err(|e| {
                 UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
+                    UCode::InvalidArgument,
                     format!("Invalid uAttributes, err: {e:?}"),
                 )
             })?;
 
         trace!("Sending message with attributes: {:?}", attributes);
 
-        let Some(source_filter) = message.attributes.source.as_ref() else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "UMessage provided with no source",
-            ));
-        };
-
-        let sink_filter = message.attributes.sink.as_ref();
+        let source_filter = message.source();
+        let sink_filter = message.sink();
         let message_type = determine_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
 
@@ -107,7 +98,7 @@ impl UTransport for UPTransportVsomeip {
             .get_message_handler(self.storage.clone(), listener_config)
         else {
             return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 "Unable to get message handler for register_listener",
             ));
         };
@@ -148,7 +139,7 @@ impl UTransport for UPTransportVsomeip {
         _sink_filter: Option<&UUri>,
     ) -> Result<UMessage, UStatus> {
         Err(UStatus::fail_with_code(
-            UCode::UNIMPLEMENTED,
+            UCode::Unimplemented,
             "This method is not implemented for vsomeip. Use register_listener instead.",
         ))
     }
@@ -156,12 +147,10 @@ impl UTransport for UPTransportVsomeip {
 
 impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
-        self.storage.get_uri().authority_name
+        self.storage.get_uri().authority_name().to_string()
     }
     fn get_resource_uri(&self, resource_id: u16) -> UUri {
-        let mut resource_uri = self.storage.get_uri();
-        resource_uri.resource_id = resource_id as u32;
-        resource_uri
+        self.storage.get_uri().clone_with_resource_id(resource_id)
     }
     fn get_source_uri(&self) -> UUri {
         self.storage.get_uri()

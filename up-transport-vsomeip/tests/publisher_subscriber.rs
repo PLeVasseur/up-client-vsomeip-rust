@@ -43,11 +43,11 @@ impl UListener for SubscriberListener {
         trace!("{:?}", msg);
         self.received_publish.fetch_add(1, Ordering::SeqCst);
 
-        let Some(payload_bytes) = msg.payload else {
+        let Some(payload_bytes) = msg.payload() else {
             panic!("No bytes included in payload");
         };
 
-        let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
+        let Ok(payload_string) = std::str::from_utf8(payload_bytes) else {
             panic!("Unable to convert back to payload_string");
         };
 
@@ -142,7 +142,7 @@ async fn publisher_subscriber() {
         let publish_payload = publish_payload_string.into_bytes();
 
         let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone())
-            .build_with_payload(publish_payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+            .build_with_payload(publish_payload, UPayloadFormat::Text);
 
         let Ok(publish_msg) = publish_msg_res else {
             panic!(

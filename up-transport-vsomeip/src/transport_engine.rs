@@ -16,7 +16,7 @@ use crate::message_conversions::UMessageToVsomeipMessage;
 use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::utils::{split_u32_to_u16, split_u32_to_u8};
+use crate::utils::{split_u32_to_u16, uuri_ue_id};
 use crate::{ApplicationName, ClientId};
 use cxx::{let_cxx_string, UniquePtr};
 use log::{error, info, trace};
@@ -144,7 +144,7 @@ impl UPTransportVsomeipEngine {
             make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx));
         if application_wrapper.is_some() {
             return Err(UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
+                UCode::AlreadyExists,
                 format!("vsomeip app already exists with app_name: {app_name}"),
             ));
         }
@@ -177,7 +177,7 @@ impl UPTransportVsomeipEngine {
         };
         let Some(application_wrapper) = application_wrapper else {
             return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 "Unable to create vsomeip application",
             ));
         };
@@ -199,7 +199,7 @@ impl UPTransportVsomeipEngine {
                 runtime_wrapper.get_pinned().get_application(&app_name_cxx),
             ) else {
                 return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
+                    UCode::Internal,
                     format!("No app found for app_name: {}", app_name_start),
                 ));
             };
@@ -220,7 +220,7 @@ impl UPTransportVsomeipEngine {
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Err(err) => {
                 return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
+                    UCode::Internal,
                     format!("Timed out on waiting for application to start: {err:?}"),
                 ));
             }
@@ -272,7 +272,7 @@ impl UPTransportVsomeipEngine {
                     );
                     let Some(mut application_wrapper) = application_wrapper else {
                         let err = Err(UStatus::fail_with_code(
-                            UCode::INTERNAL,
+                            UCode::Internal,
                             format!("Application does not exist for app_name: {app_name}"),
                         ));
                         Self::return_oneshot_result(err, return_channel).await;
@@ -307,7 +307,7 @@ impl UPTransportVsomeipEngine {
                     );
                     let Some(application_wrapper) = application_wrapper else {
                         let err = Err(UStatus::fail_with_code(
-                            UCode::INTERNAL,
+                            UCode::Internal,
                             format!("Application does not exist for app_name: {app_name}"),
                         ));
                         Self::return_oneshot_result(err, return_channel).await;
@@ -353,7 +353,7 @@ impl UPTransportVsomeipEngine {
                     let Some(mut application_wrapper) = application_wrapper else {
                         let err = format!("No application exists for {app_name}",);
                         Self::return_oneshot_result(
-                            Err(UStatus::fail_with_code(UCode::INTERNAL, err)),
+                            Err(UStatus::fail_with_code(UCode::Internal, err)),
                             return_channel,
                         )
                         .await;
@@ -433,10 +433,10 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&source_filter));
                 // let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
                 let instance_id = 1;
-                let (_, event_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, event_id) = split_u32_to_u16(u32::from(source_filter.resource_id()));
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -501,15 +501,15 @@ impl UPTransportVsomeipEngine {
                 );
                 let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
+                        UCode::InvalidArgument,
                         "Unable to map source and sink filters to uProtocol message type",
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&sink_filter));
                 let instance_id = 1; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
-                let (_, _, _, major_version) = split_u32_to_u8(sink_filter.ue_version_major);
+                let (_, method_id) = split_u32_to_u16(u32::from(sink_filter.resource_id()));
+                let major_version = sink_filter.uentity_major_version();
 
                 trace!(
                     "{}:{} - register_message_handler: service: {} instance: {} method: {}",
@@ -561,9 +561,9 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
                 );
 
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&source_filter));
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(u32::from(source_filter.resource_id()));
 
                 if !vsomeip_offered_requested_registry.is_service_requested(
                     service_id,
@@ -609,7 +609,7 @@ impl UPTransportVsomeipEngine {
                 Ok(())
             }
             RegistrationType::AllPointToPoint => Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 "Should be impossible to register point-to-point internally",
             )),
         }
@@ -637,9 +637,9 @@ impl UPTransportVsomeipEngine {
                     UP_CLIENT_VSOMEIP_TAG,
                     UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
                 );
-                let (_, service_id) = split_u32_to_u16(source_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&source_filter));
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(source_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(u32::from(source_filter.resource_id()));
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
@@ -662,14 +662,14 @@ impl UPTransportVsomeipEngine {
                 );
                 let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
+                        UCode::InvalidArgument,
                         "Request doesn't contain sink",
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&sink_filter));
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(u32::from(sink_filter.resource_id()));
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
@@ -693,14 +693,14 @@ impl UPTransportVsomeipEngine {
                 );
                 let Some(sink_filter) = sink_filter else {
                     return Err(UStatus::fail_with_code(
-                        UCode::INVALID_ARGUMENT,
+                        UCode::InvalidArgument,
                         "Request doesn't contain sink",
                     ));
                 };
 
-                let (_, service_id) = split_u32_to_u16(sink_filter.ue_id);
+                let (_, service_id) = split_u32_to_u16(uuri_ue_id(&sink_filter));
                 let instance_id = vsomeip::ANY_INSTANCE; // TODO: Set this to 1? To ANY_INSTANCE?
-                let (_, method_id) = split_u32_to_u16(sink_filter.resource_id);
+                let (_, method_id) = split_u32_to_u16(u32::from(sink_filter.resource_id()));
 
                 application_wrapper.get_pinned().unregister_message_handler(
                     service_id,
@@ -717,7 +717,7 @@ impl UPTransportVsomeipEngine {
                 Ok(())
             }
             RegistrationType::AllPointToPoint => Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 "Should be impossible to unregister point-to-point internally",
             )),
         }
@@ -733,7 +733,7 @@ impl UPTransportVsomeipEngine {
         trace!("send_internal");
 
         let payload = {
-            if let Some(bytes) = umsg.payload.clone() {
+            if let Some(bytes) = umsg.payload() {
                 bytes.to_vec()
             } else {
                 Vec::new()
@@ -744,24 +744,14 @@ impl UPTransportVsomeipEngine {
         vsomeip_payload.set_data_safe(&payload);
         let attachable_payload = vsomeip_payload.get_shared_ptr();
 
-        match umsg
-            .attributes
-            .type_
-            .enum_value_or(UMessageType::UMESSAGE_TYPE_UNSPECIFIED)
-        {
-            UMessageType::UMESSAGE_TYPE_UNSPECIFIED => {
+        match umsg.type_() {
+            UMessageType::Notification => {
                 return Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
-                    "Unspecified message type not supported",
-                ));
-            }
-            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
-                return Err(UStatus::fail_with_code(
-                    UCode::INVALID_ARGUMENT,
+                    UCode::InvalidArgument,
                     "Notification is not supported",
                 ));
             }
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+            UMessageType::Publish => {
                 let (service_id, instance_id, event_id) =
                     UMessageToVsomeipMessage::umsg_publish_to_vsomeip_notification(
                         &umsg,
@@ -778,7 +768,7 @@ impl UPTransportVsomeipEngine {
                     true,
                 );
             }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
+            UMessageType::Request => {
                 let vsomeip_msg = UMessageToVsomeipMessage::umsg_request_to_vsomeip_message(
                     &umsg,
                     rpc_correlation_registry,
@@ -791,7 +781,7 @@ impl UPTransportVsomeipEngine {
                 let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
                 application_wrapper.get_pinned().send(shared_ptr_message);
             }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            UMessageType::Response => {
                 let vsomeip_msg = UMessageToVsomeipMessage::umsg_response_to_vsomeip_message(
                     &umsg,
                     rpc_correlation_registry,
@@ -857,7 +847,7 @@ impl UPTransportVsomeipEngine {
             make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
         else {
             return Err::<(), UStatus>(UStatus::fail_with_code(
-                UCode::INTERNAL,
+                UCode::Internal,
                 "No application exists",
             ));
         };

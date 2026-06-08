@@ -28,6 +28,7 @@ use crate::storage::{
     rpc_correlation::InMemoryRpcCorrelationRegistry,
     vsomeip_offered_requested::InMemoryVsomeipOfferedRequestedRegistry,
 };
+use crate::utils::uuri_ue_id;
 use crate::vsomeip_config::VsomeipApplicationConfig;
 use crate::{
     AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId, SomeIpRequestId,
@@ -81,7 +82,7 @@ impl UPTransportVsomeipStorage {
         self.runtime_handle.clone()
     }
     pub fn get_local_authority(&self) -> AuthorityName {
-        self.uri.authority_name.clone()
+        self.uri.authority_name().to_string()
     }
 
     pub fn get_remote_authority(&self) -> AuthorityName {
@@ -89,7 +90,7 @@ impl UPTransportVsomeipStorage {
     }
 
     pub fn get_ue_id(&self) -> UeId {
-        self.uri.ue_id
+        uuri_ue_id(&self.uri)
     }
 
     pub fn get_vsomeip_application_config(&self) -> VsomeipApplicationConfig {

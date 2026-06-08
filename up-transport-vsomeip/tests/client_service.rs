@@ -43,13 +43,8 @@ impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
         info!("Received Response:\n{:?}", msg);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
-            }
+        let Some(payload) = msg.payload() else {
+            panic!("Unable to retrieve bytes")
         };
 
         let payload_bytes = payload.to_vec();
@@ -87,13 +82,8 @@ impl UListener for RequestListener {
         self.received_request.fetch_add(1, Ordering::SeqCst);
         info!("Received Request:\n{:?}", msg);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
-            }
+        let Some(payload) = msg.payload() else {
+            panic!("Unable to retrieve bytes")
         };
 
         let payload_bytes = payload.to_vec();
@@ -106,9 +96,9 @@ impl UListener for RequestListener {
         let response_payload_string = format!("Here's a response to: {payload_string}");
         let response_payload_bytes = response_payload_string.into_bytes();
 
-        let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
-            .with_comm_status(UCode::OK)
-            .build_with_payload(response_payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+        let response_msg = UMessageBuilder::response_for_request(msg.attributes())
+            .with_comm_status(UCode::Ok)
+            .build_with_payload(response_payload_bytes, UPayloadFormat::Text);
         let Ok(response_msg) = response_msg else {
             panic!(
                 "Unable to create response_msg: {:?}",
@@ -251,7 +241,7 @@ async fn client_service() {
         let payload = payload_string.into_bytes();
         let request_msg_res_1_a =
             UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
-                .build_with_payload(payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+                .build_with_payload(payload, UPayloadFormat::Text);
 
         let Ok(request_msg_1_a) = request_msg_res_1_a else {
             panic!(

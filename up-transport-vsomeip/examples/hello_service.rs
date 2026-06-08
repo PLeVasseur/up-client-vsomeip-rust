@@ -21,8 +21,7 @@ use std::thread;
 use up_rust::communication::{
     InMemoryRpcServer, RequestHandler, RpcServer, ServiceInvocationError, UPayload,
 };
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY;
-use up_rust::{UAttributes, UCode, UStatus, UUri};
+use up_rust::{UAttributes, UCode, UPayloadFormat, UStatus, UUri};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
@@ -65,7 +64,7 @@ impl RequestHandler for ServiceRequestHandler {
         let hello_request_vsomeip_unspecified_payload_format = request_payload.unwrap();
         let hello_request_protobuf_payload_format = UPayload::new(
             hello_request_vsomeip_unspecified_payload_format.payload(),
-            UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY,
+            UPayloadFormat::ProtobufWrappedInAny,
         );
         let hello_request =
             hello_request_protobuf_payload_format.extract_protobuf::<HelloRequest>();
@@ -77,9 +76,8 @@ impl RequestHandler for ServiceRequestHandler {
             }
             Err(err) => {
                 error!("Unable to parse HelloRequest: {err:?}");
-                return Err(ServiceInvocationError::RpcError(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Unable to parse hello_request",
+                return Err(ServiceInvocationError::RpcError(Box::new(
+                    UStatus::fail_with_code(UCode::Internal, "Unable to parse hello_request"),
                 )));
             }
         };

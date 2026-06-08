@@ -12,16 +12,16 @@
  ********************************************************************************/
 
 use log::{error, info, trace};
-use protobuf::EnumOrUnknown;
 use std::env::current_dir;
 use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::UMessageType::UMESSAGE_TYPE_UNSPECIFIED;
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri, UUID};
+use up_rust::{
+    ProtobufMappable, UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri,
+    UUID,
+};
 use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 500;
@@ -30,58 +30,52 @@ const STREAMER_UE_ID: u32 = 0x9876;
 
 const CLIENT_AUTHORITY_NAME: &str = "foo";
 const CLIENT_UE_ID: u32 = 0x1234;
-const CLIENT_UE_VERSION_NUMBER: u32 = 1;
+const CLIENT_UE_VERSION_NUMBER: u8 = 1;
 
 const PTP_AUTHORITY_NAME: &str = "foo";
 const PTP_UE_ID: u32 = 0x2345;
-const PTP_UE_VERSION_NUMBER: u32 = 1;
-const PTP_METHOD_RESOURCE_ID: u32 = 0x0421;
+const PTP_UE_VERSION_NUMBER: u8 = 1;
+const PTP_METHOD_RESOURCE_ID: u16 = 0x0421;
 
 const SERVICE_AUTHORITY_NAME: &str = "foo";
 const SERVICE_UE_ID: u32 = 0x3456;
-const SERVICE_UE_VERSION_NUMBER: u32 = 1;
-const SERVICE_METHOD_RESOURCE_ID: u32 = 0x0421;
+const SERVICE_UE_VERSION_NUMBER: u8 = 1;
+const SERVICE_METHOD_RESOURCE_ID: u16 = 0x0421;
 
 const NON_POINT_TO_POINT_LISTENED_AUTHORITY: &str = "oops";
 
 fn client_reply_uuri() -> UUri {
-    UUri {
-        authority_name: CLIENT_AUTHORITY_NAME.to_string(),
-        ue_id: CLIENT_UE_ID,
-        ue_version_major: CLIENT_UE_VERSION_NUMBER,
-        resource_id: 0x0000,
-        ..Default::default()
-    }
+    UUri::try_from_parts(
+        CLIENT_AUTHORITY_NAME,
+        CLIENT_UE_ID,
+        CLIENT_UE_VERSION_NUMBER,
+        0x0000,
+    )
+    .unwrap()
 }
 
 fn ptp_reply_uuri() -> UUri {
-    UUri {
-        authority_name: PTP_AUTHORITY_NAME.to_string(),
-        ue_id: PTP_UE_ID,
-        ue_version_major: PTP_UE_VERSION_NUMBER,
-        resource_id: 0x0000,
-        ..Default::default()
-    }
+    UUri::try_from_parts(PTP_AUTHORITY_NAME, PTP_UE_ID, PTP_UE_VERSION_NUMBER, 0x0000).unwrap()
 }
 
 fn ptp_method_uuri() -> UUri {
-    UUri {
-        authority_name: PTP_AUTHORITY_NAME.to_string(),
-        ue_id: PTP_UE_ID,
-        ue_version_major: PTP_UE_VERSION_NUMBER,
-        resource_id: PTP_METHOD_RESOURCE_ID,
-        ..Default::default()
-    }
+    UUri::try_from_parts(
+        PTP_AUTHORITY_NAME,
+        PTP_UE_ID,
+        PTP_UE_VERSION_NUMBER,
+        PTP_METHOD_RESOURCE_ID,
+    )
+    .unwrap()
 }
 
 fn service_uuri() -> UUri {
-    UUri {
-        authority_name: SERVICE_AUTHORITY_NAME.to_string(),
-        ue_id: SERVICE_UE_ID,
-        ue_version_major: SERVICE_UE_VERSION_NUMBER,
-        resource_id: SERVICE_METHOD_RESOURCE_ID,
-        ..Default::default()
-    }
+    UUri::try_from_parts(
+        SERVICE_AUTHORITY_NAME,
+        SERVICE_UE_ID,
+        SERVICE_UE_VERSION_NUMBER,
+        SERVICE_METHOD_RESOURCE_ID,
+    )
+    .unwrap()
 }
 
 pub struct PointToPointListener {
@@ -112,36 +106,22 @@ impl UListener for PointToPointListener {
     async fn on_receive(&self, msg: UMessage) {
         info!("Received in point-to-point listener:\n{:?}", msg);
 
-        let received_source_authority = msg.attributes.source.clone().unwrap().authority_name;
+        let received_source_authority = msg.source().authority_name();
         if received_source_authority == NON_POINT_TO_POINT_LISTENED_AUTHORITY {
             panic!(
                 "Received a message on point to point listener that we should not have:\n{msg:?}"
             );
         }
 
-        match msg
-            .attributes
-            .type_
-            .enum_value_or(UMESSAGE_TYPE_UNSPECIFIED)
-        {
-            UMESSAGE_TYPE_UNSPECIFIED => {
-                panic!("Not supported message type: UNSPECIFIED:\n{:?}", msg);
-            }
-            UMessageType::UMESSAGE_TYPE_PUBLISH => {
+        match msg.type_() {
+            UMessageType::Publish => {
                 panic!("uProtocol PUBLISH received. This shouldn't happen!");
             }
-            UMessageType::UMESSAGE_TYPE_REQUEST => {
+            UMessageType::Request => {
                 trace!("PointToPointListener got a request");
                 self.received_request.fetch_add(1, Ordering::SeqCst);
 
-                let original_id = msg
-                    .attributes
-                    .as_ref()
-                    .unwrap()
-                    .id
-                    .as_ref()
-                    .unwrap()
-                    .clone();
+                let original_id = msg.id().clone();
 
                 info!(
                     "within point to point listener, original_id: {}",
@@ -167,22 +147,14 @@ impl UListener for PointToPointListener {
 
                 info!("Able to forward request");
             }
-            UMessageType::UMESSAGE_TYPE_RESPONSE => {
+            UMessageType::Response => {
                 trace!("PointToPointListener got a response: {:?}", msg);
                 self.received_response.fetch_add(1, Ordering::SeqCst);
 
-                let mut msg_with_correct_payload_format = msg.clone();
-                if let Some(attributes) = msg_with_correct_payload_format.attributes.as_mut() {
-                    attributes.payload_format = EnumOrUnknown::from(UPAYLOAD_FORMAT_PROTOBUF);
-                }
-
-                trace!(
-                    "corrected response with protobuf payload format: {:?}",
-                    msg_with_correct_payload_format
-                );
-
-                let original_id: Result<UUID, _> =
-                    msg_with_correct_payload_format.extract_protobuf();
+                let Some(payload) = msg.payload() else {
+                    panic!("No bytes included in payload");
+                };
+                let original_id = UUID::parse_from_protobuf_bytes(payload);
 
                 let original_id = {
                     match original_id {
@@ -221,7 +193,7 @@ impl UListener for PointToPointListener {
 
                 return;
             }
-            UMessageType::UMESSAGE_TYPE_NOTIFICATION => {
+            UMessageType::Notification => {
                 panic!("Not supported message type: NOTIFICATION");
             }
         }
@@ -276,14 +248,10 @@ impl UListener for RequestListener {
         self.received_request.fetch_add(1, Ordering::SeqCst);
         info!("Received Request:\n{:?}", msg);
 
-        let mut msg_with_correct_payload_format = msg.clone();
-        if let Some(attributes) = msg_with_correct_payload_format.attributes.as_mut() {
-            attributes.payload_format = EnumOrUnknown::from(UPAYLOAD_FORMAT_PROTOBUF);
-        }
-
-        info!("Corrected Request:\n{:?}", msg_with_correct_payload_format);
-
-        let original_id: Result<UUID, _> = msg_with_correct_payload_format.extract_protobuf();
+        let Some(payload) = msg.payload() else {
+            panic!("No bytes included in payload");
+        };
+        let original_id = UUID::parse_from_protobuf_bytes(payload);
 
         let original_id = {
             match original_id {
@@ -296,10 +264,9 @@ impl UListener for RequestListener {
 
         info!("original_id: {}", original_id.to_hyphenated_string());
 
-        let response_msg =
-            UMessageBuilder::response_for_request(&msg_with_correct_payload_format.attributes)
-                .with_comm_status(UCode::OK)
-                .build_with_protobuf_payload(&original_id);
+        let response_msg = UMessageBuilder::response_for_request(msg.attributes())
+            .with_comm_status(UCode::Ok)
+            .build_with_protobuf_payload(&original_id);
 
         info!("response_msg: {response_msg:?}");
 
@@ -319,9 +286,7 @@ impl UListener for RequestListener {
     }
 }
 fn any_from_authority(authority_name: &str) -> UUri {
-    let mut any_with_authority = UUri::any();
-    any_with_authority.authority_name = authority_name.to_string();
-    any_with_authority
+    UUri::try_from_parts(authority_name, 0xFFFF_FFFF, 0xFF, 0xFFFF).unwrap()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -467,7 +432,7 @@ async fn point_to_point() {
             UMessageBuilder::request(ptp_method_uuri(), client_reply_uuri(), 10000)
                 .build()
                 .unwrap();
-        trace!("Sending message from client: {request_msg_res}");
+        trace!("Sending message from client: {request_msg_res:?}");
         let send_res = client.send(request_msg_res.clone()).await;
 
         if let Err(err) = send_res {
