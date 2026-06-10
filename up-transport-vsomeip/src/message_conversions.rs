@@ -13,7 +13,9 @@
 
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::utils::{create_request_id, split_u32_to_u16, uuri_ue_id};
+use crate::utils::{
+    create_request_id, create_ue_id, split_u32_to_u16, split_ue_id_to_instance_service, uuri_ue_id,
+};
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
 use log::trace;
@@ -40,8 +42,7 @@ impl UMessageToVsomeipMessage {
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let source = umsg.source();
 
-        let (_instance_id, service_id) = split_u32_to_u16(uuri_ue_id(source));
-        let instance_id = 1; // TODO: Setting to 1 manually for now
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(source));
         let (_, event_id) = split_u32_to_u16(u32::from(source.resource_id()));
         let interface_version = source.uentity_major_version();
         trace!("uProtocol Publish message's interface_version: {interface_version}");
@@ -107,19 +108,18 @@ where {
         };
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
-        let (_instance_id, service_id) = split_u32_to_u16(uuri_ue_id(sink));
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(sink));
         trace!(
-            "{} - sink.ue_id: {} source.ue_id: {} _instance_id: {} service_id:{}",
+            "{} - sink.ue_id: {} source.ue_id: {} instance_id: {} service_id:{}",
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
             uuri_ue_id(sink),
             uuri_ue_id(source),
-            _instance_id,
+            instance_id,
             service_id
         );
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1; // TODO: Setting to 1 manually for now
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
@@ -166,11 +166,10 @@ where {
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_message(true));
 
-        let (_instance_id, service_id) = split_u32_to_u16(uuri_ue_id(source));
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(source));
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1; // TODO: Setting to 1 manually for now
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
@@ -213,17 +212,17 @@ where {
             session_id
         );
 
-        let (commstatus, vsomeip_msg_type) = {
-            if let Some(commstatus) = umsg.commstatus() {
-                (commstatus, message_type_e::MT_ERROR)
-            } else {
-                (UCode::Unimplemented, message_type_e::MT_RESPONSE)
-            }
+        let (return_code, vsomeip_msg_type) = match umsg.commstatus() {
+            Some(UCode::Ok) | None => (vsomeip::return_code_e::E_OK, message_type_e::MT_RESPONSE),
+            Some(commstatus) => (
+                Self::ucode_to_vsomeip_err_code(commstatus),
+                message_type_e::MT_ERROR,
+            ),
         };
 
         vsomeip_msg
             .get_message_base_pinned()
-            .set_return_code(Self::ucode_to_vsomeip_err_code(commstatus));
+            .set_return_code(return_code);
         vsomeip_msg
             .get_message_base_pinned()
             .set_message_type(vsomeip_msg_type);
@@ -343,7 +342,10 @@ impl VsomeipMessageToUMessage {
         trace!("MT_REQUEST type");
         let sink = UUri::try_from_parts(
             authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
@@ -415,7 +417,10 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
@@ -469,7 +474,10 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
@@ -524,7 +532,10 @@ impl VsomeipMessageToUMessage {
         let interface_version = 1;
         let source = UUri::try_from_parts(
             mechatronics_authority_name, // TODO: Should we set this to anything specific?
-            service_id as u32,           // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
