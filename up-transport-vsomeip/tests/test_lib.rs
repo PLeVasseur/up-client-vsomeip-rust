@@ -91,6 +91,7 @@ impl IsolatedVsomeipConfig {
     }
 }
 
+#[allow(dead_code)]
 pub struct PrintingListener;
 #[async_trait::async_trait]
 impl UListener for PrintingListener {
