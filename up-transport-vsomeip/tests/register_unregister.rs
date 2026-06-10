@@ -19,27 +19,26 @@ mod tests {
     use crate::test_lib::PrintingListener;
     use crate::{test_lib, UPTransportVsomeip};
     use log::error;
-    use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
     use up_rust::{UListener, UTransport, UUri};
-    use up_transport_vsomeip::VsomeipApplicationConfig;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_registering_unregistering_publish() {
         test_lib::before_test();
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_publish_test", 0x123);
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_publish");
+        let config = network.config("reg_unreg_publish_test", 0x0123);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
 
-        let source_filter = UUri::try_from_parts("foo", 0x01, 1, 10).unwrap();
+        let source_filter = UUri::try_from_parts("foo", 0x01, 1, 0x8001).unwrap();
         let printing_helper: Arc<dyn UListener> = Arc::new(PrintingListener);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -73,12 +72,13 @@ mod tests {
     async fn test_registering_unregistering_request() {
         test_lib::before_test();
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_request_test", 0x124);
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_request");
+        let config = network.config("reg_unreg_request_test", 0x0124);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
@@ -118,12 +118,13 @@ mod tests {
     async fn test_registering_unregistering_response() {
         test_lib::before_test();
 
-        let vsomeip_app_config = VsomeipApplicationConfig::new("reg_unreg_response_test", 0x125);
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_response");
+        let config = network.config("reg_unreg_response_test", 0x0125);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
-        let client = UPTransportVsomeip::new(
-            vsomeip_app_config,
+        let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
+            config.path(),
             None,
         )
         .unwrap();
@@ -165,11 +166,13 @@ mod tests {
     async fn test_registering_unregistering_all_point_to_point() {
         test_lib::before_test();
 
+        let network = test_lib::VsomeipTestNetwork::new("register_unregister_point_to_point");
+        let config = network.config_with_services("2345_app", 0x2345, &[(0x2345, 0x0001)]);
         let client_uri = UUri::try_from_parts("foo", 10, 1, 0).unwrap();
         let client = UPTransportVsomeip::new_with_config(
             client_uri,
             &"me_authority".to_string(),
-            Path::new("vsomeip_configs/point_to_point_integ.json"),
+            config.path(),
             None,
         )
         .unwrap();

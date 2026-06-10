@@ -11,13 +11,15 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+mod test_lib;
+
 use log::{info, trace};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
+use up_transport_vsomeip::UPTransportVsomeip;
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
@@ -50,6 +52,10 @@ impl UListener for SubscriberListener {
         let Ok(payload_string) = std::str::from_utf8(payload_bytes) else {
             panic!("Unable to convert back to payload_string");
         };
+        assert!(
+            payload_string == "warmup_publish" || payload_string.starts_with("publish_message@i="),
+            "unexpected application payload; possible framing leakage: {payload_string:?}"
+        );
 
         info!("We received payload_string: {payload_string}");
     }
@@ -68,7 +74,8 @@ pub async fn spawn_artifical_load(duration: Duration) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn publisher_subscriber() {
-    env_logger::init();
+    test_lib::before_test();
+    let network = test_lib::VsomeipTestNetwork::new("publisher_subscriber");
 
     let authority_name = "foo";
 
@@ -80,15 +87,14 @@ async fn publisher_subscriber() {
     let publisher_topic =
         UUri::try_from_parts(authority_name, ue_id, ue_version_major, resource_id).unwrap();
 
-    let vsomeip_application_config_subscriber =
-        VsomeipApplicationConfig::new("subscriber_app", 0x344);
+    let subscriber_config = network.config("subscriber_app", 0x0344);
     let subscriber_uri =
         UUri::try_from_parts(authority_name, subscriber_ue_id, ue_version_major, 0).unwrap();
 
-    let subscriber_res = UPTransportVsomeip::new(
-        vsomeip_application_config_subscriber,
+    let subscriber_res = UPTransportVsomeip::new_with_config(
         subscriber_uri,
         &"me_authority".to_string(),
+        subscriber_config.path(),
         None,
     );
 
@@ -111,13 +117,12 @@ async fn publisher_subscriber() {
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let vsomeip_application_config_publisher =
-        VsomeipApplicationConfig::new("publisher_app", 0x343);
+    let publisher_config = network.config("publisher_app", 0x0343);
     let publisher_uri = UUri::try_from_parts(authority_name, ue_id, 1, 0).unwrap();
-    let publisher_res = UPTransportVsomeip::new(
-        vsomeip_application_config_publisher,
+    let publisher_res = UPTransportVsomeip::new_with_config(
         publisher_uri,
         &"me_authority".to_string(),
+        publisher_config.path(),
         None,
     );
 
@@ -130,6 +135,17 @@ async fn publisher_subscriber() {
     });
 
     tokio::time::sleep(Duration::from_millis(500)).await;
+
+    publisher
+        .send(
+            UMessageBuilder::publish(publisher_topic.clone())
+                .build_with_payload(b"warmup_publish".to_vec(), UPayloadFormat::Text)
+                .expect("failed to create warm-up publish UMessage"),
+        )
+        .await
+        .expect("failed to send warm-up publish UMessage");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let baseline_received = subscriber_listener_check.received_publish();
 
     // Track the start time and set the duration for the loop
     let duration = Duration::from_millis(TEST_DURATION);
@@ -167,7 +183,8 @@ async fn publisher_subscriber() {
 
     let mut attempts = 0;
     const MAX_WAIT_ATTEMPTS: usize = 10;
-    while subscriber_listener_check.received_publish() < iterations && attempts < MAX_WAIT_ATTEMPTS
+    while subscriber_listener_check.received_publish() < baseline_received + iterations
+        && attempts < MAX_WAIT_ATTEMPTS
     {
         tokio::time::sleep(Duration::from_millis(200)).await;
         attempts += 1;
@@ -182,7 +199,9 @@ async fn publisher_subscriber() {
 
     assert_eq!(
         iterations,
-        subscriber_listener_check.received_publish(),
+        subscriber_listener_check
+            .received_publish()
+            .saturating_sub(baseline_received),
         "The number of messages received by the subscriber does not match the number sent."
     );
 }

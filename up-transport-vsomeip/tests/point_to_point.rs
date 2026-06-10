@@ -11,9 +11,9 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
+mod test_lib;
+
 use log::{error, info, trace};
-use std::env::current_dir;
-use std::fs::canonicalize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -291,14 +291,10 @@ fn any_from_authority(authority_name: &str) -> UUri {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn point_to_point() {
-    env_logger::init();
-
-    let current_dir = current_dir();
-    info!("{current_dir:?}");
-
-    let vsomeip_config_path = "vsomeip_configs/point_to_point_integ.json";
-    let abs_vsomeip_config_path = canonicalize(vsomeip_config_path).ok();
-    info!("abs_vsomeip_config_path: {abs_vsomeip_config_path:?}");
+    test_lib::before_test();
+    let network = test_lib::VsomeipTestNetwork::new("point_to_point");
+    let point_to_point_config =
+        network.config_with_services("2345_app", 0x2345, &[(0x2345, 0x0001)]);
 
     let point_to_point_uri =
         UUri::try_from_parts(PTP_AUTHORITY_NAME, STREAMER_UE_ID, 1, 0).unwrap();
@@ -306,7 +302,7 @@ async fn point_to_point() {
     let point_to_point_client_res = UPTransportVsomeip::new_with_config(
         point_to_point_uri,
         &PTP_AUTHORITY_NAME.to_string(),
-        &abs_vsomeip_config_path.unwrap(),
+        point_to_point_config.path(),
         None,
     );
     trace!("Initializing point to point: End");
@@ -343,15 +339,13 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let client_config = "vsomeip_configs/client.json";
-    let client_config = canonicalize(client_config).ok();
-    info!("client_config: {client_config:?}");
+    let client_config = network.config("837", 0x0345);
 
     let client_uri = UUri::try_from_parts(CLIENT_AUTHORITY_NAME, CLIENT_UE_ID, 1, 0).unwrap();
     let client_res = UPTransportVsomeip::new_with_config(
         client_uri,
         &CLIENT_AUTHORITY_NAME.to_string(),
-        &client_config.unwrap(),
+        client_config.path(),
         None,
     );
 
@@ -381,15 +375,13 @@ async fn point_to_point() {
 
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let service_config = "vsomeip_configs/service.json";
-    let service_config = canonicalize(service_config).ok();
-    info!("service_config: {service_config:?}");
+    let service_config = network.config("4660", 0x1234);
 
     let service_uri = UUri::try_from_parts(SERVICE_AUTHORITY_NAME, SERVICE_UE_ID, 1, 0).unwrap();
     let service_res = UPTransportVsomeip::new_with_config(
         service_uri,
         &SERVICE_AUTHORITY_NAME.to_string(),
-        &service_config.unwrap(),
+        service_config.path(),
         None,
     );
 
