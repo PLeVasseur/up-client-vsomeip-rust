@@ -154,7 +154,7 @@ impl UListener for PointToPointListener {
                 let Some(payload) = msg.payload() else {
                     panic!("No bytes included in payload");
                 };
-                let original_id = UUID::parse_from_protobuf_bytes(payload);
+                let original_id = UUID::parse_from_protobuf_bytes(&payload);
 
                 let original_id = {
                     match original_id {
@@ -251,7 +251,7 @@ impl UListener for RequestListener {
         let Some(payload) = msg.payload() else {
             panic!("No bytes included in payload");
         };
-        let original_id = UUID::parse_from_protobuf_bytes(payload);
+        let original_id = UUID::parse_from_protobuf_bytes(&payload);
 
         let original_id = {
             match original_id {

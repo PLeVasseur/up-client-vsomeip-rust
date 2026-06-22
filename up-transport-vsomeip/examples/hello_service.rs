@@ -63,7 +63,9 @@ impl RequestHandler for ServiceRequestHandler {
 
         let hello_request_vsomeip_unspecified_payload_format = request_payload.unwrap();
         let hello_request_protobuf_payload_format = UPayload::new(
-            hello_request_vsomeip_unspecified_payload_format.payload(),
+            hello_request_vsomeip_unspecified_payload_format
+                .payload()
+                .clone(),
             UPayloadFormat::ProtobufWrappedInAny,
         );
         let hello_request =

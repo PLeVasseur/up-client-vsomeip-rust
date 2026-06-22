@@ -114,7 +114,9 @@ async fn main() -> Result<(), UStatus> {
 
         let hello_response_vsomeip_unspecified_payload_format = response.unwrap();
         let hello_response_protobuf_payload_format = UPayload::new(
-            hello_response_vsomeip_unspecified_payload_format.payload(),
+            hello_response_vsomeip_unspecified_payload_format
+                .payload()
+                .clone(),
             UPayloadFormat::ProtobufWrappedInAny,
         );
 

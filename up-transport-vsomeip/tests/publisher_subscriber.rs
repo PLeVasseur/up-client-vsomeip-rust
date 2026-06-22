@@ -49,7 +49,7 @@ impl UListener for SubscriberListener {
             panic!("No bytes included in payload");
         };
 
-        let Ok(payload_string) = std::str::from_utf8(payload_bytes) else {
+        let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
             panic!("Unable to convert back to payload_string");
         };
         assert!(
