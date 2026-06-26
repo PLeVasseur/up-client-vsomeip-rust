@@ -51,6 +51,6 @@ regex = { version = "1.10" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 tokio = { version = "1.35.1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "tracing"] }
-up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "d00aa18f0dccee1b9271123cd546de62acfccab3", features = ["protobuf-support", "up-core-types", "up-l2-api", "up-l2-rpc-client", "up-l2-rpc-server"] }
+up-rust = { git = "https://github.com/PLeVasseur/up-rust.git", rev = "b16c4cdb7cfa4294ee3d13b5f151aabe228dbb32", features = ["protobuf-support", "up-core-types", "up-l2-api", "up-l2-rpc-client", "up-l2-rpc-server"] }
 vsomeip-proc-macro = { version = "0.4.0", path = "vsomeip-proc-macro" }
 vsomeip-sys = { version = "0.4.0", path = "vsomeip-sys", default-features = false }
