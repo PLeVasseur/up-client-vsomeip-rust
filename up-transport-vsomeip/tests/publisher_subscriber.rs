@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
@@ -43,6 +43,10 @@ impl SubscriberListener {
 impl UListener for SubscriberListener {
     async fn on_receive(&self, msg: UMessage) {
         trace!("{:?}", msg);
+        assert_eq!(
+            msg.attributes().payload_format(),
+            Some(UPayloadFormat::Protobuf)
+        );
         self.received_publish.fetch_add(1, Ordering::SeqCst);
 
         let Some(payload_bytes) = msg.payload() else {
@@ -91,11 +95,14 @@ async fn publisher_subscriber() {
     let subscriber_uri =
         UUri::try_from_parts(authority_name, subscriber_ue_id, ue_version_major, 0).unwrap();
 
-    let subscriber_res = UPTransportVsomeip::new_with_config(
+    let subscriber_res = UPTransportVsomeip::new_with_config_and_transport_config(
         subscriber_uri,
         &"me_authority".to_string(),
         subscriber_config.path(),
         None,
+        TransportConfig {
+            notification_payload_format: UPayloadFormat::Protobuf,
+        },
     );
 
     let Ok(subscriber) = subscriber_res else {

@@ -101,6 +101,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
 
                     let authority_name = transport_storage.get_local_authority();
                     let remote_authority_name = transport_storage.get_remote_authority();
+                    let notification_payload_format = transport_storage.get_notification_payload_format();
 
                     let transport_storage_clone = transport_storage.clone();
                     let uri = transport_storage.get_uri();
@@ -108,6 +109,7 @@ pub fn generate_message_handler_extern_c_fns(input: TokenStream) -> TokenStream 
                         &authority_name,
                         &uri,
                         &remote_authority_name,
+                        notification_payload_format,
                         transport_storage_clone,
                         &mut vsomeip_msg_wrapper,
                     )

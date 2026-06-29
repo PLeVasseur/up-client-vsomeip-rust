@@ -261,6 +261,7 @@ impl VsomeipMessageToUMessage {
         authority_name: &AuthorityName,
         self_uuri: &UUri,
         mechatronics_authority_name: &AuthorityName,
+        notification_payload_format: UPayloadFormat,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
     ) -> Result<UMessage, UStatus> {
@@ -291,6 +292,7 @@ impl VsomeipMessageToUMessage {
             message_type_e::MT_NOTIFICATION => {
                 Self::convert_vsomeip_mt_notification_to_umsg(
                     mechatronics_authority_name,
+                    notification_payload_format,
                     vsomeip_message,
                     payload_bytes,
                 )
@@ -519,6 +521,7 @@ impl VsomeipMessageToUMessage {
 
     async fn convert_vsomeip_mt_notification_to_umsg(
         mechatronics_authority_name: &AuthorityName,
+        payload_format: UPayloadFormat,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -546,8 +549,8 @@ impl VsomeipMessageToUMessage {
             )
         })?;
 
-        let umsg_res = UMessageBuilder::publish(source)
-            .build_with_payload(payload_bytes, UPayloadFormat::Unspecified);
+        let umsg_res =
+            UMessageBuilder::publish(source).build_with_payload(payload_bytes, payload_format);
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(

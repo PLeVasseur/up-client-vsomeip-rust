@@ -31,7 +31,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
-use up_rust::{ComparableListener, UCode, UListener, UStatus, UUri, UUID};
+use up_rust::{ComparableListener, UCode, UListener, UPayloadFormat, UStatus, UUri, UUID};
 use vsomeip_config::extract_application;
 pub use vsomeip_config::VsomeipApplicationConfig;
 
@@ -125,6 +125,19 @@ pub struct RuntimeConfig {
     num_threads: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransportConfig {
+    pub notification_payload_format: UPayloadFormat,
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            notification_payload_format: UPayloadFormat::Unspecified,
+        }
+    }
+}
+
 /// UTransport implementation over top of the C++ vsomeip library
 ///
 /// We hold a transport_inner internally which does the nitty-gritty
@@ -159,6 +172,22 @@ impl UPTransportVsomeip {
         config_path: &Path,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
+        Self::new_with_config_and_transport_config(
+            uri,
+            remote_authority_name,
+            config_path,
+            runtime_config,
+            TransportConfig::default(),
+        )
+    }
+
+    pub fn new_with_config_and_transport_config(
+        uri: UUri,
+        remote_authority_name: &AuthorityName,
+        config_path: &Path,
+        runtime_config: Option<RuntimeConfig>,
+        transport_config: TransportConfig,
+    ) -> Result<Self, UStatus> {
         if !config_path.exists() {
             return Err(UStatus::fail_with_code(
                 UCode::NotFound,
@@ -174,6 +203,7 @@ impl UPTransportVsomeip {
             remote_authority_name,
             Some(config_path),
             runtime_config,
+            transport_config,
         )
     }
 
@@ -191,12 +221,29 @@ impl UPTransportVsomeip {
         remote_authority_name: &AuthorityName,
         runtime_config: Option<RuntimeConfig>,
     ) -> Result<Self, UStatus> {
+        Self::new_with_transport_config(
+            vsomeip_application_config,
+            uri,
+            remote_authority_name,
+            runtime_config,
+            TransportConfig::default(),
+        )
+    }
+
+    pub fn new_with_transport_config(
+        vsomeip_application_config: VsomeipApplicationConfig,
+        uri: UUri,
+        remote_authority_name: &AuthorityName,
+        runtime_config: Option<RuntimeConfig>,
+        transport_config: TransportConfig,
+    ) -> Result<Self, UStatus> {
         Self::new_internal(
             vsomeip_application_config,
             uri,
             remote_authority_name,
             None,
             runtime_config,
+            transport_config,
         )
     }
 
@@ -207,6 +254,7 @@ impl UPTransportVsomeip {
         remote_authority_name: &AuthorityName,
         config_path: Option<&Path>,
         runtime_config: Option<RuntimeConfig>,
+        transport_config: TransportConfig,
     ) -> Result<Self, UStatus> {
         uri.verify_rpc_response().map_err(|e| {
             UStatus::fail_with_code(
@@ -223,6 +271,7 @@ impl UPTransportVsomeip {
             uri.clone(),
             remote_authority_name.clone(),
             runtime_handle.clone(),
+            transport_config,
         ));
 
         let engine = UPTransportVsomeipEngine::new(uri, config_path);

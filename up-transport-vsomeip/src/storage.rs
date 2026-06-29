@@ -32,12 +32,12 @@ use crate::utils::uuri_ue_id;
 use crate::vsomeip_config::VsomeipApplicationConfig;
 use crate::{
     AuthorityName, ClientId, EventId, InstanceId, MethodId, ServiceId, SessionId, SomeIpRequestId,
-    UProtocolReqId, UeId,
+    TransportConfig, UProtocolReqId, UeId,
 };
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::{ComparableListener, UListener, UStatus, UUri};
+use up_rust::{ComparableListener, UListener, UPayloadFormat, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
@@ -45,6 +45,7 @@ pub struct UPTransportVsomeipStorage {
     vsomeip_application_config: VsomeipApplicationConfig,
     uri: UUri,
     remote_authority: AuthorityName,
+    transport_config: TransportConfig,
     runtime_handle: Handle,
     message_handler_registry: Arc<InMemoryMessageHandlerRegistry>,
     application_state_handler_registry: Arc<InMemoryApplicationStateAvailabilityHandlerRegistry>,
@@ -58,6 +59,7 @@ impl UPTransportVsomeipStorage {
         uri: UUri,
         remote_authority: AuthorityName,
         runtime_handle: Handle,
+        transport_config: TransportConfig,
     ) -> Self {
         let application_state_handler_registry =
             InMemoryApplicationStateAvailabilityHandlerRegistry::new_trait_obj();
@@ -66,6 +68,7 @@ impl UPTransportVsomeipStorage {
             vsomeip_application_config,
             uri,
             remote_authority,
+            transport_config,
             runtime_handle,
             message_handler_registry: Arc::new(InMemoryMessageHandlerRegistry::new()),
             application_state_handler_registry,
@@ -87,6 +90,10 @@ impl UPTransportVsomeipStorage {
 
     pub fn get_remote_authority(&self) -> AuthorityName {
         self.remote_authority.clone()
+    }
+
+    pub fn get_notification_payload_format(&self) -> UPayloadFormat {
+        self.transport_config.notification_payload_format
     }
 
     pub fn get_ue_id(&self) -> UeId {
