@@ -375,7 +375,7 @@ impl VsomeipMessageToUMessage {
         trace!("Prior to building Request");
 
         let umsg_res = UMessageBuilder::request(sink, source, ttl)
-            .build_with_payload(payload_bytes, UPayloadFormat::Unspecified);
+            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
 
         trace!("After building Request");
 
@@ -442,7 +442,7 @@ impl VsomeipMessageToUMessage {
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(UCode::Ok)
-            .build_with_payload(payload_bytes, UPayloadFormat::Unspecified);
+            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
@@ -502,7 +502,7 @@ impl VsomeipMessageToUMessage {
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(comm_status)
-            .build_with_payload(payload_bytes, UPayloadFormat::Unspecified);
+            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(

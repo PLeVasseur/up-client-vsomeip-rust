@@ -19,8 +19,8 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
 use up_rust::{
-    ProtobufMappable, UCode, UListener, UMessage, UMessageBuilder, UMessageType, UTransport, UUri,
-    UUID,
+    ProtobufMappable, UCode, UListener, UMessage, UMessageBuilder, UMessageType, UPayloadFormat,
+    UTransport, UUri, UUID,
 };
 use up_transport_vsomeip::UPTransportVsomeip;
 
@@ -119,6 +119,10 @@ impl UListener for PointToPointListener {
             }
             UMessageType::Request => {
                 trace!("PointToPointListener got a request");
+                assert_eq!(
+                    msg.attributes().payload_format(),
+                    Some(UPayloadFormat::Protobuf)
+                );
                 self.received_request.fetch_add(1, Ordering::SeqCst);
 
                 let original_id = msg.id().clone();
@@ -149,6 +153,10 @@ impl UListener for PointToPointListener {
             }
             UMessageType::Response => {
                 trace!("PointToPointListener got a response: {:?}", msg);
+                assert_eq!(
+                    msg.attributes().payload_format(),
+                    Some(UPayloadFormat::Protobuf)
+                );
                 self.received_response.fetch_add(1, Ordering::SeqCst);
 
                 let Some(payload) = msg.payload() else {
@@ -247,6 +255,10 @@ impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
         self.received_request.fetch_add(1, Ordering::SeqCst);
         info!("Received Request:\n{:?}", msg);
+        assert_eq!(
+            msg.attributes().payload_format(),
+            Some(UPayloadFormat::Protobuf)
+        );
 
         let Some(payload) = msg.payload() else {
             panic!("No bytes included in payload");
