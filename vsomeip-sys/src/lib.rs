@@ -94,8 +94,21 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    static VSOMEIP_SYS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn stop_application(app_name: &str) {
+        let runtime_wrapper = make_runtime_wrapper(runtime::get());
+        let_cxx_string!(app_name_cxx = app_name);
+        if let Some(app_wrapper) =
+            make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
+        {
+            app_wrapper.get_pinned().stop();
+        }
+    }
+
     #[test]
     fn test_make_runtime() {
+        let _guard = VSOMEIP_SYS_TEST_LOCK.lock().unwrap();
         let my_runtime = runtime::get();
         let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
@@ -157,10 +170,10 @@ mod tests {
 
     #[test]
     fn test_available_state_handler() {
+        let _guard = VSOMEIP_SYS_TEST_LOCK.lock().unwrap();
         // Create a globally accessible sender
         lazy_static! {
             static ref SENDER: Mutex<Option<Sender<state_type_e>>> = Mutex::new(None);
-            static ref RECEIVER: Mutex<Option<Receiver<state_type_e>>> = Mutex::new(None);
         }
         // in production code we'll probably have to have a registry of channel receivers
         // tied to specific available_state_handler_i which we look up and get in the controlling thread
@@ -168,7 +181,25 @@ mod tests {
             println!("available_state: {available_state:?}");
 
             if let Some(ref tx) = *SENDER.lock().unwrap() {
-                tx.send(available_state).unwrap();
+                let _ = tx.send(available_state);
+            }
+        }
+
+        fn wait_for_state(
+            rx: &Receiver<state_type_e>,
+            expected: state_type_e,
+            timeout: Duration,
+        ) -> bool {
+            let deadline = Instant::now() + timeout;
+            loop {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    return false;
+                };
+                match rx.recv_timeout(remaining) {
+                    Ok(state) if state == expected => return true,
+                    Ok(_) => continue,
+                    Err(_) => return false,
+                }
             }
         }
 
@@ -179,61 +210,11 @@ mod tests {
 
         // Store the sender and receiver in the global variables
         *SENDER.lock().unwrap() = Some(tx);
-        *RECEIVER.lock().unwrap() = Some(rx);
-
-        let app_name_check = app_name.to_string();
-        let handle = thread::spawn(move || {
-            let my_runtime = runtime::get();
-            let runtime_wrapper = make_runtime_wrapper(my_runtime);
-
-            let_cxx_string!(app_name_cxx = app_name_check);
-
-            if make_application_wrapper(runtime_wrapper.get_pinned().get_application(&app_name_cxx))
-                .is_some()
-            {
-                panic!("Application had started");
-            } else {
-                println!("Application not started yet");
-            }
-
-            let binding = RECEIVER.lock().unwrap();
-            let rx = binding.as_ref().unwrap();
-
-            while let Ok(msg) = rx.recv_timeout(Duration::from_secs(5)) {
-                println!("Received: {:?}", msg);
-
-                match msg {
-                    state_type_e::ST_REGISTERED => {
-                        if make_application_wrapper(
-                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
-                        )
-                        .is_some()
-                        {
-                            println!("Application had started");
-                        } else {
-                            panic!("Application not started yet");
-                        }
-                    }
-                    state_type_e::ST_DEREGISTERED => {
-                        println!("After stopping app, in theory:");
-                        if make_application_wrapper(
-                            runtime_wrapper.get_pinned().get_application(&app_name_cxx),
-                        )
-                        .is_some()
-                        {
-                            panic!("Application still running");
-                        } else {
-                            println!("Application has stopped");
-                        }
-                    }
-                }
-            }
-        });
 
         thread::sleep(Duration::from_millis(500));
 
         let app_name_start = app_name.to_string();
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let my_runtime = runtime::get();
             let runtime_wrapper = make_runtime_wrapper(my_runtime);
 
@@ -249,29 +230,40 @@ mod tests {
             let state_handler = AvailableStateHandlerFnPtr(available_state_handler);
             app_wrapper.register_state_handler_fn_ptr_safe(state_handler);
             app_wrapper.get_pinned().start();
-
-            thread::sleep(Duration::from_millis(500));
-
-            app_wrapper.get_pinned().stop();
         });
 
-        let _ = handle.join();
+        assert!(
+            wait_for_state(&rx, state_type_e::ST_REGISTERED, Duration::from_secs(5)),
+            "application did not reach registered state"
+        );
+        stop_application(app_name);
+        *SENDER.lock().unwrap() = None;
+        handle.join().expect("vSomeIP app thread panicked");
     }
 
     #[test]
     fn test_service_availability_handler() {
+        let _guard = VSOMEIP_SYS_TEST_LOCK.lock().unwrap();
         lazy_static! {
             static ref TIMES_MESSAGE_RECEIVED: AtomicUsize = AtomicUsize::new(0);
             static ref PAIR: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
         }
 
-        fn wait_for_service_available() {
+        TIMES_MESSAGE_RECEIVED.store(0, Ordering::SeqCst);
+        *PAIR.0.lock().unwrap() = false;
+
+        fn wait_for_service_available(timeout: Duration) -> bool {
             let (lock, cvar) = &*PAIR;
             let mut started = lock.lock().unwrap();
             while !*started {
-                started = cvar.wait(started).unwrap();
+                let (guard, result) = cvar.wait_timeout(started, timeout).unwrap();
+                started = guard;
+                if result.timed_out() {
+                    return false;
+                }
             }
             println!("The bool has changed to true!");
+            true
         }
 
         fn set_service_available() {
@@ -310,7 +302,7 @@ mod tests {
         let_cxx_string!(app_name_subscriber_cxx = app_name_subscriber);
 
         let app_name_publisher_start = app_name_publisher.to_string();
-        thread::spawn(|| {
+        let publisher_handle = thread::spawn(|| {
             let runtime_wrapper = make_runtime_wrapper(runtime::get());
 
             let_cxx_string!(app_name_cxx = app_name_publisher_start);
@@ -328,7 +320,7 @@ mod tests {
         });
 
         let app_name_subscriber_start = app_name_subscriber.to_string();
-        thread::spawn(|| {
+        let subscriber_handle = thread::spawn(|| {
             let runtime_wrapper = make_runtime_wrapper(runtime::get());
 
             let_cxx_string!(app_name_cxx = app_name_subscriber_start);
@@ -406,25 +398,27 @@ mod tests {
 
         publisher_app_wrapper.offer_single_event_safe(service_id, instance_id, event_id, event_id);
 
-        wait_for_service_available();
+        let service_available = wait_for_service_available(Duration::from_secs(5));
 
-        // Track the start time and set the duration for the loop
-        let duration = Duration::from_millis(test_duration);
-        let start_time = Instant::now();
+        if service_available {
+            // Track the start time and set the duration for the loop
+            let duration = Duration::from_millis(test_duration);
+            let start_time = Instant::now();
 
-        while Instant::now().duration_since(start_time) < duration {
-            let vsomeip_payload =
-                make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
-            let payload = [1, 2, 3, 4];
-            vsomeip_payload.set_data_safe(&payload);
-            let attachable_payload = vsomeip_payload.get_shared_ptr();
-            publisher_app_wrapper.get_pinned().notify(
-                service_id,
-                instance_id,
-                event_id,
-                attachable_payload,
-                true,
-            );
+            while Instant::now().duration_since(start_time) < duration {
+                let vsomeip_payload =
+                    make_payload_wrapper(runtime_wrapper.get_pinned().create_payload());
+                let payload = [1, 2, 3, 4];
+                vsomeip_payload.set_data_safe(&payload);
+                let attachable_payload = vsomeip_payload.get_shared_ptr();
+                publisher_app_wrapper.get_pinned().notify(
+                    service_id,
+                    instance_id,
+                    event_id,
+                    attachable_payload,
+                    true,
+                );
+            }
         }
 
         thread::sleep(Duration::from_millis(500));
@@ -435,5 +429,14 @@ mod tests {
         // TODO: It seems like checking if the service is up is not enough.
         //  May unfortunately need to leave the sleep for now
         // assert_eq!(iterations, times_message_received);
+        publisher_app_wrapper.get_pinned().stop();
+        subscriber_app_wrapper.get_pinned().stop();
+        publisher_handle
+            .join()
+            .expect("publisher vSomeIP app thread panicked");
+        subscriber_handle
+            .join()
+            .expect("subscriber vSomeIP app thread panicked");
+        assert!(service_available, "service did not become available");
     }
 }
