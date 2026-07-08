@@ -31,7 +31,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tokio::task;
 use tokio::time::timeout;
-use up_rust::{ComparableListener, UCode, UListener, UPayloadFormat, UStatus, UUri, UUID};
+use up_rust::{ComparableListener, PayloadEncoding, UCode, UListener, UStatus, UUri, UUID};
 use vsomeip_config::extract_application;
 pub use vsomeip_config::VsomeipApplicationConfig;
 
@@ -127,13 +127,21 @@ pub struct RuntimeConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransportConfig {
-    pub notification_payload_format: UPayloadFormat,
+    pub assumed_payload_encoding: PayloadEncoding,
+}
+
+impl TransportConfig {
+    pub fn new(assumed_payload_encoding: PayloadEncoding) -> Self {
+        Self {
+            assumed_payload_encoding,
+        }
+    }
 }
 
 impl Default for TransportConfig {
     fn default() -> Self {
         Self {
-            notification_payload_format: UPayloadFormat::Unspecified,
+            assumed_payload_encoding: PayloadEncoding::PROTOBUF,
         }
     }
 }

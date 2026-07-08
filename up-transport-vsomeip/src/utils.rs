@@ -30,6 +30,14 @@ pub fn create_ue_id(instance_id: u16, service_id: u16) -> UeId {
     ((instance_id as UeId) << 16) | service_id as UeId
 }
 
+pub fn create_ue_id_from_instance_service(instance_id: u16, service_id: u16) -> UeId {
+    if instance_id == 1 {
+        service_id as UeId
+    } else {
+        create_ue_id(instance_id, service_id)
+    }
+}
+
 /// Create a vsomeip request_id from client_id and session_id as per SOME/IP spec
 pub fn create_request_id(client_id: ClientId, session_id: SessionId) -> SomeIpRequestId {
     ((client_id as u32) << 16) | (session_id as u32)
@@ -52,5 +60,11 @@ mod tests {
     #[test]
     fn create_ue_id_combines_instance_and_service() {
         assert_eq!(create_ue_id(0x0002, 0xabcd), 0x0002_abcd);
+    }
+
+    #[test]
+    fn create_ue_id_from_instance_service_compacts_default_instance() {
+        assert_eq!(create_ue_id_from_instance_service(0x0001, 0xabcd), 0xabcd);
+        assert_eq!(create_ue_id_from_instance_service(0x0002, 0xabcd), 0x0002_abcd);
     }
 }

@@ -21,8 +21,8 @@ use log::trace;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use up_rust::{
-    ComparableListener, LocalUriProvider, UAttributesValidators, UCode, UListener, UMessage,
-    UStatus, UTransport, UUri,
+    ComparableListener, LocalUriProvider, PayloadEncoding, UAttributesValidators, UCode, UListener,
+    UMessage, UMessageType, UPayloadFormat, UStatus, UTransport, UUri,
 };
 
 #[async_trait]
@@ -46,6 +46,13 @@ impl UTransport for UPTransportVsomeip {
         let sink_filter = message.sink();
         let message_type = determine_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
+
+        if message.type_() != UMessageType::Notification {
+            validate_payload_encoding_matches_assumption(
+                &message,
+                &self.storage.get_assumed_payload_encoding(),
+            )?;
+        }
 
         let app_name = self.storage.get_vsomeip_application_config().name;
 
@@ -145,6 +152,60 @@ impl UTransport for UPTransportVsomeip {
     }
 }
 
+fn validate_payload_encoding_matches_assumption(
+    message: &UMessage,
+    assumed_payload_encoding: &PayloadEncoding,
+) -> Result<(), UStatus> {
+    if message.payload().is_none() {
+        return Ok(());
+    }
+
+    let attributes = message.attributes();
+    let payload_format = attributes.payload_format();
+    let (registry_id, literal_id, content_type) = attributes.open_payload_encoding_parts();
+
+    let declared_payload_encoding = match (payload_format, registry_id, literal_id, content_type) {
+        (None | Some(UPayloadFormat::Unspecified), None, None, None) => {
+            return Err(UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                format!(
+                    "payload-bearing SOME/IP message does not declare payload encoding; expected `{}`",
+                    assumed_payload_encoding.describe()
+                ),
+            ));
+        }
+        (Some(format), None, None, None) => PayloadEncoding::try_from_legacy_format(format)
+            .map_err(|error| UStatus::fail_with_code(UCode::InvalidArgument, error.to_string()))?,
+        (None | Some(UPayloadFormat::Unspecified), registry_id, literal_id, content_type) => {
+            PayloadEncoding::from_parts(
+                registry_id,
+                literal_id.map(str::to_owned),
+                content_type.map(str::to_owned),
+            )
+            .map_err(|error| UStatus::fail_with_code(UCode::InvalidArgument, error.to_string()))?
+        }
+        _ => {
+            return Err(UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                "payload-bearing SOME/IP message declares both legacy payload_format and open payload encoding",
+            ));
+        }
+    };
+
+    if declared_payload_encoding != *assumed_payload_encoding {
+        return Err(UStatus::fail_with_code(
+            UCode::InvalidArgument,
+            format!(
+                "payload encoding `{}` does not match configured SOME/IP assumed payload encoding `{}`",
+                declared_payload_encoding.describe(),
+                assumed_payload_encoding.describe()
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
 impl LocalUriProvider for UPTransportVsomeip {
     fn get_authority(&self) -> String {
         self.storage.get_uri().authority_name().to_string()
@@ -154,5 +215,77 @@ impl LocalUriProvider for UPTransportVsomeip {
     }
     fn get_source_uri(&self) -> UUri {
         self.storage.get_uri()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use up_rust::UMessageBuilder;
+
+    fn topic() -> UUri {
+        UUri::try_from_parts("authority", 0x1234, 1, 0x8001).unwrap()
+    }
+
+    #[test]
+    fn validate_payload_encoding_accepts_matching_legacy_encoding() {
+        let message = UMessageBuilder::publish(topic())
+            .build_with_payload("payload", UPayloadFormat::Text)
+            .unwrap();
+
+        validate_payload_encoding_matches_assumption(&message, &PayloadEncoding::TEXT).unwrap();
+    }
+
+    #[test]
+    fn validate_payload_encoding_accepts_matching_open_encoding() {
+        let encoding =
+            PayloadEncoding::custom("up.xcdr-v2", "application/vnd.uprotocol.xcdr-v2").unwrap();
+        let message = UMessageBuilder::publish(topic())
+            .build_with_payload_encoding(vec![1, 2, 3, 4], encoding.clone())
+            .unwrap();
+
+        validate_payload_encoding_matches_assumption(&message, &encoding).unwrap();
+    }
+
+    #[test]
+    fn validate_payload_encoding_rejects_mismatch() {
+        let message = UMessageBuilder::publish(topic())
+            .build_with_payload("payload", UPayloadFormat::Text)
+            .unwrap();
+
+        let error =
+            validate_payload_encoding_matches_assumption(&message, &PayloadEncoding::PROTOBUF)
+                .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not match configured SOME/IP assumed payload encoding"),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn validate_payload_encoding_rejects_undeclared_payload() {
+        let message = UMessageBuilder::publish(topic())
+            .build_with_payload("payload", UPayloadFormat::Unspecified)
+            .unwrap();
+
+        let error = validate_payload_encoding_matches_assumption(&message, &PayloadEncoding::TEXT)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not declare payload encoding"),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn validate_payload_encoding_allows_payloadless_message() {
+        let message = UMessageBuilder::publish(topic()).build().unwrap();
+
+        validate_payload_encoding_matches_assumption(&message, &PayloadEncoding::TEXT).unwrap();
     }
 }

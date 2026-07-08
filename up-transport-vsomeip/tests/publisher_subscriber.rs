@@ -18,7 +18,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
+use up_rust::{
+    PayloadEncoding, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri,
+};
 use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const TEST_DURATION: u64 = 2000;
@@ -45,7 +47,7 @@ impl UListener for SubscriberListener {
         trace!("{:?}", msg);
         assert_eq!(
             msg.attributes().payload_format(),
-            Some(UPayloadFormat::Protobuf)
+            Some(UPayloadFormat::Text)
         );
         self.received_publish.fetch_add(1, Ordering::SeqCst);
 
@@ -100,9 +102,7 @@ async fn publisher_subscriber() {
         &"me_authority".to_string(),
         subscriber_config.path(),
         None,
-        TransportConfig {
-            notification_payload_format: UPayloadFormat::Protobuf,
-        },
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(subscriber) = subscriber_res else {
@@ -126,11 +126,12 @@ async fn publisher_subscriber() {
 
     let publisher_config = network.config("publisher_app", 0x0343);
     let publisher_uri = UUri::try_from_parts(authority_name, ue_id, 1, 0).unwrap();
-    let publisher_res = UPTransportVsomeip::new_with_config(
+    let publisher_res = UPTransportVsomeip::new_with_config_and_transport_config(
         publisher_uri,
         &"me_authority".to_string(),
         publisher_config.path(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(publisher) = publisher_res else {

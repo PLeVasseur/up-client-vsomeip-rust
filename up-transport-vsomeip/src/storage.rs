@@ -37,7 +37,7 @@ use crate::{
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::{ComparableListener, UListener, UPayloadFormat, UStatus, UUri};
+use up_rust::{ComparableListener, PayloadEncoding, UListener, UStatus, UUri};
 use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
 use vsomeip_sys::vsomeip;
 
@@ -92,8 +92,8 @@ impl UPTransportVsomeipStorage {
         self.remote_authority.clone()
     }
 
-    pub fn get_notification_payload_format(&self) -> UPayloadFormat {
-        self.transport_config.notification_payload_format
+    pub fn get_assumed_payload_encoding(&self) -> PayloadEncoding {
+        self.transport_config.assumed_payload_encoding.clone()
     }
 
     pub fn get_ue_id(&self) -> UeId {

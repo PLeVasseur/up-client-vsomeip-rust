@@ -18,8 +18,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{
+    PayloadEncoding, UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri,
+};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
@@ -144,11 +146,12 @@ async fn client_service() {
     let client_config = network.config("837", 0x0345);
 
     let client_uuri = UUri::try_from_parts(client_authority_name, streamer_ue_id, 1, 0).unwrap();
-    let client_res = UPTransportVsomeip::new_with_config(
+    let client_res = UPTransportVsomeip::new_with_config_and_transport_config(
         client_uuri,
         &service_authority_name.to_string(),
         client_config.path(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(client) = client_res else {
@@ -195,11 +198,12 @@ async fn client_service() {
     let service_config = network.config("4660", 0x1234);
 
     let service_uuri = UUri::try_from_parts(service_authority_name, streamer_ue_id, 1, 0).unwrap();
-    let service_res = UPTransportVsomeip::new_with_config(
+    let service_res = UPTransportVsomeip::new_with_config_and_transport_config(
         service_uuri,
         &client_authority_name.to_string(),
         service_config.path(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(service) = service_res else {

@@ -14,14 +14,15 @@
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::utils::{
-    create_request_id, create_ue_id, split_u32_to_u16, split_ue_id_to_instance_service, uuri_ue_id,
+    create_request_id, create_ue_id_from_instance_service, split_u32_to_u16,
+    split_ue_id_to_instance_service, uuri_ue_id,
 };
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
 use log::trace;
 use std::sync::Arc;
 use std::time::Duration;
-use up_rust::{UCode, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UUri};
+use up_rust::{PayloadEncoding, UCode, UMessage, UMessageBuilder, UStatus, UUri};
 use vsomeip_sys::glue::{make_message_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
@@ -261,7 +262,7 @@ impl VsomeipMessageToUMessage {
         authority_name: &AuthorityName,
         self_uuri: &UUri,
         mechatronics_authority_name: &AuthorityName,
-        notification_payload_format: UPayloadFormat,
+        assumed_payload_encoding: PayloadEncoding,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
     ) -> Result<UMessage, UStatus> {
@@ -286,13 +287,14 @@ impl VsomeipMessageToUMessage {
                     &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
+                    &assumed_payload_encoding,
                 )
                 .await
             }
             message_type_e::MT_NOTIFICATION => {
                 Self::convert_vsomeip_mt_notification_to_umsg(
                     mechatronics_authority_name,
-                    notification_payload_format,
+                    &assumed_payload_encoding,
                     vsomeip_message,
                     payload_bytes,
                 )
@@ -304,6 +306,7 @@ impl VsomeipMessageToUMessage {
                     &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
+                    &assumed_payload_encoding,
                 )
                 .await
             }
@@ -313,6 +316,7 @@ impl VsomeipMessageToUMessage {
                     &rpc_correlation_registry,
                     vsomeip_message,
                     payload_bytes,
+                    &assumed_payload_encoding,
                 )
                 .await
             }
@@ -333,6 +337,7 @@ impl VsomeipMessageToUMessage {
         rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
+        assumed_payload_encoding: &PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -344,7 +349,7 @@ impl VsomeipMessageToUMessage {
         trace!("MT_REQUEST type");
         let sink = UUri::try_from_parts(
             authority_name,
-            create_ue_id(
+            create_ue_id_from_instance_service(
                 vsomeip_message.get_message_base_pinned().get_instance(),
                 service_id,
             ),
@@ -377,7 +382,7 @@ impl VsomeipMessageToUMessage {
         trace!("Prior to building Request");
 
         let umsg_res = UMessageBuilder::request(sink, source, ttl)
-            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
+            .build_with_payload_encoding(payload_bytes, assumed_payload_encoding.clone());
 
         trace!("After building Request");
 
@@ -407,6 +412,7 @@ impl VsomeipMessageToUMessage {
         rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
+        assumed_payload_encoding: &PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -419,7 +425,7 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            create_ue_id(
+            create_ue_id_from_instance_service(
                 vsomeip_message.get_message_base_pinned().get_instance(),
                 service_id,
             ),
@@ -444,7 +450,7 @@ impl VsomeipMessageToUMessage {
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(UCode::Ok)
-            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
+            .build_with_payload_encoding(payload_bytes, assumed_payload_encoding.clone());
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
@@ -464,6 +470,7 @@ impl VsomeipMessageToUMessage {
         rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
+        assumed_payload_encoding: &PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -476,7 +483,7 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            create_ue_id(
+            create_ue_id_from_instance_service(
                 vsomeip_message.get_message_base_pinned().get_instance(),
                 service_id,
             ),
@@ -504,7 +511,7 @@ impl VsomeipMessageToUMessage {
 
         let umsg_res = UMessageBuilder::response(sink, req_id, source)
             .with_comm_status(comm_status)
-            .build_with_payload(payload_bytes, UPayloadFormat::Protobuf);
+            .build_with_payload_encoding(payload_bytes, assumed_payload_encoding.clone());
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
@@ -521,7 +528,7 @@ impl VsomeipMessageToUMessage {
 
     async fn convert_vsomeip_mt_notification_to_umsg(
         mechatronics_authority_name: &AuthorityName,
-        payload_format: UPayloadFormat,
+        assumed_payload_encoding: &PayloadEncoding,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
         payload_bytes: Vec<u8>,
     ) -> Result<UMessage, UStatus> {
@@ -535,7 +542,7 @@ impl VsomeipMessageToUMessage {
         let interface_version = 1;
         let source = UUri::try_from_parts(
             mechatronics_authority_name, // TODO: Should we set this to anything specific?
-            create_ue_id(
+            create_ue_id_from_instance_service(
                 vsomeip_message.get_message_base_pinned().get_instance(),
                 service_id,
             ),
@@ -549,8 +556,8 @@ impl VsomeipMessageToUMessage {
             )
         })?;
 
-        let umsg_res =
-            UMessageBuilder::publish(source).build_with_payload(payload_bytes, payload_format);
+        let umsg_res = UMessageBuilder::publish(source)
+            .build_with_payload_encoding(payload_bytes, assumed_payload_encoding.clone());
 
         let Ok(umsg) = umsg_res else {
             return Err(UStatus::fail_with_code(
