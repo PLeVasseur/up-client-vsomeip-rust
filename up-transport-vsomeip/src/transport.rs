@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use up_rust::{
     ComparableListener, LocalUriProvider, PayloadEncoding, UAttributesValidators, UCode, UListener,
-    UMessage, UMessageType, UPayloadFormat, UStatus, UTransport, UUri,
+    UMessage, UPayloadFormat, UStatus, UTransport, UUri,
 };
 
 #[async_trait]
@@ -47,12 +47,10 @@ impl UTransport for UPTransportVsomeip {
         let message_type = determine_type(source_filter, &sink_filter.cloned())?;
         trace!("inside send(), message_type: {message_type:?}");
 
-        if message.type_() != UMessageType::Notification {
-            validate_payload_encoding_matches_assumption(
-                &message,
-                &self.storage.get_assumed_payload_encoding(),
-            )?;
-        }
+        validate_payload_encoding_matches_assumption(
+            &message,
+            &self.storage.get_assumed_payload_encoding(),
+        )?;
 
         let app_name = self.storage.get_vsomeip_application_config().name;
 

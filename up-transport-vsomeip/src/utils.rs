@@ -65,6 +65,9 @@ mod tests {
     #[test]
     fn create_ue_id_from_instance_service_compacts_default_instance() {
         assert_eq!(create_ue_id_from_instance_service(0x0001, 0xabcd), 0xabcd);
-        assert_eq!(create_ue_id_from_instance_service(0x0002, 0xabcd), 0x0002_abcd);
+        assert_eq!(
+            create_ue_id_from_instance_service(0x0002, 0xabcd),
+            0x0002_abcd
+        );
     }
 }

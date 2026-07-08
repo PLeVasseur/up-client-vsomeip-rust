@@ -92,6 +92,56 @@ impl UMessageToVsomeipMessage {
         Ok((service_id, instance_id, event_id))
     }
 
+    /// Converts a uProtocol Notification into a SOME/IP REQUEST_NO_RETURN.
+    ///
+    /// No RPC correlation is recorded because this is a fire-and-forget
+    /// request. The sink entity identifies the SOME/IP service/instance and a
+    /// notification sink has resource_id 0, so the mapped MethodID is 0.
+    pub async fn umsg_notification_to_vsomeip_message(
+        umsg: &UMessage,
+        runtime_wrapper: &UniquePtr<RuntimeWrapper>,
+    ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+        let source = umsg.source();
+
+        let Some(sink) = umsg.sink() else {
+            return Err(UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                "Notification message has no sink UUri",
+            ));
+        };
+
+        let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(sink));
+        trace!(
+            "{} - notification sink.ue_id: {} source.ue_id: {} instance_id: {} service_id: {}",
+            UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
+            uuri_ue_id(sink),
+            uuri_ue_id(source),
+            instance_id,
+            service_id
+        );
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_service(service_id);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_instance(instance_id);
+        let (_, method_id) = split_u32_to_u16(u32::from(sink.resource_id()));
+        vsomeip_msg.get_message_base_pinned().set_method(method_id);
+        let interface_version = sink.uentity_major_version();
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_interface_version(interface_version);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_message_type(vsomeip::message_type_e::MT_REQUEST_NO_RETURN);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_return_code(vsomeip::return_code_e::E_OK);
+
+        Ok(vsomeip_msg)
+    }
+
     pub async fn umsg_request_to_vsomeip_message(
         umsg: &UMessage,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
@@ -291,6 +341,16 @@ impl VsomeipMessageToUMessage {
                 )
                 .await
             }
+            message_type_e::MT_REQUEST_NO_RETURN => {
+                Self::convert_vsomeip_mt_request_no_return_to_umsg(
+                    authority_name,
+                    mechatronics_authority_name,
+                    &assumed_payload_encoding,
+                    vsomeip_message,
+                    payload_bytes,
+                )
+                .await
+            }
             message_type_e::MT_NOTIFICATION => {
                 Self::convert_vsomeip_mt_notification_to_umsg(
                     mechatronics_authority_name,
@@ -405,6 +465,62 @@ impl VsomeipMessageToUMessage {
         rpc_correlation_registry.insert_me_request_correlation(req_id.clone(), request_id)?;
 
         Ok(umsg)
+    }
+
+    /// Reconstructs a uProtocol Notification from SOME/IP REQUEST_NO_RETURN.
+    ///
+    /// SOME/IP does not carry the concrete notification source event, so the
+    /// source uses version 1 and event-range sentinel resource 0x8000. Matrix
+    /// notifier roles pin their source to the same convention for exact checks.
+    async fn convert_vsomeip_mt_request_no_return_to_umsg(
+        authority_name: &AuthorityName,
+        mechatronics_authority_name: &AuthorityName,
+        assumed_payload_encoding: &PayloadEncoding,
+        vsomeip_message: &mut UniquePtr<MessageWrapper>,
+        payload_bytes: Vec<u8>,
+    ) -> Result<UMessage, UStatus> {
+        let service_id = (*vsomeip_message).get_message_base_pinned().get_service();
+        let method_id = vsomeip_message.get_message_base_pinned().get_method();
+        let client_id = vsomeip_message.get_message_base_pinned().get_client();
+        let interface_version = vsomeip_message
+            .get_message_base_pinned()
+            .get_interface_version();
+
+        trace!("MT_REQUEST_NO_RETURN type");
+
+        let sink = UUri::try_from_parts(
+            authority_name,
+            create_ue_id_from_instance_service(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
+            interface_version,
+            method_id,
+        )
+        .map_err(|e| {
+            UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                format!("Unable to build sink UUri for MT_REQUEST_NO_RETURN type: {e:?}"),
+            )
+        })?;
+
+        let source =
+            UUri::try_from_parts(mechatronics_authority_name, u32::from(client_id), 1, 0x8000)
+                .map_err(|e| {
+                    UStatus::fail_with_code(
+                        UCode::InvalidArgument,
+                        format!("Unable to build source UUri for MT_REQUEST_NO_RETURN type: {e:?}"),
+                    )
+                })?;
+
+        UMessageBuilder::notification(source, sink)
+            .build_with_payload_encoding(payload_bytes, assumed_payload_encoding.clone())
+            .map_err(|e| {
+                UStatus::fail_with_code(
+                    UCode::Internal,
+                    format!("Unable to build UMessage from vsomeip message: {e:?}"),
+                )
+            })
     }
 
     async fn convert_vsomeip_mt_response_to_umsg(

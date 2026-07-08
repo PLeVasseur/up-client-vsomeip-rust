@@ -492,6 +492,66 @@ impl UPTransportVsomeipEngine {
 
                 Ok(())
             }
+            RegistrationType::Notification => {
+                trace!(
+                    "{}:{} - Registering for Notification style messages.",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+                let Some(sink_filter) = sink_filter else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::InvalidArgument,
+                        "Notification registration requires a sink filter",
+                    ));
+                };
+
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(uuri_ue_id(&sink_filter));
+                let (_, method_id) = split_u32_to_u16(u32::from(sink_filter.resource_id()));
+                let major_version = sink_filter.uentity_major_version();
+
+                trace!(
+                    "{}:{} - register_message_handler: service: {} instance: {} method: {}",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                    service_id,
+                    instance_id,
+                    method_id
+                );
+
+                if !vsomeip_offered_requested_registry.is_service_offered(
+                    service_id,
+                    instance_id,
+                    method_id,
+                ) {
+                    application_wrapper.get_pinned().offer_service(
+                        service_id,
+                        instance_id,
+                        major_version,
+                        vsomeip::DEFAULT_MINOR,
+                    );
+                    vsomeip_offered_requested_registry.insert_service_offered(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    );
+                }
+
+                (*application_wrapper).register_message_handler_fn_ptr_safe(
+                    service_id,
+                    instance_id,
+                    method_id,
+                    msg_handler,
+                );
+
+                trace!(
+                    "{}:{} - Registered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_REGISTER_LISTENER_INTERNAL,
+                );
+
+                Ok(())
+            }
             RegistrationType::Request => {
                 trace!(
                     "{}:{} - Registering for Request style messages.",
@@ -653,6 +713,37 @@ impl UPTransportVsomeipEngine {
                 );
                 Ok(())
             }
+            RegistrationType::Notification => {
+                trace!(
+                    "{}:{} - Unregistering for Notification style messages.",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
+                );
+                let Some(sink_filter) = sink_filter else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::InvalidArgument,
+                        "Notification unregistration requires a sink filter",
+                    ));
+                };
+
+                let (instance_id, service_id) =
+                    split_ue_id_to_instance_service(uuri_ue_id(&sink_filter));
+                let (_, method_id) = split_u32_to_u16(u32::from(sink_filter.resource_id()));
+
+                application_wrapper.get_pinned().unregister_message_handler(
+                    service_id,
+                    instance_id,
+                    method_id,
+                );
+
+                trace!(
+                    "{}:{} - Unregistered vsomeip message handler.",
+                    UP_CLIENT_VSOMEIP_TAG,
+                    UP_CLIENT_VSOMEIP_FN_TAG_UNREGISTER_LISTENER_INTERNAL,
+                );
+
+                Ok(())
+            }
             RegistrationType::Request => {
                 trace!(
                     "{}:{} - Unregistering for Request style messages.",
@@ -743,10 +834,42 @@ impl UPTransportVsomeipEngine {
 
         match umsg.type_() {
             UMessageType::Notification => {
-                return Err(UStatus::fail_with_code(
-                    UCode::InvalidArgument,
-                    "Notification is not supported",
-                ));
+                let Some(sink) = umsg.sink() else {
+                    return Err(UStatus::fail_with_code(
+                        UCode::InvalidArgument,
+                        "Notification message has no sink UUri",
+                    ));
+                };
+                let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(sink));
+                let (_, method_id) = split_u32_to_u16(u32::from(sink.resource_id()));
+
+                if !vsomeip_offered_requested_registry.is_service_requested(
+                    service_id,
+                    instance_id,
+                    method_id,
+                ) {
+                    application_wrapper.get_pinned().request_service(
+                        service_id,
+                        instance_id,
+                        vsomeip::ANY_MAJOR,
+                        vsomeip::ANY_MINOR,
+                    );
+                    vsomeip_offered_requested_registry.insert_service_requested(
+                        service_id,
+                        instance_id,
+                        method_id,
+                    );
+                }
+
+                let vsomeip_msg = UMessageToVsomeipMessage::umsg_notification_to_vsomeip_message(
+                    &umsg,
+                    runtime_wrapper,
+                )
+                .await?;
+
+                vsomeip_msg.set_message_payload(&mut vsomeip_payload);
+                let shared_ptr_message = vsomeip_msg.as_ref().unwrap().get_shared_ptr();
+                application_wrapper.get_pinned().send(shared_ptr_message);
             }
             UMessageType::Publish => {
                 let (service_id, instance_id, event_id) =

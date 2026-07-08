@@ -21,6 +21,9 @@ pub(crate) enum RegistrationType {
     Publish,
     Request,
     Response,
+    /// uProtocol Notification carried as SOME/IP REQUEST_NO_RETURN per the
+    /// up-l1/someip.adoc uattribute mapping row and note-5.
+    Notification,
     AllPointToPoint,
 }
 
@@ -86,6 +89,15 @@ pub fn determine_type(
 
         // Log which case we're falling through to
         if sink_filter.resource_id() == 0 {
+            // A uProtocol Notification has an event-range source resource and
+            // sink resource 0. Responses also have sink resource 0, so note-5's
+            // event range is the available discriminator.
+            if source_filter.resource_id() >= 0x8000 {
+                trace!(
+                    "sink resource_id == 0 and source resource_id >= 0x8000 - returning Notification"
+                );
+                return Ok(RegistrationType::Notification);
+            }
             trace!("sink_filter.resource_id == 0 - returning Response");
             Ok(RegistrationType::Response)
         } else {
