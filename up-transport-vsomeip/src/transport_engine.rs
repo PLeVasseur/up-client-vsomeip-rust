@@ -15,6 +15,7 @@ use crate::determine_message_type::RegistrationType;
 use crate::message_conversions::UMessageToVsomeipMessage;
 use crate::storage::application_state_availability_handler_registry::ApplicationStateAvailabilityHandlerRegistry;
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::subscription_handler_registry::SubscriptionHandlerRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::utils::{split_u32_to_u16, split_ue_id_to_instance_service, uuri_ue_id};
 use crate::{ApplicationName, ClientId};
@@ -67,11 +68,12 @@ pub enum TransportCommand {
         oneshot::Sender<Result<(), UStatus>>,
     ),
     Send(
-        UMessage,
+        Box<UMessage>,
         RegistrationType,
         ApplicationName,
         Arc<dyn RpcCorrelationRegistry>,
         Arc<dyn VsomeipOfferedRequestedRegistry>,
+        Arc<dyn SubscriptionHandlerRegistry>,
         oneshot::Sender<Result<(), UStatus>>,
     ),
     // Additional helpful commands
@@ -332,6 +334,7 @@ impl UPTransportVsomeipEngine {
                     app_name,
                     rpc_correlation_registry,
                     vsomeip_offered_requested_registry,
+                    subscription_handler_registry,
                     return_channel,
                 ) => {
                     trace!(
@@ -361,9 +364,10 @@ impl UPTransportVsomeipEngine {
                     };
 
                     let res = Self::send_internal(
-                        umsg,
+                        *umsg,
                         rpc_correlation_registry,
                         vsomeip_offered_requested_registry,
+                        subscription_handler_registry,
                         &mut application_wrapper,
                         &runtime_wrapper,
                     )
@@ -810,6 +814,7 @@ impl UPTransportVsomeipEngine {
         umsg: UMessage,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
+        subscription_handler_registry: Arc<dyn SubscriptionHandlerRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<(), UStatus> {
@@ -876,6 +881,7 @@ impl UPTransportVsomeipEngine {
                     UMessageToVsomeipMessage::umsg_publish_to_vsomeip_notification(
                         &umsg,
                         vsomeip_offered_requested_registry,
+                        subscription_handler_registry,
                         application_wrapper,
                     )
                     .await?;

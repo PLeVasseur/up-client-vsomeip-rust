@@ -12,6 +12,7 @@
  ********************************************************************************/
 
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::subscription_handler_registry::SubscriptionHandlerRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::utils::{
     create_request_id, create_ue_id_from_instance_service, split_u32_to_u16,
@@ -29,6 +30,7 @@ use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
+const PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct UMessageToVsomeipMessage;
 
@@ -39,6 +41,7 @@ impl UMessageToVsomeipMessage {
     pub async fn umsg_publish_to_vsomeip_notification(
         umsg: &UMessage,
         vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
+        subscription_handler_registry: Arc<dyn SubscriptionHandlerRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
         let source = umsg.source();
@@ -57,6 +60,14 @@ impl UMessageToVsomeipMessage {
         // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
         //  the UPClientVsomeip?
         if !vsomeip_offered_requested_registry.is_event_offered(service_id, instance_id, event_id) {
+            let (handler_id, subscription_handler, receiver) =
+                subscription_handler_registry.allocate_subscription_handler()?;
+            application_wrapper.register_subscription_handler_fn_ptr_safe(
+                service_id,
+                instance_id,
+                event_id,
+                subscription_handler,
+            );
             application_wrapper.get_pinned().offer_service(
                 service_id,
                 instance_id,
@@ -71,15 +82,26 @@ impl UMessageToVsomeipMessage {
                 event_id,
             );
             trace!("doing event offered");
-            // TODO: We should replace this with using a vsomeip register_availability_handler()
-            //  and then we block with timeout while waiting on receiving availability
-            //  change over a channel and if we exceed timeout then we can return an error
-            //
-            // Initial prototyping of this in vsomeip-sys doesn't look promising
-            // Seems it's possible to start sending messages before this application's offered
-            // service and event are "understood" by other applications
-            // Leaving sleep for now till thinking of some better idea
-            tokio::time::sleep(Duration::from_nanos(5)).await;
+
+            let ready = tokio::time::timeout(PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT, async {
+                loop {
+                    if receiver.try_recv().is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .is_ok();
+            application_wrapper
+                .get_pinned()
+                .unregister_subscription_handler(service_id, instance_id, event_id);
+            subscription_handler_registry.free_subscription_handler(handler_id);
+            if ready {
+                trace!("subscriber ready for offered event");
+            } else {
+                trace!("no subscriber became ready before publish readiness timeout");
+            }
             vsomeip_offered_requested_registry.insert_event_offered(
                 service_id,
                 instance_id,

@@ -154,6 +154,10 @@ async fn publisher_subscriber() {
         .expect("failed to send warm-up publish UMessage");
     tokio::time::sleep(Duration::from_millis(500)).await;
     let baseline_received = subscriber_listener_check.received_publish();
+    assert_eq!(
+        baseline_received, 1,
+        "the first publish must wait for the pending subscription"
+    );
 
     // Track the start time and set the duration for the loop
     let duration = Duration::from_millis(TEST_DURATION);

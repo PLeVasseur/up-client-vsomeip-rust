@@ -129,6 +129,18 @@ pub mod handler_registration {
             _is_selective: bool,
         );
 
+        type subscription_handler_fn_ptr =
+            crate::extern_callback_wrappers::SubscriptionHandlerFnPtr;
+
+        /// Registers a provider-side handler that reports subscriber readiness.
+        pub unsafe fn register_subscription_handler_fn_ptr(
+            _application_wrapper: *mut ApplicationWrapper,
+            _service: u16,
+            _instance: u16,
+            _eventgroup: u16,
+            _fn_ptr_handler: subscription_handler_fn_ptr,
+        );
+
         type state_handler_fn_ptr = crate::extern_callback_wrappers::AvailableStateHandlerFnPtr;
 
         pub unsafe fn register_state_handler_fn_ptr(

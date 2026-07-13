@@ -65,9 +65,10 @@ impl UTransport for UPTransportVsomeip {
         let send_to_engine_res = Self::send_to_engine_with_status(
             &self.engine.transport_command_sender,
             TransportCommand::Send(
-                message,
+                Box::new(message),
                 message_type,
                 app_name,
+                self.storage.clone(),
                 self.storage.clone(),
                 self.storage.clone(),
                 tx,

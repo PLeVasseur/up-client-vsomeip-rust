@@ -307,3 +307,91 @@ pub fn generate_available_state_handler_extern_c_fns(input: TokenStream) -> Toke
 
     expanded.into()
 }
+
+#[proc_macro]
+pub fn generate_subscription_handler_extern_c_fns(input: TokenStream) -> TokenStream {
+    let num_fns = parse_macro_input!(input as LitInt)
+        .base10_parse::<usize>()
+        .unwrap();
+
+    let mut generated_fns = quote! {};
+    let mut match_arms = Vec::with_capacity(num_fns);
+    let mut free_ids_init = quote! {
+        let mut set = HashSet::with_capacity(#num_fns);
+    };
+    let mut channels_init = quote! {};
+
+    for i in 0..num_fns {
+        let extern_fn_name = format_ident!("subscription_handler_extern_fn_{}", i);
+        generated_fns.extend(quote! {
+            #[no_mangle]
+            extern "C" fn #extern_fn_name(
+                _client: vsomeip::client_t,
+                _uid: u32,
+                _gid: u32,
+                subscribed: bool,
+            ) -> bool {
+                if subscribed {
+                    call_shared_extern_fn(#i);
+                }
+                true
+            }
+        });
+        match_arms.push(quote! { #i => #extern_fn_name, });
+        free_ids_init.extend(quote! { set.insert(#i); });
+        channels_init.extend(quote! {
+            let (sender, receiver) = crossbeam_channel::bounded(1);
+            SUBSCRIPTION_SENDERS.write().unwrap().insert(#i, sender);
+            SUBSCRIPTION_RECEIVERS.write().unwrap().insert(#i, receiver);
+        });
+    }
+
+    quote! {
+        pub(super) mod subscription_handler_proc_macro {
+            use super::*;
+
+            lazy_static! {
+                pub(super) static ref FREE_SUBSCRIPTION_HANDLER_EXTERN_FN_IDS: RwLock<HashSet<usize>> = {
+                    #free_ids_init
+                    RwLock::new(set)
+                };
+                static ref SUBSCRIPTION_SENDERS: RwLock<HashMap<usize, Sender<()>>> = RwLock::new(HashMap::new());
+                static ref SUBSCRIPTION_RECEIVERS: RwLock<HashMap<usize, Receiver<()>>> = RwLock::new(HashMap::new());
+            }
+
+            #generated_fns
+
+            fn call_shared_extern_fn(subscription_handler_id: usize) {
+                let senders = SUBSCRIPTION_SENDERS.read().unwrap();
+                if let Some(sender) = senders.get(&subscription_handler_id) {
+                    let _ = sender.try_send(());
+                }
+            }
+
+            pub(super) fn get_extern_fn(
+                subscription_handler_id: usize,
+            ) -> (
+                extern "C" fn(vsomeip::client_t, u32, u32, bool) -> bool,
+                Receiver<()>,
+            ) {
+                let extern_fn = match subscription_handler_id {
+                    #(#match_arms)*
+                    _ => panic!("subscription_handler_id out of range"),
+                };
+                let receiver = SUBSCRIPTION_RECEIVERS
+                    .read()
+                    .unwrap()
+                    .get(&subscription_handler_id)
+                    .expect("subscription receiver must be initialized")
+                    .clone();
+                while receiver.try_recv().is_ok() {}
+                (extern_fn, receiver)
+            }
+
+            pub(super) fn initialize_sender_receiver() {
+                #channels_init
+            }
+        }
+    }
+    .into()
+}

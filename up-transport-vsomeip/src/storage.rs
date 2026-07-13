@@ -14,10 +14,14 @@
 pub mod application_state_availability_handler_registry;
 pub mod message_handler_registry;
 pub mod rpc_correlation;
+pub mod subscription_handler_registry;
 pub mod vsomeip_offered_requested;
 
 use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::subscription_handler_registry::{
+    InMemorySubscriptionHandlerRegistry, SubscriptionHandlerRegistry,
+};
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::storage::{
     application_state_availability_handler_registry::{
@@ -38,7 +42,9 @@ use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use up_rust::{ComparableListener, PayloadEncoding, UListener, UStatus, UUri};
-use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
+use vsomeip_sys::glue::{
+    AvailableStateHandlerFnPtr, MessageHandlerFnPtr, SubscriptionHandlerFnPtr,
+};
 use vsomeip_sys::vsomeip;
 
 pub struct UPTransportVsomeipStorage {
@@ -50,6 +56,7 @@ pub struct UPTransportVsomeipStorage {
     message_handler_registry: Arc<InMemoryMessageHandlerRegistry>,
     application_state_handler_registry: Arc<InMemoryApplicationStateAvailabilityHandlerRegistry>,
     rpc_correlation: Arc<InMemoryRpcCorrelationRegistry>,
+    subscription_handler_registry: Arc<InMemorySubscriptionHandlerRegistry>,
     vsomeip_offered_requested: Arc<InMemoryVsomeipOfferedRequestedRegistry>,
 }
 
@@ -73,6 +80,7 @@ impl UPTransportVsomeipStorage {
             message_handler_registry: Arc::new(InMemoryMessageHandlerRegistry::new()),
             application_state_handler_registry,
             rpc_correlation: Arc::new(InMemoryRpcCorrelationRegistry::new()),
+            subscription_handler_registry: InMemorySubscriptionHandlerRegistry::new(),
             vsomeip_offered_requested: Arc::new(InMemoryVsomeipOfferedRequestedRegistry::new()),
         }
     }
@@ -125,6 +133,20 @@ impl ApplicationStateAvailabilityHandlerRegistry for UPTransportVsomeipStorage {
     fn find_application_state_availability_handler_id(&self) -> Result<usize, UStatus> {
         self.application_state_handler_registry
             .find_available_state_handler_id()
+    }
+}
+
+impl SubscriptionHandlerRegistry for UPTransportVsomeipStorage {
+    fn allocate_subscription_handler(
+        &self,
+    ) -> Result<(usize, SubscriptionHandlerFnPtr, Receiver<()>), UStatus> {
+        self.subscription_handler_registry
+            .allocate_subscription_handler()
+    }
+
+    fn free_subscription_handler(&self, handler_id: usize) {
+        self.subscription_handler_registry
+            .free_subscription_handler(handler_id);
     }
 }
 
