@@ -82,8 +82,13 @@ void register_subscription_status_handler_fn_ptr(ApplicationWrapper* application
 void register_subscription_handler_fn_ptr(ApplicationWrapper* application_wrapper, vsomeip_v3::service_t _service,
                                            vsomeip_v3::instance_t _instance, vsomeip_v3::eventgroup_t _eventgroup,
                                            subscription_handler_fn_ptr _fn_ptr_handler) {
-    vsomeip_v3::subscription_handler_t _handler = _fn_ptr_handler;
-    application_wrapper->get_shared_ptr()->register_subscription_handler(
+    vsomeip_v3::async_subscription_handler_t _handler = [=](vsomeip_v3::client_t _client, vsomeip_v3::uid_t _uid,
+                                                             vsomeip_v3::gid_t _gid, bool _subscribed,
+                                                             std::function<void(bool)> _accepted_cb) {
+        _accepted_cb(true);
+        _fn_ptr_handler(_client, _uid, _gid, _subscribed);
+    };
+    application_wrapper->get_shared_ptr()->register_async_subscription_handler(
         _service, _instance, _eventgroup, _handler);
 }
 
