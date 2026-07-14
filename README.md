@@ -64,6 +64,27 @@ LD_LIBRARY_PATH="$VSOMEIP_INSTALL_PATH/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 Do not use `--no-default-features` for the default bundled smoke. That flag disables the bundled build and expects an external `libvsomeip3` to be available.
 
+### Subscription Readiness And First Publish
+
+For offered publish events, provider readiness means that vSomeIP has invoked
+the provider-side asynchronous subscription handler for the event. Merely
+offering the service/event is not subscriber readiness. The first publish waits
+for that accepted-subscription signal for the bounded
+`PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT`; it does not send duplicate application
+messages to probe readiness.
+
+If no subscriber becomes ready before the timeout, publishing remains vSomeIP
+best effort: the bounded wait ends, the temporary handler is unregistered, and
+the send proceeds once. This is not a delivery acknowledgment and callers must
+not infer that a subscriber received the event. Later publishes do not repeat
+the one-time offer/readiness setup for the same event.
+
+The focused `publisher_subscriber` test proves that a pending subscription does
+not lose the first publish. The `publish_without_subscriber` test proves that an
+absent subscriber does not hang or trigger an unbounded retry loop. Run native
+vSomeIP tests serially because their configurations and runtime state are not
+independent.
+
 ### Using the Library
 
 The library contains the following modules:
