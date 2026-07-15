@@ -31,7 +31,7 @@ impl UTransport for UPTransportVsomeip {
         let attributes = message.attributes();
 
         // Validate UAttributes before conversion.
-        UAttributesValidators::get_validator_for_attributes(attributes)
+        UAttributesValidators::validator_for_attributes(attributes)
             .validate(attributes)
             .map_err(|e| {
                 UStatus::fail_with_code(
