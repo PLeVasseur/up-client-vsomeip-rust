@@ -12,20 +12,26 @@
  ********************************************************************************/
 
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::subscription_handler_registry::SubscriptionHandlerRegistry;
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
-use crate::utils::{create_request_id, split_u32_to_u16, split_u32_to_u8};
+use crate::storage::UPTransportVsomeipStorage;
+use crate::utils::{
+    create_request_id, create_ue_id_from_instance_service, split_u32_to_u16,
+    split_ue_id_to_instance_service, uuri_ue_id,
+};
 use crate::{AuthorityName, EventId, InstanceId, ServiceId};
 use cxx::UniquePtr;
 use log::trace;
 use std::sync::Arc;
 use std::time::Duration;
-use up_rust::{UCode, UMessage, UMessageBuilder, UPayloadFormat, UStatus, UUri};
+use up_rust::{BuilderState, PayloadEncoding, UCode, UMessage, UMessageBuilder, UStatus, UUri};
 use vsomeip_sys::glue::{make_message_wrapper, ApplicationWrapper, MessageWrapper, RuntimeWrapper};
 use vsomeip_sys::vsomeip;
 use vsomeip_sys::vsomeip::{message_type_e, ANY_MAJOR};
 
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg_to_vsomeip_msg";
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
+const PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub struct UMessageToVsomeipMessage;
 
@@ -36,19 +42,14 @@ impl UMessageToVsomeipMessage {
     pub async fn umsg_publish_to_vsomeip_notification(
         umsg: &UMessage,
         vsomeip_offered_requested_registry: Arc<dyn VsomeipOfferedRequestedRegistry>,
+        subscription_handler_registry: Arc<dyn SubscriptionHandlerRegistry>,
         application_wrapper: &mut UniquePtr<ApplicationWrapper>,
     ) -> Result<(ServiceId, InstanceId, EventId), UStatus> {
-        let Some(source) = umsg.attributes.source.as_ref() else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Message has no source UUri",
-            ));
-        };
+        let source = umsg.source();
 
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
-        let instance_id = 1; // TODO: Setting to 1 manually for now
-        let (_, event_id) = split_u32_to_u16(source.resource_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(source));
+        let event_id = source.resource_id();
+        let interface_version = source.uentity_major_version();
         trace!("uProtocol Publish message's interface_version: {interface_version}");
 
         trace!(
@@ -60,6 +61,14 @@ impl UMessageToVsomeipMessage {
         // TODO: We also need to add a corresponding stop_offer_event perhaps when we drop
         //  the UPClientVsomeip?
         if !vsomeip_offered_requested_registry.is_event_offered(service_id, instance_id, event_id) {
+            let (handler_id, handler, receiver) =
+                subscription_handler_registry.allocate_subscription_handler()?;
+            application_wrapper.register_subscription_handler_fn_ptr_safe(
+                service_id,
+                instance_id,
+                event_id,
+                handler,
+            );
             application_wrapper.get_pinned().offer_service(
                 service_id,
                 instance_id,
@@ -74,15 +83,25 @@ impl UMessageToVsomeipMessage {
                 event_id,
             );
             trace!("doing event offered");
-            // TODO: We should replace this with using a vsomeip register_availability_handler()
-            //  and then we block with timeout while waiting on receiving availability
-            //  change over a channel and if we exceed timeout then we can return an error
-            //
-            // Initial prototyping of this in vsomeip-sys doesn't look promising
-            // Seems it's possible to start sending messages before this application's offered
-            // service and event are "understood" by other applications
-            // Leaving sleep for now till thinking of some better idea
-            tokio::time::sleep(Duration::from_nanos(5)).await;
+            let subscriber_ready = tokio::time::timeout(PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT, async {
+                loop {
+                    if receiver.try_recv().is_ok() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+            })
+            .await
+            .is_ok();
+            application_wrapper
+                .get_pinned()
+                .unregister_subscription_handler(service_id, instance_id, event_id);
+            subscription_handler_registry.free_subscription_handler(handler_id);
+            if subscriber_ready {
+                trace!("subscriber ready for offered event");
+            } else {
+                trace!("no subscriber became ready before publish readiness timeout");
+            }
             vsomeip_offered_requested_registry.insert_event_offered(
                 service_id,
                 instance_id,
@@ -95,6 +114,42 @@ impl UMessageToVsomeipMessage {
         Ok((service_id, instance_id, event_id))
     }
 
+    /// Converts a directed uProtocol Notification into SOME/IP REQUEST_NO_RETURN.
+    pub async fn umsg_notification_to_vsomeip_message(
+        umsg: &UMessage,
+        runtime_wrapper: &UniquePtr<RuntimeWrapper>,
+    ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
+        let Some(sink) = umsg.sink() else {
+            return Err(UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                "Notification message has no sink UUri",
+            ));
+        };
+
+        let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(sink));
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_service(service_id);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_instance(instance_id);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_method(sink.resource_id());
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_interface_version(sink.uentity_major_version());
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_message_type(message_type_e::MT_REQUEST_NO_RETURN);
+        vsomeip_msg
+            .get_message_base_pinned()
+            .set_return_code(vsomeip::return_code_e::E_OK);
+
+        Ok(vsomeip_msg)
+    }
+
     pub async fn umsg_request_to_vsomeip_message(
         umsg: &UMessage,
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
@@ -102,50 +157,39 @@ impl UMessageToVsomeipMessage {
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus>
 where {
-        let Some(source) = umsg.attributes.source.as_ref() else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Message has no source UUri",
-            ));
-        };
+        let source = umsg.source();
 
-        let Some(sink) = umsg.attributes.sink.as_ref() else {
+        let Some(sink) = umsg.sink() else {
             return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 "Message has no sink UUri",
             ));
         };
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_request(true));
-        let (_instance_id, service_id) = split_u32_to_u16(sink.ue_id);
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(sink));
         trace!(
-            "{} - sink.ue_id: {} source.ue_id: {} _instance_id: {} service_id:{}",
+            "{} - sink.ue_id: {} source.ue_id: {} instance_id: {} service_id:{}",
             UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG,
-            sink.ue_id,
-            source.ue_id,
-            _instance_id,
+            uuri_ue_id(sink),
+            uuri_ue_id(source),
+            instance_id,
             service_id
         );
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1; // TODO: Setting to 1 manually for now
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
-        let (_, method_id) = split_u32_to_u16(sink.resource_id);
+        let method_id = sink.resource_id();
         vsomeip_msg.get_message_base_pinned().set_method(method_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(sink.ue_version_major);
+        let interface_version = sink.uentity_major_version();
         vsomeip_msg
             .get_message_base_pinned()
             .set_interface_version(interface_version);
 
-        let req_id = umsg.attributes.id.as_ref().ok_or_else(|| {
-            UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Missing id for Request message. Would be unable to correlate. Rejected.",
-            )
-        })?;
+        let req_id = umsg.id();
         let app_client_id = application_wrapper.get_pinned().get_client();
         let app_session_id = rpc_correlation_registry.retrieve_session_id(app_client_id);
         let request_id = create_request_id(app_client_id, app_session_id);
@@ -172,12 +216,7 @@ where {
         rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
         runtime_wrapper: &UniquePtr<RuntimeWrapper>,
     ) -> Result<UniquePtr<MessageWrapper>, UStatus> {
-        let Some(source) = umsg.attributes.source.as_ref() else {
-            return Err(UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Message has no source UUri",
-            ));
-        };
+        let source = umsg.source();
 
         trace!(
             "{} - Attempting to send Response",
@@ -186,24 +225,23 @@ where {
 
         let vsomeip_msg = make_message_wrapper(runtime_wrapper.get_pinned().create_message(true));
 
-        let (_instance_id, service_id) = split_u32_to_u16(source.ue_id);
+        let (instance_id, service_id) = split_ue_id_to_instance_service(uuri_ue_id(source));
         vsomeip_msg
             .get_message_base_pinned()
             .set_service(service_id);
-        let instance_id = 1; // TODO: Setting to 1 manually for now
         vsomeip_msg
             .get_message_base_pinned()
             .set_instance(instance_id);
-        let (_, method_id) = split_u32_to_u16(source.resource_id);
+        let method_id = source.resource_id();
         vsomeip_msg.get_message_base_pinned().set_method(method_id);
-        let (_, _, _, interface_version) = split_u32_to_u8(source.ue_version_major);
+        let interface_version = source.uentity_major_version();
         vsomeip_msg
             .get_message_base_pinned()
             .set_interface_version(interface_version);
 
-        let req_id = umsg.attributes.reqid.as_ref().ok_or_else(|| {
+        let req_id = umsg.request_id().ok_or_else(|| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 "Missing id for Request message. Would be unable to correlate. Rejected.",
             )
         })?;
@@ -233,20 +271,17 @@ where {
             session_id
         );
 
-        let (commstatus, vsomeip_msg_type) = {
-            if let Some(commstatus) = umsg.attributes.commstatus {
-                (
-                    commstatus.enum_value_or(UCode::UNIMPLEMENTED),
-                    message_type_e::MT_ERROR,
-                )
-            } else {
-                (UCode::UNIMPLEMENTED, message_type_e::MT_RESPONSE)
-            }
+        let (return_code, vsomeip_msg_type) = match umsg.commstatus() {
+            Some(UCode::Ok) | None => (vsomeip::return_code_e::E_OK, message_type_e::MT_RESPONSE),
+            Some(commstatus) => (
+                Self::ucode_to_vsomeip_err_code(commstatus),
+                message_type_e::MT_ERROR,
+            ),
         };
 
         vsomeip_msg
             .get_message_base_pinned()
-            .set_return_code(Self::ucode_to_vsomeip_err_code(commstatus));
+            .set_return_code(return_code);
         vsomeip_msg
             .get_message_base_pinned()
             .set_message_type(vsomeip_msg_type);
@@ -264,15 +299,15 @@ where {
     fn ucode_to_vsomeip_err_code(ucode: UCode) -> vsomeip::return_code_e {
         // TODO handle the one-to-many mapping. eg: INVALID_ARGUMENT <==> E_WRONG_MESSAGE_TYPE / E_UNKNOWN_METHOD
         match ucode {
-            UCode::OK => vsomeip::return_code_e::E_OK,
-            UCode::INVALID_ARGUMENT => vsomeip::return_code_e::E_WRONG_MESSAGE_TYPE,
-            UCode::DEADLINE_EXCEEDED => vsomeip::return_code_e::E_TIMEOUT,
-            UCode::NOT_FOUND => vsomeip::return_code_e::E_UNKNOWN_SERVICE,
-            UCode::UNAVAILABLE => vsomeip::return_code_e::E_UNKNOWN_SERVICE,
-            UCode::DATA_LOSS => vsomeip::return_code_e::E_MALFORMED_MESSAGE,
-            UCode::INTERNAL => vsomeip::return_code_e::E_NOT_REACHABLE,
-            UCode::UNKNOWN => vsomeip::return_code_e::E_NOT_OK,
-            UCode::FAILED_PRECONDITION => vsomeip::return_code_e::E_WRONG_PROTOCOL_VERSION,
+            UCode::Ok => vsomeip::return_code_e::E_OK,
+            UCode::InvalidArgument => vsomeip::return_code_e::E_WRONG_MESSAGE_TYPE,
+            UCode::DeadlineExceeded => vsomeip::return_code_e::E_TIMEOUT,
+            UCode::NotFound => vsomeip::return_code_e::E_UNKNOWN_SERVICE,
+            UCode::Unavailable => vsomeip::return_code_e::E_UNKNOWN_SERVICE,
+            UCode::DataLoss => vsomeip::return_code_e::E_MALFORMED_MESSAGE,
+            UCode::Internal => vsomeip::return_code_e::E_NOT_REACHABLE,
+            UCode::Unknown => vsomeip::return_code_e::E_NOT_OK,
+            UCode::FailedPrecondition => vsomeip::return_code_e::E_WRONG_PROTOCOL_VERSION,
             _ => vsomeip::return_code_e::E_UNKNOWN,
         }
     }
@@ -280,25 +315,40 @@ where {
 
 pub struct VsomeipMessageToUMessage;
 
+fn build_with_optional_payload<S: BuilderState>(
+    mut builder: UMessageBuilder<S>,
+    payload: Option<Vec<u8>>,
+    assumed_payload_encoding: PayloadEncoding,
+) -> Result<UMessage, UStatus> {
+    match payload {
+        Some(bytes) => builder.build_with_payload(bytes, assumed_payload_encoding),
+        None => builder.build(),
+    }
+    .map_err(|error| {
+        UStatus::fail_with_code(
+            UCode::Internal,
+            format!("Unable to build UMessage from SOME/IP message: {error:?}"),
+        )
+    })
+}
+
 impl VsomeipMessageToUMessage {
     pub async fn convert_vsomeip_msg_to_umsg(
         authority_name: &AuthorityName,
         self_uuri: &UUri,
         mechatronics_authority_name: &AuthorityName,
-        rpc_correlation_registry: Arc<dyn RpcCorrelationRegistry>,
+        transport_storage: Arc<UPTransportVsomeipStorage>,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
     ) -> Result<UMessage, UStatus> {
         let msg_type = vsomeip_message.get_message_base_pinned().get_message_type();
-
-        let payload_bytes = {
-            let Some(payload) = (*vsomeip_message).get_message_payload() else {
-                return Err(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Unable to extract PayloadWrapper from MessageWrapper",
-                ));
-            };
-            payload.get_data_safe()
-        };
+        let assumed_payload_encoding = transport_storage.get_assumed_payload_encoding();
+        let payload_bytes = (*vsomeip_message)
+            .get_message_payload()
+            .map(|payload| payload.get_data_safe())
+            // SOME/IP has no presence bit, so zero bytes cannot distinguish an
+            // absent payload from a present-empty payload. Keep absence
+            // identity-free rather than inventing a declaration.
+            .filter(|payload| !payload.is_empty());
 
         match msg_type {
             message_type_e::MT_REQUEST => {
@@ -306,9 +356,20 @@ impl VsomeipMessageToUMessage {
                     authority_name,
                     self_uuri,
                     mechatronics_authority_name,
-                    &rpc_correlation_registry,
+                    transport_storage.as_ref(),
                     vsomeip_message,
                     payload_bytes,
+                    assumed_payload_encoding,
+                )
+                .await
+            }
+            message_type_e::MT_REQUEST_NO_RETURN => {
+                Self::convert_vsomeip_mt_request_no_return_to_umsg(
+                    authority_name,
+                    mechatronics_authority_name,
+                    vsomeip_message,
+                    payload_bytes,
+                    assumed_payload_encoding,
                 )
                 .await
             }
@@ -317,29 +378,32 @@ impl VsomeipMessageToUMessage {
                     mechatronics_authority_name,
                     vsomeip_message,
                     payload_bytes,
+                    assumed_payload_encoding,
                 )
                 .await
             }
             message_type_e::MT_RESPONSE => {
                 Self::convert_vsomeip_mt_response_to_umsg(
                     mechatronics_authority_name,
-                    &rpc_correlation_registry,
+                    transport_storage.as_ref(),
                     vsomeip_message,
                     payload_bytes,
+                    assumed_payload_encoding,
                 )
                 .await
             }
             message_type_e::MT_ERROR => {
                 Self::convert_vsomeip_mt_error_to_umsg(
                     mechatronics_authority_name,
-                    &rpc_correlation_registry,
+                    transport_storage.as_ref(),
                     vsomeip_message,
                     payload_bytes,
+                    assumed_payload_encoding,
                 )
                 .await
             }
             _ => Err(UStatus::fail_with_code(
-                UCode::OUT_OF_RANGE,
+                UCode::OutOfRange,
                 format!("Not one of the handled message types from SOME/IP: {msg_type}"),
             )),
         }
@@ -349,9 +413,10 @@ impl VsomeipMessageToUMessage {
         authority_name: &AuthorityName,
         self_uuri: &UUri,
         mechatronics_authority_name: &AuthorityName,
-        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
+        rpc_correlation_registry: &dyn RpcCorrelationRegistry,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
-        payload_bytes: Vec<u8>,
+        payload_bytes: Option<Vec<u8>>,
+        assumed_payload_encoding: PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -363,26 +428,29 @@ impl VsomeipMessageToUMessage {
         trace!("MT_REQUEST type");
         let sink = UUri::try_from_parts(
             authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id_from_instance_service(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Unable to build sink UUri for MT_REQUEST type: {e:?}"),
             )
         })?;
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            self_uuri.ue_id,
-            self_uuri.ue_version_major.try_into().unwrap(), // we have checked this fits prior
+            uuri_ue_id(self_uuri),
+            self_uuri.uentity_major_version(),
             0, // set to 0 as this is the resource_id of "intended for me"
         )
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Unable to build source UUri for MT_REQUEST type: {e:?}"),
             )
         })?;
@@ -392,27 +460,15 @@ impl VsomeipMessageToUMessage {
 
         trace!("Prior to building Request");
 
-        let umsg_res = UMessageBuilder::request(sink, source, ttl)
-            .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
+        let umsg = build_with_optional_payload(
+            UMessageBuilder::request(sink, source, ttl),
+            payload_bytes,
+            assumed_payload_encoding,
+        )?;
 
         trace!("After building Request");
 
-        let Ok(umsg) = umsg_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
-                format!(
-                    "Unable to build UMessage from vsomeip message: {:?}",
-                    umsg_res.err().unwrap()
-                ),
-            ));
-        };
-
-        let req_id = umsg.attributes.id.as_ref().ok_or_else(|| {
-            UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
-                "Missing id for Request message. Would be unable to correlate. Rejected.",
-            )
-        })?;
+        let req_id = umsg.id();
         trace!("{} - (req_id, request_id) to store for later correlation in ME_REQUEST_CORRELATION: ({}, {})",
                 UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG,
                 req_id.to_hyphenated_string(), request_id
@@ -423,11 +479,54 @@ impl VsomeipMessageToUMessage {
         Ok(umsg)
     }
 
+    async fn convert_vsomeip_mt_request_no_return_to_umsg(
+        authority_name: &AuthorityName,
+        mechatronics_authority_name: &AuthorityName,
+        vsomeip_message: &mut UniquePtr<MessageWrapper>,
+        payload_bytes: Option<Vec<u8>>,
+        assumed_payload_encoding: PayloadEncoding,
+    ) -> Result<UMessage, UStatus> {
+        let service_id = vsomeip_message.get_message_base_pinned().get_service();
+        let instance_id = vsomeip_message.get_message_base_pinned().get_instance();
+        let client_id = vsomeip_message.get_message_base_pinned().get_client();
+        let interface_version = vsomeip_message
+            .get_message_base_pinned()
+            .get_interface_version();
+
+        let sink = UUri::try_from_parts(
+            authority_name,
+            create_ue_id_from_instance_service(instance_id, service_id),
+            interface_version,
+            0,
+        )
+        .map_err(|error| {
+            UStatus::fail_with_code(
+                UCode::InvalidArgument,
+                format!("Unable to build sink UUri for MT_REQUEST_NO_RETURN: {error:?}"),
+            )
+        })?;
+        let source =
+            UUri::try_from_parts(mechatronics_authority_name, u32::from(client_id), 1, 0x8000)
+                .map_err(|error| {
+                    UStatus::fail_with_code(
+                        UCode::InvalidArgument,
+                        format!("Unable to build source UUri for MT_REQUEST_NO_RETURN: {error:?}"),
+                    )
+                })?;
+
+        build_with_optional_payload(
+            UMessageBuilder::notification(source, sink),
+            payload_bytes,
+            assumed_payload_encoding,
+        )
+    }
+
     async fn convert_vsomeip_mt_response_to_umsg(
         mechatronics_authority_name: &AuthorityName,
-        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
+        rpc_correlation_registry: &dyn RpcCorrelationRegistry,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
-        payload_bytes: Vec<u8>,
+        payload_bytes: Option<Vec<u8>>,
+        assumed_payload_encoding: PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -440,13 +539,16 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id_from_instance_service(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Unable to build source UUri for MT_RESPONSE type: {e:?}"),
             )
         })?;
@@ -460,28 +562,17 @@ impl VsomeipMessageToUMessage {
 
         trace!("source: {source:?}; sink: {sink:?}");
 
-        let umsg_res = UMessageBuilder::response(sink, req_id, source)
-            .with_comm_status(UCode::OK)
-            .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
-
-        let Ok(umsg) = umsg_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
-                format!(
-                    "Unable to build UMessage from vsomeip message: {:?}",
-                    umsg_res.err().unwrap()
-                ),
-            ));
-        };
-
-        Ok(umsg)
+        let mut builder = UMessageBuilder::response(sink, req_id, source);
+        builder.with_comm_status(UCode::Ok);
+        build_with_optional_payload(builder, payload_bytes, assumed_payload_encoding)
     }
 
     async fn convert_vsomeip_mt_error_to_umsg(
         mechatronics_authority_name: &AuthorityName,
-        rpc_correlation_registry: &Arc<dyn RpcCorrelationRegistry>,
+        rpc_correlation_registry: &dyn RpcCorrelationRegistry,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
-        payload_bytes: Vec<u8>,
+        payload_bytes: Option<Vec<u8>>,
+        assumed_payload_encoding: PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let request_id = vsomeip_message.get_message_base_pinned().get_request();
         let service_id = vsomeip_message.get_message_base_pinned().get_service();
@@ -494,13 +585,16 @@ impl VsomeipMessageToUMessage {
 
         let source = UUri::try_from_parts(
             mechatronics_authority_name,
-            service_id as u32, // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id_from_instance_service(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Unable to build source UUri for MT_ERROR type: {e:?}"),
             )
         })?;
@@ -517,27 +611,16 @@ impl VsomeipMessageToUMessage {
 
         trace!("source: {source:?}; sink: {sink:?}");
 
-        let umsg_res = UMessageBuilder::response(sink, req_id, source)
-            .with_comm_status(comm_status)
-            .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
-
-        let Ok(umsg) = umsg_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
-                format!(
-                    "Unable to build UMessage from vsomeip message: {:?}",
-                    umsg_res.err().unwrap()
-                ),
-            ));
-        };
-
-        Ok(umsg)
+        let mut builder = UMessageBuilder::response(sink, req_id, source);
+        builder.with_comm_status(comm_status);
+        build_with_optional_payload(builder, payload_bytes, assumed_payload_encoding)
     }
 
     async fn convert_vsomeip_mt_notification_to_umsg(
         mechatronics_authority_name: &AuthorityName,
         vsomeip_message: &mut UniquePtr<MessageWrapper>,
-        payload_bytes: Vec<u8>,
+        payload_bytes: Option<Vec<u8>>,
+        assumed_payload_encoding: PayloadEncoding,
     ) -> Result<UMessage, UStatus> {
         let service_id = (*vsomeip_message).get_message_base_pinned().get_service();
         let method_id = vsomeip_message.get_message_base_pinned().get_method();
@@ -549,49 +632,89 @@ impl VsomeipMessageToUMessage {
         let interface_version = 1;
         let source = UUri::try_from_parts(
             mechatronics_authority_name, // TODO: Should we set this to anything specific?
-            service_id as u32,           // TODO: Need to address this by adding instance_id in MSB
+            create_ue_id_from_instance_service(
+                vsomeip_message.get_message_base_pinned().get_instance(),
+                service_id,
+            ),
             interface_version,
             method_id,
         )
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Unable to build source UUri for MT_NOTIFICATION type: {e:?}"),
             )
         })?;
 
-        let umsg_res = UMessageBuilder::publish(source)
-            .build_with_payload(payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_UNSPECIFIED);
-
-        let Ok(umsg) = umsg_res else {
-            return Err(UStatus::fail_with_code(
-                UCode::INTERNAL,
-                format!(
-                    "Unable to build UMessage from vsomeip message: {:?}",
-                    umsg_res.err().unwrap()
-                ),
-            ));
-        };
-
-        Ok(umsg)
+        build_with_optional_payload(
+            UMessageBuilder::publish(source),
+            payload_bytes,
+            assumed_payload_encoding,
+        )
     }
 
     fn vsomeip_err_code_to_ucode(someip_error: vsomeip::return_code_e) -> UCode {
         match someip_error {
-            vsomeip::return_code_e::E_OK => UCode::OK,
+            vsomeip::return_code_e::E_OK => UCode::Ok,
             vsomeip::return_code_e::E_WRONG_MESSAGE_TYPE
-            | vsomeip::return_code_e::E_UNKNOWN_METHOD => UCode::INVALID_ARGUMENT,
-            vsomeip::return_code_e::E_TIMEOUT => UCode::DEADLINE_EXCEEDED,
-            vsomeip::return_code_e::E_UNKNOWN_SERVICE => UCode::NOT_FOUND,
-            vsomeip::return_code_e::E_NOT_READY => UCode::UNAVAILABLE,
-            vsomeip::return_code_e::E_MALFORMED_MESSAGE => UCode::DATA_LOSS,
-            vsomeip::return_code_e::E_NOT_REACHABLE => UCode::INTERNAL,
-            vsomeip::return_code_e::E_NOT_OK => UCode::UNKNOWN,
+            | vsomeip::return_code_e::E_UNKNOWN_METHOD => UCode::InvalidArgument,
+            vsomeip::return_code_e::E_TIMEOUT => UCode::DeadlineExceeded,
+            vsomeip::return_code_e::E_UNKNOWN_SERVICE => UCode::NotFound,
+            vsomeip::return_code_e::E_NOT_READY => UCode::Unavailable,
+            vsomeip::return_code_e::E_MALFORMED_MESSAGE => UCode::DataLoss,
+            vsomeip::return_code_e::E_NOT_REACHABLE => UCode::Internal,
+            vsomeip::return_code_e::E_NOT_OK => UCode::Unknown,
             vsomeip::return_code_e::E_WRONG_PROTOCOL_VERSION
-            | vsomeip::return_code_e::E_WRONG_INTERFACE_VERSION => UCode::FAILED_PRECONDITION,
-            _ => UCode::UNKNOWN,
+            | vsomeip::return_code_e::E_WRONG_INTERFACE_VERSION => UCode::FailedPrecondition,
+            _ => UCode::Unknown,
         }
     }
 }
 
-// TODO: Add unit tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn topic() -> UUri {
+        UUri::try_from_parts("remote", 0x1234, 1, 0x8001).unwrap()
+    }
+
+    #[test]
+    fn incoming_present_empty_payload_receives_every_configured_identity() {
+        let encodings = [
+            PayloadEncoding::PROTOBUF_WRAPPED_IN_ANY,
+            PayloadEncoding::PROTOBUF,
+            PayloadEncoding::JSON,
+            PayloadEncoding::SOMEIP,
+            PayloadEncoding::SOMEIP_TLV,
+            PayloadEncoding::RAW,
+            PayloadEncoding::TEXT,
+            PayloadEncoding::SHM,
+            PayloadEncoding::from_registry_entry(0x1000_0042),
+        ];
+
+        for encoding in encodings {
+            let message = build_with_optional_payload(
+                UMessageBuilder::publish(topic()),
+                Some(Vec::new()),
+                encoding,
+            )
+            .unwrap();
+            assert_eq!(message.payload().as_deref(), Some([].as_slice()));
+            assert_eq!(message.payload_encoding(), Some(encoding));
+        }
+    }
+
+    #[test]
+    fn incoming_payload_absence_remains_identity_free() {
+        let message = build_with_optional_payload(
+            UMessageBuilder::publish(topic()),
+            None,
+            PayloadEncoding::TEXT,
+        )
+        .unwrap();
+
+        assert!(message.payload().is_none());
+        assert!(message.payload_encoding().is_none());
+    }
+}

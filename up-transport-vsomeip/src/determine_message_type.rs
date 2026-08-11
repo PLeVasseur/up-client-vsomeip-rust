@@ -21,6 +21,7 @@ pub(crate) enum RegistrationType {
     Publish,
     Request,
     Response,
+    Notification,
     AllPointToPoint,
 }
 
@@ -85,7 +86,10 @@ pub fn determine_type(
         }
 
         // Log which case we're falling through to
-        if sink_filter.resource_id == 0 {
+        if sink_filter.is_notification_destination() && source_filter.is_event() {
+            trace!("notification filters - returning Notification");
+            Ok(RegistrationType::Notification)
+        } else if sink_filter.is_rpc_response() {
             trace!("sink_filter.resource_id == 0 - returning Response");
             Ok(RegistrationType::Response)
         } else {

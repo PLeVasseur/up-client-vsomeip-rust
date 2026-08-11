@@ -17,25 +17,49 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UCode, UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{PayloadEncoding, UCode, UListener, UMessage, UMessageBuilder, UTransport, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
 
 pub struct ResponseListener {
     received_response: AtomicUsize,
+    received_error_response: AtomicUsize,
+    received_payloadless: AtomicUsize,
+    received_empty_payload: AtomicUsize,
+    received_nonempty_payload: AtomicUsize,
 }
 impl ResponseListener {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             received_response: AtomicUsize::new(0),
+            received_error_response: AtomicUsize::new(0),
+            received_payloadless: AtomicUsize::new(0),
+            received_empty_payload: AtomicUsize::new(0),
+            received_nonempty_payload: AtomicUsize::new(0),
         }
     }
 
     pub fn received_response(&self) -> usize {
         self.received_response.load(Ordering::SeqCst)
+    }
+
+    pub fn received_error_response(&self) -> usize {
+        self.received_error_response.load(Ordering::SeqCst)
+    }
+
+    pub fn received_payloadless(&self) -> usize {
+        self.received_payloadless.load(Ordering::SeqCst)
+    }
+
+    pub fn received_empty_payload(&self) -> usize {
+        self.received_empty_payload.load(Ordering::SeqCst)
+    }
+
+    pub fn received_nonempty_payload(&self) -> usize {
+        self.received_nonempty_payload.load(Ordering::SeqCst)
     }
 }
 #[async_trait::async_trait]
@@ -43,21 +67,28 @@ impl UListener for ResponseListener {
     async fn on_receive(&self, msg: UMessage) {
         info!("Received Response:\n{:?}", msg);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
+        match msg.payload() {
+            None => {
+                assert!(msg.payload_encoding().is_none());
+                self.received_payloadless.fetch_add(1, Ordering::SeqCst);
             }
-        };
+            Some(payload) if payload.is_empty() => {
+                assert_eq!(msg.payload_encoding(), Some(PayloadEncoding::TEXT));
+                self.received_empty_payload.fetch_add(1, Ordering::SeqCst);
+            }
+            Some(payload) => {
+                assert_eq!(msg.payload_encoding(), Some(PayloadEncoding::TEXT));
+                let response_payload_string = std::str::from_utf8(&payload)
+                    .expect("response payload should contain UTF-8 text");
+                info!("Response payload_string: {response_payload_string}");
+                self.received_nonempty_payload
+                    .fetch_add(1, Ordering::SeqCst);
+            }
+        }
 
-        let payload_bytes = payload.to_vec();
-        info!("Received response payload_bytes of: {payload_bytes:?}");
-        let Ok(response_payload_string) = std::str::from_utf8(&payload_bytes) else {
-            panic!("unable to convert payload_bytes to string");
-        };
-        info!("Response payload_string: {response_payload_string}");
+        if msg.commstatus() == Some(UCode::InvalidArgument) {
+            self.received_error_response.fetch_add(1, Ordering::SeqCst);
+        }
 
         self.received_response.fetch_add(1, Ordering::SeqCst);
     }
@@ -84,31 +115,29 @@ impl RequestListener {
 #[async_trait::async_trait]
 impl UListener for RequestListener {
     async fn on_receive(&self, msg: UMessage) {
-        self.received_request.fetch_add(1, Ordering::SeqCst);
+        let request_index = self.received_request.fetch_add(1, Ordering::SeqCst);
         info!("Received Request:\n{:?}", msg);
 
-        let payload = {
-            match msg.payload {
-                None => {
-                    panic!("Unable to retrieve bytes")
-                }
-                Some(payload) => payload,
+        let response_payload = msg.payload().map(|payload| {
+            if payload.is_empty() {
+                Vec::new()
+            } else {
+                let payload_string = std::str::from_utf8(&payload)
+                    .expect("request payload should contain UTF-8 text");
+                format!("Here's a response to: {payload_string}").into_bytes()
             }
+        });
+
+        let mut builder = UMessageBuilder::response_for_request(msg.attributes());
+        builder.with_comm_status(if request_index == 0 {
+            UCode::InvalidArgument
+        } else {
+            UCode::Ok
+        });
+        let response_msg = match response_payload {
+            Some(payload) => builder.build_with_payload(payload, PayloadEncoding::TEXT),
+            None => builder.build(),
         };
-
-        let payload_bytes = payload.to_vec();
-        info!("Received request payload_bytes of: {payload_bytes:?}");
-        let Ok(payload_string) = std::str::from_utf8(&payload_bytes) else {
-            panic!("Unable to unpack string from payload_bytes");
-        };
-        info!("Request payload_string: {payload_string}");
-
-        let response_payload_string = format!("Here's a response to: {payload_string}");
-        let response_payload_bytes = response_payload_string.into_bytes();
-
-        let response_msg = UMessageBuilder::response_for_request(&msg.attributes)
-            .with_comm_status(UCode::OK)
-            .build_with_payload(response_payload_bytes, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
         let Ok(response_msg) = response_msg else {
             panic!(
                 "Unable to create response_msg: {:?}",
@@ -146,11 +175,12 @@ async fn client_service() {
     println!("client_config: {client_config:?}");
 
     let client_uuri = UUri::try_from_parts(client_authority_name, streamer_ue_id, 1, 0).unwrap();
-    let client_res = UPTransportVsomeip::new_with_config(
+    let client_res = UPTransportVsomeip::new_with_config_and_transport_config(
         client_uuri,
         &service_authority_name.to_string(),
         &client_config.unwrap(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(client) = client_res else {
@@ -199,11 +229,12 @@ async fn client_service() {
     println!("service_config: {service_config:?}");
 
     let service_uuri = UUri::try_from_parts(service_authority_name, streamer_ue_id, 1, 0).unwrap();
-    let service_res = UPTransportVsomeip::new_with_config(
+    let service_res = UPTransportVsomeip::new_with_config_and_transport_config(
         service_uuri,
         &client_authority_name.to_string(),
         &service_config.unwrap(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(service) = service_res else {
@@ -247,11 +278,14 @@ async fn client_service() {
 
     // limit with iterations to ensure socket transactions can complete during test
     while (Instant::now().duration_since(start_time) < duration) && (iterations < MAX_ITERATIONS) {
-        let payload_string = format!("request@i={i}");
-        let payload = payload_string.into_bytes();
-        let request_msg_res_1_a =
-            UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000)
-                .build_with_payload(payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+        let mut builder =
+            UMessageBuilder::request(service_1_uuri_method_a.clone(), client_uuri.clone(), 10000);
+        let request_msg_res_1_a = match iterations {
+            0 => builder.build(),
+            1 => builder.build_with_payload(Vec::<u8>::new(), PayloadEncoding::TEXT),
+            _ => builder
+                .build_with_payload(format!("request@i={i}").into_bytes(), PayloadEncoding::TEXT),
+        };
 
         let Ok(request_msg_1_a) = request_msg_res_1_a else {
             panic!(
@@ -284,4 +318,11 @@ async fn client_service() {
 
     assert_eq!(iterations, request_listener_check.received_request());
     assert_eq!(iterations, response_listener_check.received_response());
+    assert_eq!(response_listener_check.received_error_response(), 1);
+    assert_eq!(response_listener_check.received_payloadless(), 2);
+    assert_eq!(response_listener_check.received_empty_payload(), 0);
+    assert_eq!(
+        response_listener_check.received_nonempty_payload(),
+        iterations - 2
+    );
 }

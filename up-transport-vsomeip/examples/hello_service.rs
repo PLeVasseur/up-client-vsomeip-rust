@@ -21,9 +21,8 @@ use std::thread;
 use up_rust::communication::{
     InMemoryRpcServer, RequestHandler, RpcServer, ServiceInvocationError, UPayload,
 };
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY;
-use up_rust::{UAttributes, UCode, UStatus, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{PayloadEncoding, UAttributes, UCode, UStatus, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
 const HELLO_INSTANCE_ID: u32 = 0x0001;
@@ -62,13 +61,7 @@ impl RequestHandler for ServiceRequestHandler {
     ) -> Result<Option<UPayload>, ServiceInvocationError> {
         println!("ServiceRequestHandler: Received a resource_id: {resource_id} request_payload: {request_payload:?}");
 
-        let hello_request_vsomeip_unspecified_payload_format = request_payload.unwrap();
-        let hello_request_protobuf_payload_format = UPayload::new(
-            hello_request_vsomeip_unspecified_payload_format.payload(),
-            UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY,
-        );
-        let hello_request =
-            hello_request_protobuf_payload_format.extract_protobuf::<HelloRequest>();
+        let hello_request = request_payload.unwrap().extract_protobuf::<HelloRequest>();
 
         let hello_request = match hello_request {
             Ok(hello_request) => {
@@ -77,9 +70,8 @@ impl RequestHandler for ServiceRequestHandler {
             }
             Err(err) => {
                 error!("Unable to parse HelloRequest: {err:?}");
-                return Err(ServiceInvocationError::RpcError(UStatus::fail_with_code(
-                    UCode::INTERNAL,
-                    "Unable to parse hello_request",
+                return Err(ServiceInvocationError::RpcError(Box::new(
+                    UStatus::fail_with_code(UCode::Internal, "Unable to parse hello_request"),
                 )));
             }
         };
@@ -118,11 +110,12 @@ async fn main() -> Result<(), UStatus> {
     )
     .unwrap();
     let service = Arc::new(
-        UPTransportVsomeip::new_with_config(
+        UPTransportVsomeip::new_with_config_and_transport_config(
             service_uuri,
             &CLIENT_AUTHORITY.to_string(),
             &vsomeip_config.unwrap(),
             None,
+            TransportConfig::new(PayloadEncoding::PROTOBUF_WRAPPED_IN_ANY),
         )
         .unwrap(),
     );

@@ -16,8 +16,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::Instant;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::{UPTransportVsomeip, VsomeipApplicationConfig};
+use up_rust::{PayloadEncoding, UListener, UMessage, UMessageBuilder, UTransport, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip, VsomeipApplicationConfig};
 
 const TEST_DURATION: u64 = 2000;
 const MAX_ITERATIONS: usize = 100;
@@ -43,7 +43,7 @@ impl UListener for SubscriberListener {
         trace!("{:?}", msg);
         self.received_publish.fetch_add(1, Ordering::SeqCst);
 
-        let Some(payload_bytes) = msg.payload else {
+        let Some(payload_bytes) = msg.payload() else {
             panic!("No bytes included in payload");
         };
 
@@ -85,11 +85,12 @@ async fn publisher_subscriber() {
     let subscriber_uri =
         UUri::try_from_parts(authority_name, subscriber_ue_id, ue_version_major, 0).unwrap();
 
-    let subscriber_res = UPTransportVsomeip::new(
+    let subscriber_res = UPTransportVsomeip::new_with_transport_config(
         vsomeip_application_config_subscriber,
         subscriber_uri,
         &"me_authority".to_string(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(subscriber) = subscriber_res else {
@@ -114,11 +115,12 @@ async fn publisher_subscriber() {
     let vsomeip_application_config_publisher =
         VsomeipApplicationConfig::new("publisher_app", 0x343);
     let publisher_uri = UUri::try_from_parts(authority_name, ue_id, 1, 0).unwrap();
-    let publisher_res = UPTransportVsomeip::new(
+    let publisher_res = UPTransportVsomeip::new_with_transport_config(
         vsomeip_application_config_publisher,
         publisher_uri,
         &"me_authority".to_string(),
         None,
+        TransportConfig::new(PayloadEncoding::TEXT),
     );
 
     let Ok(publisher) = publisher_res else {
@@ -142,7 +144,7 @@ async fn publisher_subscriber() {
         let publish_payload = publish_payload_string.into_bytes();
 
         let publish_msg_res = UMessageBuilder::publish(publisher_topic.clone())
-            .build_with_payload(publish_payload, UPayloadFormat::UPAYLOAD_FORMAT_TEXT);
+            .build_with_payload(publish_payload, PayloadEncoding::TEXT);
 
         let Ok(publish_msg) = publish_msg_res else {
             panic!(

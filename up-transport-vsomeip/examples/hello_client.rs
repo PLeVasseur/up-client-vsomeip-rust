@@ -18,9 +18,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::communication::{CallOptions, InMemoryRpcClient, RpcClient, UPayload};
-use up_rust::UPayloadFormat::UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY;
-use up_rust::{UStatus, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{PayloadEncoding, UStatus, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const HELLO_SERVICE_ID: u16 = 0x6000;
 const HELLO_INSTANCE_ID: u16 = 0x0001;
@@ -65,11 +64,12 @@ async fn main() -> Result<(), UStatus> {
     )
     .unwrap();
     let client = Arc::new(
-        UPTransportVsomeip::new_with_config(
+        UPTransportVsomeip::new_with_config_and_transport_config(
             client_uuri,
             &HELLO_SERVICE_AUTHORITY.to_string(),
             &vsomeip_config.unwrap(),
             None,
+            TransportConfig::new(PayloadEncoding::PROTOBUF_WRAPPED_IN_ANY),
         )
         .unwrap(),
     );
@@ -113,15 +113,7 @@ async fn main() -> Result<(), UStatus> {
             );
         };
 
-        let hello_response_vsomeip_unspecified_payload_format = response.unwrap();
-        let hello_response_protobuf_payload_format = UPayload::new(
-            hello_response_vsomeip_unspecified_payload_format.payload(),
-            UPAYLOAD_FORMAT_PROTOBUF_WRAPPED_IN_ANY,
-        );
-
-        let Ok(hello_response) =
-            hello_response_protobuf_payload_format.extract_protobuf::<HelloResponse>()
-        else {
+        let Ok(hello_response) = response.unwrap().extract_protobuf::<HelloResponse>() else {
             panic!("Unable to parse into HelloResponse");
         };
 

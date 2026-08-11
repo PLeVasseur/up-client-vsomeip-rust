@@ -77,7 +77,7 @@ fn read_json_file(file_path: &Path) -> Result<Value, serde_json::Error> {
 pub(crate) fn extract_application(file_path: &Path) -> Result<VsomeipApplicationConfig, UStatus> {
     let json_data = read_json_file(file_path).map_err(|e| {
         UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
+            UCode::InvalidArgument,
             format!("Failed to read JSON File: {e}"),
         )
     })?;
@@ -87,20 +87,20 @@ pub(crate) fn extract_application(file_path: &Path) -> Result<VsomeipApplication
         .and_then(|v| v.as_array())
         .ok_or_else(|| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("'applications' array is not Found: {:?}", file_path),
             )
         })?;
 
     if applications.is_empty() {
         return Err(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
+            UCode::InvalidArgument,
             "applications array is Empty",
         ));
     }
 
     let app_config: VsomeipApplicationConfig = serde_json::from_value(applications[0].clone())
-        .map_err(|e| UStatus::fail_with_code(UCode::INVALID_ARGUMENT, format!(": {e}")))?;
+        .map_err(|e| UStatus::fail_with_code(UCode::InvalidArgument, format!(": {e}")))?;
 
     Ok(app_config)
 }
@@ -108,7 +108,7 @@ pub(crate) fn extract_application(file_path: &Path) -> Result<VsomeipApplication
 pub(crate) fn extract_services(file_path: &Path) -> Result<Vec<ServiceConfig>, UStatus> {
     let json_data = read_json_file(file_path).map_err(|e| {
         UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
+            UCode::InvalidArgument,
             format!("Failed to read JSON File: {e}"),
         )
     })?;
@@ -118,14 +118,14 @@ pub(crate) fn extract_services(file_path: &Path) -> Result<Vec<ServiceConfig>, U
         .and_then(|v| v.as_array())
         .ok_or_else(|| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("'services' Array is not Found : {:?}", file_path),
             )
         })?;
 
     if services.is_empty() {
         return Err(UStatus::fail_with_code(
-            UCode::INVALID_ARGUMENT,
+            UCode::InvalidArgument,
             "services array is Empty",
         ));
     }
@@ -133,7 +133,7 @@ pub(crate) fn extract_services(file_path: &Path) -> Result<Vec<ServiceConfig>, U
     let service_configs: Vec<ServiceConfig> = serde_json::from_value(services.clone().into())
         .map_err(|e| {
             UStatus::fail_with_code(
-                UCode::INVALID_ARGUMENT,
+                UCode::InvalidArgument,
                 format!("Failed to change service: {e}"),
             )
         })?;

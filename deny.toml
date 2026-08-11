@@ -1,0 +1,31 @@
+[graph]
+all-features = true
+
+[advisories]
+ignore = [
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is inherited through autocxx 0.30 and has no safe upgrade" },
+    { id = "RUSTSEC-2024-0375", reason = "atty is inherited through autocxx 0.30 and has no safe upgrade" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+# The native/autocxx and dev graphs intentionally retain upstream duplicates.
+multiple-versions = "allow"
+wildcards = "allow"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/PLeVasseur/up-rust.git"]
