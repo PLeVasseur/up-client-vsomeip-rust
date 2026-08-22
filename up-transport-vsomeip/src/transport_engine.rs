@@ -219,23 +219,27 @@ impl UPTransportVsomeipEngine {
             UP_CLIENT_VSOMEIP_FN_TAG_START_APP
         );
 
-        match receiver.recv_timeout(Duration::from_millis(50)) {
-            Err(err) => {
-                return Err(UStatus::fail_with_code(
-                    UCode::Internal,
-                    format!("Timed out on waiting for application to start: {err:?}"),
-                ));
-            }
-            Ok(app_state) => {
-                info!("app_state: {app_state}");
+        let app_state = Self::wait_for_application_state(&receiver)?;
+        info!("app_state: {app_state}");
 
-                application_wrapper.get_pinned().unregister_state_handler();
-                application_state_availability_handler_registry
-                    .free_application_state_availability_handler_id(state_handler_id)?;
-            }
-        }
+        application_wrapper.get_pinned().unregister_state_handler();
+        application_state_availability_handler_registry
+            .free_application_state_availability_handler_id(state_handler_id)?;
 
         Ok(())
+    }
+
+    fn wait_for_application_state(
+        receiver: &crossbeam_channel::Receiver<vsomeip::state_type_e>,
+    ) -> Result<vsomeip::state_type_e, UStatus> {
+        receiver
+            .recv_timeout(Duration::from_secs(INTERNAL_FUNCTION_TIMEOUT))
+            .map_err(|err| {
+                UStatus::fail_with_code(
+                    UCode::Internal,
+                    format!("Timed out on waiting for application to start: {err:?}"),
+                )
+            })
     }
 
     async fn event_loop(
@@ -950,5 +954,24 @@ impl UPTransportVsomeipEngine {
         app_wrapper.get_pinned().stop();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_start_wait_accepts_state_after_old_fifty_millisecond_limit() {
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        let delayed_state = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            sender.send(vsomeip::state_type_e::ST_REGISTERED).unwrap();
+        });
+
+        let result = UPTransportVsomeipEngine::wait_for_application_state(&receiver);
+        delayed_state.join().unwrap();
+
+        assert!(result.is_ok());
     }
 }
