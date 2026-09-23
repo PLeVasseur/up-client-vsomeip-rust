@@ -196,26 +196,23 @@ mod tests {
         UUri::try_from_parts("authority", 0x1234, 1, 0x8001).unwrap()
     }
 
-    #[test]
-    fn matching_registered_and_private_encodings_are_accepted() {
-        let encodings = [
-            PayloadEncoding::PROTOBUF_WRAPPED_IN_ANY,
-            PayloadEncoding::PROTOBUF,
-            PayloadEncoding::JSON,
-            PayloadEncoding::SOMEIP,
-            PayloadEncoding::SOMEIP_TLV,
-            PayloadEncoding::RAW,
-            PayloadEncoding::TEXT,
-            PayloadEncoding::SHM,
-            PayloadEncoding::from_registry_entry(0x1000_0042),
-        ];
-
-        for encoding in encodings {
-            let message = UMessageBuilder::publish(topic())
-                .build_with_payload(Vec::<u8>::new(), encoding)
-                .unwrap();
-            validate_payload_encoding_matches_assumption(&message, encoding).unwrap();
-        }
+    #[test_case::test_case(0; "contract defined zero")]
+    #[test_case::test_case(1; "protobuf Any")]
+    #[test_case::test_case(2; "protobuf")]
+    #[test_case::test_case(3; "JSON")]
+    #[test_case::test_case(4; "SOMEIP")]
+    #[test_case::test_case(5; "SOMEIP TLV")]
+    #[test_case::test_case(6; "raw")]
+    #[test_case::test_case(7; "text")]
+    #[test_case::test_case(8; "unassigned former SHM number")]
+    #[test_case::test_case(0xE000; "reserved")]
+    #[test_case::test_case(0xF042; "private use")]
+    fn matching_configured_encodings_are_accepted(id: u32) {
+        let encoding = PayloadEncoding::from_id(id).unwrap();
+        let message = UMessageBuilder::publish(topic())
+            .build_with_payload(Vec::<u8>::new(), encoding)
+            .unwrap();
+        validate_payload_encoding_matches_assumption(&message, encoding).unwrap();
     }
 
     #[test]

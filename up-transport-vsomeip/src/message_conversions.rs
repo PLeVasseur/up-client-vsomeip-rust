@@ -33,6 +33,11 @@ const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_UMSG_TO_VSOMEIP_MSG: &str = "convert_umsg
 const UP_CLIENT_VSOMEIP_FN_TAG_CONVERT_VSOMEIP_MSG_TO_UMSG: &str = "convert_vsomeip_msg_to_umsg";
 const PUBLISH_SUBSCRIPTION_WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
+// SOME/IP request headers carry no uProtocol TTL or creation timestamp. Retain
+// this binding's receive-local budget, starting with the synthesized UUID below.
+// It is not a recovered producer lifetime and is unrelated to SOME/IP SD TTL.
+const INCOMING_REQUEST_TTL_MS: u32 = 1_000;
+
 pub struct UMessageToVsomeipMessage;
 
 impl UMessageToVsomeipMessage {
@@ -455,13 +460,10 @@ impl VsomeipMessageToUMessage {
             )
         })?;
 
-        // TODO: Not sure where to get this
-        let ttl = 1000;
-
         trace!("Prior to building Request");
 
         let umsg = build_with_optional_payload(
-            UMessageBuilder::request(sink, source, ttl),
+            UMessageBuilder::request(sink, source, INCOMING_REQUEST_TTL_MS),
             payload_bytes,
             assumed_payload_encoding,
         )?;
@@ -679,30 +681,27 @@ mod tests {
         UUri::try_from_parts("remote", 0x1234, 1, 0x8001).unwrap()
     }
 
-    #[test]
-    fn incoming_present_empty_payload_receives_every_configured_identity() {
-        let encodings = [
-            PayloadEncoding::PROTOBUF_WRAPPED_IN_ANY,
-            PayloadEncoding::PROTOBUF,
-            PayloadEncoding::JSON,
-            PayloadEncoding::SOMEIP,
-            PayloadEncoding::SOMEIP_TLV,
-            PayloadEncoding::RAW,
-            PayloadEncoding::TEXT,
-            PayloadEncoding::SHM,
-            PayloadEncoding::from_registry_entry(0x1000_0042),
-        ];
-
-        for encoding in encodings {
-            let message = build_with_optional_payload(
-                UMessageBuilder::publish(topic()),
-                Some(Vec::new()),
-                encoding,
-            )
-            .unwrap();
-            assert_eq!(message.payload().as_deref(), Some([].as_slice()));
-            assert_eq!(message.payload_encoding(), Some(encoding));
-        }
+    #[test_case::test_case(0; "contract defined zero")]
+    #[test_case::test_case(1; "protobuf Any")]
+    #[test_case::test_case(2; "protobuf")]
+    #[test_case::test_case(3; "JSON")]
+    #[test_case::test_case(4; "SOMEIP")]
+    #[test_case::test_case(5; "SOMEIP TLV")]
+    #[test_case::test_case(6; "raw")]
+    #[test_case::test_case(7; "text")]
+    #[test_case::test_case(8; "unassigned former SHM number")]
+    #[test_case::test_case(0xE000; "reserved")]
+    #[test_case::test_case(0xF042; "private use")]
+    fn incoming_present_empty_payload_receives_configured_identity(id: u32) {
+        let encoding = PayloadEncoding::from_id(id).unwrap();
+        let message = build_with_optional_payload(
+            UMessageBuilder::publish(topic()),
+            Some(Vec::new()),
+            encoding,
+        )
+        .unwrap();
+        assert_eq!(message.payload().as_deref(), Some([].as_slice()));
+        assert_eq!(message.payload_encoding(), Some(encoding));
     }
 
     #[test]
