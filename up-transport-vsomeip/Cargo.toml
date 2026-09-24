@@ -39,7 +39,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" }
 tempfile = "3.27"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time"] }
-up-rust = { version = "=0.10.0-SNAPSHOT", git = "https://github.com/PLeVasseur/up-rust.git", rev = "28073370dcb8d75245c57c2a5b5ab54249759146", default-features = false, features = ["communication"] }
+up-rust = { version = "=0.10.0-SNAPSHOT", git = "https://github.com/PLeVasseur/up-rust.git", rev = "f531712c63d811d402bcf4425d6a6ec8c288a361", default-features = false, features = ["communication"] }
 vsomeip-proc-macro = { workspace = true }
 vsomeip-sys = { workspace = true }
 
