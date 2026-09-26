@@ -13,6 +13,8 @@
 
 # Config file for cargo deny
 # For all options see https://github.com/EmbarkStudios/cargo-deny/blob/main/deny.template.toml
+[graph]
+all-features = true
 
 [licenses]
 allow = [
@@ -21,6 +23,7 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "MIT",
+    "MIT-0", # borrow-or-share, used by the SDK's fluent-uri parser
     # Unicode-3.0 is not (yet) on the Eclipse Foundation's list of approved licenses
     # however, all of its predecessors are, thus we assume that 3.0 is also ok to use
     "Unicode-3.0",
@@ -43,3 +46,8 @@ ignore = [
     { id = "RUSTSEC-2024-0375", reason = "The atty crate is a transitive dependency of autocxx-build which is only used during the build process"},
     { id = "RUSTSEC-2024-0370", reason = "The proc-macro-error crate is a transitive dependency of autocxx which is only used during the build process"},
 ]
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/PLeVasseur/up-rust.git"]

@@ -14,10 +14,14 @@
 pub mod application_state_availability_handler_registry;
 pub mod message_handler_registry;
 pub mod rpc_correlation;
+pub mod subscription_handler_registry;
 pub mod vsomeip_offered_requested;
 
 use crate::storage::message_handler_registry::{GetMessageHandlerError, MessageHandlerRegistry};
 use crate::storage::rpc_correlation::RpcCorrelationRegistry;
+use crate::storage::subscription_handler_registry::{
+    InMemorySubscriptionHandlerRegistry, SubscriptionHandlerRegistry,
+};
 use crate::storage::vsomeip_offered_requested::VsomeipOfferedRequestedRegistry;
 use crate::storage::{
     application_state_availability_handler_registry::{
@@ -36,18 +40,22 @@ use crate::{
 use crossbeam_channel::Receiver;
 use std::sync::Arc;
 use tokio::runtime::Handle;
-use up_rust::{ComparableListener, UListener, UStatus, UUri};
-use vsomeip_sys::glue::{AvailableStateHandlerFnPtr, MessageHandlerFnPtr};
+use up_rust::{ComparableListener, PayloadEncoding, UListener, UStatus, UUri};
+use vsomeip_sys::glue::{
+    AvailableStateHandlerFnPtr, MessageHandlerFnPtr, SubscriptionHandlerFnPtr,
+};
 use vsomeip_sys::vsomeip;
 
 pub struct UPTransportVsomeipStorage {
     vsomeip_application_config: VsomeipApplicationConfig,
     uri: UUri,
     remote_authority: AuthorityName,
+    assumed_payload_encoding: PayloadEncoding,
     runtime_handle: Handle,
     message_handler_registry: Arc<InMemoryMessageHandlerRegistry>,
     application_state_handler_registry: Arc<InMemoryApplicationStateAvailabilityHandlerRegistry>,
     rpc_correlation: Arc<InMemoryRpcCorrelationRegistry>,
+    subscription_handler_registry: Arc<InMemorySubscriptionHandlerRegistry>,
     vsomeip_offered_requested: Arc<InMemoryVsomeipOfferedRequestedRegistry>,
 }
 
@@ -57,6 +65,7 @@ impl UPTransportVsomeipStorage {
         uri: UUri,
         remote_authority: AuthorityName,
         runtime_handle: Handle,
+        assumed_payload_encoding: PayloadEncoding,
     ) -> Self {
         let application_state_handler_registry =
             InMemoryApplicationStateAvailabilityHandlerRegistry::new_trait_obj();
@@ -65,10 +74,12 @@ impl UPTransportVsomeipStorage {
             vsomeip_application_config,
             uri,
             remote_authority,
+            assumed_payload_encoding,
             runtime_handle,
             message_handler_registry: Arc::new(InMemoryMessageHandlerRegistry::new()),
             application_state_handler_registry,
             rpc_correlation: Arc::new(InMemoryRpcCorrelationRegistry::new()),
+            subscription_handler_registry: InMemorySubscriptionHandlerRegistry::new(),
             vsomeip_offered_requested: Arc::new(InMemoryVsomeipOfferedRequestedRegistry::new()),
         }
     }
@@ -81,7 +92,7 @@ impl UPTransportVsomeipStorage {
         self.runtime_handle.clone()
     }
     pub fn get_local_authority(&self) -> AuthorityName {
-        self.uri.authority_name.clone()
+        self.uri.authority_name().to_owned()
     }
 
     pub fn get_remote_authority(&self) -> AuthorityName {
@@ -89,11 +100,29 @@ impl UPTransportVsomeipStorage {
     }
 
     pub fn get_ue_id(&self) -> UeId {
-        self.uri.ue_id
+        (u32::from(self.uri.uentity_instance_id()) << 16) | u32::from(self.uri.uentity_type_id())
+    }
+
+    pub fn get_assumed_payload_encoding(&self) -> PayloadEncoding {
+        self.assumed_payload_encoding
     }
 
     pub fn get_vsomeip_application_config(&self) -> VsomeipApplicationConfig {
         self.vsomeip_application_config.clone()
+    }
+}
+
+impl SubscriptionHandlerRegistry for UPTransportVsomeipStorage {
+    fn allocate_subscription_handler(
+        &self,
+    ) -> Result<(usize, SubscriptionHandlerFnPtr, Receiver<()>), UStatus> {
+        self.subscription_handler_registry
+            .allocate_subscription_handler()
+    }
+
+    fn free_subscription_handler(&self, handler_id: usize) {
+        self.subscription_handler_registry
+            .free_subscription_handler(handler_id);
     }
 }
 

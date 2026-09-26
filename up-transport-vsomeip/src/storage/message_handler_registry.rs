@@ -176,7 +176,7 @@ impl InMemoryMessageHandlerRegistry {
         else {
             return Err(GetMessageHandlerError::OtherError(format!(
                 "{:?}",
-                UStatus::fail_with_code(UCode::RESOURCE_EXHAUSTED, "No more available extern fns",)
+                UStatus::fail_with_code(UCode::ResourceExhausted, "No more available extern fns",)
             )));
         };
 
@@ -274,7 +274,7 @@ impl InMemoryMessageHandlerRegistry {
             listener_config,
         )
         .ok_or(UStatus::fail_with_code(
-            UCode::NOT_FOUND,
+            UCode::NotFound,
             "No listener_id for listener_config",
         ))?;
 
@@ -386,7 +386,7 @@ impl InMemoryMessageHandlerRegistry {
             e.insert(Arc::downgrade(&transport));
         } else {
             return Err(UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
+                UCode::AlreadyExists,
                 format!(
                     "LISTENER_ID_TRANSPORT_MAPPING already contains listener_id: {listener_id}"
                 ),
@@ -407,7 +407,7 @@ impl InMemoryMessageHandlerRegistry {
             message_handler_id_to_transport_storage.remove(&listener_id);
         } else {
             return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
+                UCode::NotFound,
                 format!(
                     "LISTENER_ID_TRANSPORT_MAPPING does not contain listener_id: {listener_id}"
                 ),
@@ -437,7 +437,7 @@ impl InMemoryMessageHandlerRegistry {
             Ok(id)
         } else {
             Err(UStatus::fail_with_code(
-                UCode::RESOURCE_EXHAUSTED,
+                UCode::ResourceExhausted,
                 "No more extern C fns available",
             ))
         }
@@ -454,7 +454,7 @@ impl InMemoryMessageHandlerRegistry {
         let removed = message_handler_id_and_listener_config.remove_by_left(&message_handler_id);
         if removed.is_none() {
             return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
+                UCode::NotFound,
                 format!("No listener_config for listener_id: {message_handler_id}"),
             ));
         }

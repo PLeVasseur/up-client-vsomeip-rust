@@ -6,8 +6,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use up_rust::UCode;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{PayloadEncoding, UListener, UMessage, UMessageBuilder, UTransport, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const PORT: u16 = 30509;
 
@@ -57,7 +57,7 @@ impl RawClient {
                 }
             );
 
-            // Assert mathematically from the OS that this is a TCP/IP socket, not an IPC socket
+            // Verify the OS-reported socket address family.
             assert!(
                 is_ip,
                 "The socket must be a TCP/IP socket, but an IPC was detected!"
@@ -137,42 +137,23 @@ impl UListener for MyListener {
         self.count.fetch_add(1, Ordering::SeqCst);
 
         let result = async {
-            let req_source = msg
-                .attributes
-                .source
-                .as_ref()
-                .ok_or("request has no source")?
-                .clone();
-            let req_sink = msg
-                .attributes
-                .sink
-                .as_ref()
-                .ok_or("request has no sink")?
-                .clone();
-            let reqid = msg
-                .attributes
-                .id
-                .as_ref()
-                .ok_or("request has no ID")?
-                .clone();
+            let req_source = msg.source().clone();
+            let req_sink = msg.sink().ok_or("request has no sink")?.clone();
+            let reqid = msg.id().clone();
 
             println!("\n--------------------------------------------------");
-            println!(">>> [UPROTOCOL APP] 📥 UMessage REQUEST received from Transport:");
-            println!("    - Request SOURCE (Sender): {:#x}", req_source.ue_id);
-            println!("    - Request SINK (Dest)  : {:#x}", req_sink.ue_id);
+            println!("Received request: source={req_source}, sink={req_sink}");
 
             // Generate response by swapping source and sink
             let resp_sink = req_source.clone();
             let resp_source = req_sink;
 
-            println!(">>> [UPROTOCOL APP] 📤 Generating UMessage RESPONSE (swapping source/sink):");
-            println!("    - Response SOURCE (Sender): {:#x}", resp_source.ue_id);
-            println!("    - Response SINK (Dest)  : {:#x}", resp_sink.ue_id);
+            println!("Sending response: source={resp_source}, sink={resp_sink}");
             println!("--------------------------------------------------\n");
 
             let resp = UMessageBuilder::response(resp_sink, reqid, resp_source)
-                .with_comm_status(UCode::OK)
-                .build_with_payload(vec![1, 2, 3], UPayloadFormat::UPAYLOAD_FORMAT_RAW)
+                .with_comm_status(UCode::Ok)
+                .build_with_payload(vec![1, 2, 3], PayloadEncoding::RAW)
                 .map_err(|error| format!("failed to build application response: {error}"))?;
 
             self.transport
@@ -194,11 +175,12 @@ async fn build_service() -> (Arc<UPTransportVsomeip>, UUri, UUri) {
     let cfg = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("vsomeip_configs/tcp_service.json");
     std::env::set_var("VSOMEIP_CONFIGURATION", cfg.to_str().unwrap());
     let t = Arc::new(
-        UPTransportVsomeip::new_with_config(
+        UPTransportVsomeip::new_with_config_and_transport_config(
             UUri::try_from_parts("foo", 0x1234u32, 1u8, 0u16).unwrap(),
             &"foo".to_string(),
             &cfg,
             None,
+            TransportConfig::new(PayloadEncoding::RAW),
         )
         .expect("start transport"),
     );

@@ -92,7 +92,7 @@ impl InMemoryRpcCorrelationRegistry {
         let mut ue_request_correlation = self.ue_request_correlation.write().unwrap();
         match ue_request_correlation.entry(someip_request_id) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
+                UCode::AlreadyExists,
                 format!(
                     "UE_REQUEST_CORRELATION: Already exists therefore rejecting, occupied: {occ:?}"
                 ),
@@ -118,7 +118,7 @@ impl InMemoryRpcCorrelationRegistry {
             ue_request_correlation.remove(&someip_request_id)
         else {
             return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
+                UCode::NotFound,
                 format!(
                     "Corresponding reqid not found for this SOME/IP RESPONSE: {}",
                     someip_request_id
@@ -138,7 +138,7 @@ impl InMemoryRpcCorrelationRegistry {
         let mut me_request_correlation = self.me_request_correlation.write().unwrap();
         match me_request_correlation.entry(uprotocol_req_id.clone()) {
             Entry::Occupied(occ) => Err(UStatus::fail_with_code(
-                UCode::ALREADY_EXISTS,
+                UCode::AlreadyExists,
                 format!(
                     "ME_REQUEST_CORRELATION: Already exists therefore rejecting, occupied: {occ:?}"
                 ),
@@ -162,7 +162,7 @@ impl InMemoryRpcCorrelationRegistry {
 
         let Some(someip_request_id) = me_request_correlation.remove(uprotocol_req_id) else {
             return Err(UStatus::fail_with_code(
-                UCode::NOT_FOUND,
+                UCode::NotFound,
                 format!(
                     "Corresponding SOME/IP Request ID not found for this Request UMessage's reqid: {}",
                     uprotocol_req_id.to_hyphenated_string()

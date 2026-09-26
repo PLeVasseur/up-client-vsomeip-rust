@@ -21,7 +21,9 @@ namespace glue {
 using message_handler_fn_ptr = void (*)(const std::shared_ptr< vsomeip_v3::message > &);
 using availability_handler_fn_ptr = void (*)(vsomeip_v3::service_t, vsomeip_v3::instance_t, bool);
 using subscription_status_handler_fn_ptr = void (*)(const vsomeip_v3::service_t, const vsomeip_v3::instance_t, const vsomeip_v3::eventgroup_t,
-                                                    const vsomeip_v3::event_t, const uint16_t);
+                                                     const vsomeip_v3::event_t, const uint16_t);
+using subscription_handler_fn_ptr = void (*)(const vsomeip_v3::client_t, const vsomeip_v3::uid_t,
+                                             const vsomeip_v3::gid_t, bool);
 using state_handler_fn_ptr = void (*)(vsomeip_v3::state_type_e);
 
 /**

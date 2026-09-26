@@ -71,8 +71,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 use up_rust::UCode;
-use up_rust::{UListener, UMessage, UMessageBuilder, UPayloadFormat, UTransport, UUri};
-use up_transport_vsomeip::UPTransportVsomeip;
+use up_rust::{PayloadEncoding, UListener, UMessage, UMessageBuilder, UTransport, UUri};
+use up_transport_vsomeip::{TransportConfig, UPTransportVsomeip};
 
 const PORT: u16 = 30511;
 /// Per-RPC polling timeout – shows the "stuck" effect on failed RPCs.
@@ -89,8 +89,8 @@ enum Ev {
 
 fn ucode_to_return_code_mock(ucode: UCode) -> u8 {
     match ucode {
-        UCode::OK => 0x00,
-        UCode::UNIMPLEMENTED => 0xFF,
+        UCode::Ok => 0x00,
+        UCode::Unimplemented => 0xFF,
         _ => 0x01,
     }
 }
@@ -116,8 +116,7 @@ impl RawServer {
             let local_addr = s.local_addr().unwrap();
             let is_ip = local_addr.is_ipv4() || local_addr.is_ipv6();
 
-            println!("\n>>> [TCP SERVER] 🔌 REAL TCP CONNECTION ESTABLISHED!");
-            println!(">>> [TCP SERVER] System Socket Verification:");
+            println!("TCP connection established:");
             println!("    - Local OS socket : {}", local_addr);
             println!("    - Remote OS socket: {}", addr);
             println!(
@@ -129,7 +128,7 @@ impl RawServer {
                 }
             );
 
-            // Assert mathematically from the OS that this is a TCP/IP socket, not an IPC socket
+            // Verify the OS-reported socket address family.
             assert!(
                 is_ip,
                 "The socket must be a TCP/IP socket, but an IPC was detected!"
@@ -162,9 +161,9 @@ impl RawServer {
                 // Negative path: craft the historical bad SOME/IP return code directly.
                 // Positive path: always emit a valid return code and let the pipeline run end-to-end.
                 let rc = if bug_on == Some(n) {
-                    ucode_to_return_code_mock(UCode::UNIMPLEMENTED)
+                    ucode_to_return_code_mock(UCode::Unimplemented)
                 } else {
-                    ucode_to_return_code_mock(UCode::OK)
+                    ucode_to_return_code_mock(UCode::Ok)
                 };
 
                 // Response size:
@@ -226,11 +225,12 @@ async fn build_client() -> (Arc<UPTransportVsomeip>, UUri, UUri) {
         .join("vsomeip_configs/tcp_client_raw_remote.json");
     std::env::set_var("VSOMEIP_CONFIGURATION", cfg.to_str().unwrap());
     let t = Arc::new(
-        UPTransportVsomeip::new_with_config(
+        UPTransportVsomeip::new_with_config_and_transport_config(
             UUri::try_from_parts("bar", 0x0345u32, 1u8, 0u16).unwrap(),
             &"foo".to_string(),
             &cfg,
             None,
+            TransportConfig::new(PayloadEncoding::RAW),
         )
         .expect("start transport"),
     );
@@ -253,7 +253,7 @@ async fn rpc(
     let pl_len = payload.len();
 
     let msg = UMessageBuilder::request(svc.clone(), src.clone(), 5000)
-        .build_with_payload(payload, UPayloadFormat::UPAYLOAD_FORMAT_RAW)
+        .build_with_payload(payload, PayloadEncoding::RAW)
         .expect("build");
     client.send(msg).await.expect("send");
 

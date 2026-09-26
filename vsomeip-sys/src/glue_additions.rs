@@ -1,11 +1,11 @@
 use crate::cxx_bridge::handler_registration::{
     offer_single_event, register_availability_handler_fn_ptr, register_message_handler_fn_ptr,
-    register_state_handler_fn_ptr, register_subscription_status_handler_fn_ptr,
-    request_single_event,
+    register_state_handler_fn_ptr, register_subscription_handler_fn_ptr,
+    register_subscription_status_handler_fn_ptr, request_single_event,
 };
 use crate::extern_callback_wrappers::{
     AvailabilityHandlerFnPtr, AvailableStateHandlerFnPtr, MessageHandlerFnPtr,
-    SubscriptionStatusHandlerFnPtr,
+    SubscriptionHandlerFnPtr, SubscriptionStatusHandlerFnPtr,
 };
 use crate::ffi::glue::make_application_wrapper as make_application_wrapper_possible;
 use crate::ffi::glue::{get_payload_raw, set_payload_raw};
@@ -243,6 +243,27 @@ impl ApplicationWrapper {
                 event,
                 fn_ptr_handler,
                 is_selective,
+            );
+        }
+    }
+
+    /// Registers a provider-side handler for subscription state changes.
+    pub fn register_subscription_handler_fn_ptr_safe(
+        &self,
+        service: u16,
+        instance: u16,
+        eventgroup: u16,
+        fn_ptr_handler: SubscriptionHandlerFnPtr,
+    ) {
+        unsafe {
+            let application_wrapper_ptr =
+                self as *const ApplicationWrapper as *mut ApplicationWrapper;
+            register_subscription_handler_fn_ptr(
+                application_wrapper_ptr,
+                service,
+                instance,
+                eventgroup,
+                fn_ptr_handler,
             );
         }
     }
